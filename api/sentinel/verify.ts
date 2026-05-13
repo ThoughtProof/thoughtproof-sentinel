@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { validateVerifyRequest } from '../../src/validation.js';
-import { getTierConfig } from '../../src/tiers.js';
+import { verify } from '../../src/engine/index.js';
 
-export default function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -30,22 +30,13 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const tierConfig = getTierConfig(result.data.tier);
+    // Engine call — pure verification, no auth (Phase 0)
+    const response = await verify(result.data);
 
-    // Engine not yet wired — return 501 with useful info
-    return res.status(501).json({
-      error: 'Sentinel engine not yet implemented',
-      code: 'ENGINE_NOT_IMPLEMENTED',
-      hint: `Tier "${tierConfig.tier}" (${tierConfig.cascade.join('→')}) is configured but the verification engine is not yet wired.`,
-      accepted_request: {
-        mode: result.data.mode,
-        tier: tierConfig.tier,
-        cascade: tierConfig.cascade,
-        price_usd: tierConfig.price_usd,
-      },
-    });
+    return res.status(200).json(response);
   } catch (error) {
     console.error('[sentinel/verify] error:', error);
-    res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    res.status(500).json({ error: message, code: 'INTERNAL_ERROR' });
   }
 }
