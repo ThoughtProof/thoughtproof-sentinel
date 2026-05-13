@@ -17,7 +17,11 @@ import type { AttestationData, AttestationResult, SentinelVerifyResponse, Sentin
 // EAS contract ABI — only the attest function we need
 const EAS_ABI = [
   'function attest((bytes32 schema, (address recipient, uint64 expirationTime, bool revocable, bytes32 refUID, bytes data, uint256 value) data)) external payable returns (bytes32)',
+  'event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)',
 ];
+
+// keccak256("Attested(address,address,bytes32,bytes32)")
+const ATTESTED_EVENT_TOPIC = '0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75c5b2b76c2';
 
 // ABI encoder for schema fields
 const SCHEMA_ENCODER = new ethers.AbiCoder();
@@ -59,7 +63,7 @@ export function buildAttestationData(
     tier: res.tier,
     mode: res.mode,
     verdict: res.verdict,
-    confidence: Math.round(res.confidence * 100), // 0-100 for uint8
+    confidence: Math.max(0, Math.min(100, Math.round(res.confidence * 100))), // uint8 0-100, clamped
     claimHash: hashToBytes32(req.claim),
     evidenceHash: hashToBytes32(req.evidence),
     evaluatedAt: Math.floor(new Date(res.meta.verified_at).getTime() / 1000),
@@ -104,9 +108,13 @@ export async function issueAttestation(
     privateKey?: string; // override for testing (normally from env)
   },
 ): Promise<AttestationResult> {
+  // SECURITY: Handles production wallet private key. Only call when attestation is explicitly requested.
   const privateKey = options?.privateKey ?? process.env.ATTESTER_PRIVATE_KEY;
   if (!privateKey) {
-    throw new Error('[sentinel-eas] ATTESTER_PRIVATE_KEY not set');
+    throw new Error('[sentinel-eas] ATTESTER_PRIVATE_KEY not configured — required for on-chain attestation');
+  }
+  if (!/^(0x)?[a-fA-F0-9]{64}$/.test(privateKey)) {
+    throw new Error('[sentinel-eas] Invalid private key format');
   }
 
   const rpcUrl = options?.rpcUrl ?? SENTINEL_EAS_CONFIG.rpcUrl;
@@ -133,17 +141,43 @@ export async function issueAttestation(
     },
   };
 
+  // Gas price protection — reject if network congestion makes attestation uneconomical
+  const feeData = await provider.getFeeData();
+  const maxGasPrice = ethers.parseUnits('5', 'gwei'); // Base L2 typical: 0.005-0.05 gwei, spike threshold: 5 gwei
+  if (feeData.gasPrice && feeData.gasPrice > maxGasPrice) {
+    throw new Error(
+      `[sentinel-eas] Gas price too high: ${ethers.formatUnits(feeData.gasPrice, 'gwei')} gwei (max: 5 gwei). Deferring attestation.`
+    );
+  }
+
   const tx = await eas.attest(attestationRequest);
   const receipt = await tx.wait();
 
-  // Extract attestation UID from logs
-  // EAS emits Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)
+  // Extract attestation UID from EAS Attested event
+  // Event: Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)
+  // uid is a non-indexed parameter but schemaUID is indexed at topics[3]
+  const easAddress = SENTINEL_EAS_CONFIG.contracts.eas.toLowerCase();
   const attestedEvent = receipt.logs.find(
-    (log: ethers.Log) => log.topics.length >= 4,
+    (log: ethers.Log) =>
+      log.address.toLowerCase() === easAddress &&
+      log.topics[0] === ATTESTED_EVENT_TOPIC &&
+      log.topics.length >= 4,
   );
 
-  const uid = attestedEvent?.topics?.[3]
-    ?? '0x0000000000000000000000000000000000000000000000000000000000000000';
+  if (!attestedEvent) {
+    throw new Error(`[sentinel-eas] Attested event not found in tx ${receipt.hash}. Check EAS contract address and event signature.`);
+  }
+
+  // The UID is returned by the attest() function — decode from logs or use tx return value
+  // In EAS v1, uid is topics[3] (indexed schemaUID), but the attestation UID
+  // is actually the return value. For reliability, decode the Attested event data.
+  const iface = new ethers.Interface(EAS_ABI);
+  const parsed = iface.parseLog({ topics: attestedEvent.topics as string[], data: attestedEvent.data });
+  const uid = parsed?.args?.[2] as string; // uid is the 3rd parameter (non-indexed)
+
+  if (!uid || uid === ethers.ZeroHash) {
+    throw new Error(`[sentinel-eas] Invalid attestation UID in tx ${receipt.hash}`);
+  }
 
   return {
     uid,
