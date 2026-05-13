@@ -156,10 +156,10 @@ Each step is independent. No step blocks another.
 
 ## Action Items
 
-1. [ ] Update `ENGINE-ARCHITECTURE.md` to reference this ADR (remove inline x402 section)
-2. [ ] Create `adapters/platform/` and `adapters/payment/` directory structure
-3. [ ] Define `BillingEvent` in `types.ts`
-4. [ ] Engine wiring PR uses this structure from the start
+1. [x] Update `ENGINE-ARCHITECTURE.md` to reference this ADR (remove inline x402 section)
+2. [x] Create `adapters/platform/` and `adapters/payment/` directory structure
+3. [x] Define `BillingEvent` in `types.ts`
+4. [x] Engine wiring PR uses this structure from the start
 
 ---
 
