@@ -12,6 +12,27 @@ export interface TierConfig {
   notes: string;
 }
 
+/**
+ * SERV model labels → pot-cli model-router aliases.
+ *
+ * Sentinel's tier config uses SERV labels (nano, pro) for product consistency.
+ * The engine resolves these to pot-cli aliases at runtime via this map.
+ *
+ * SERV "nano" = binary classifier, fast/cheap → gemini (gemini-3.1-flash-lite)
+ * SERV "pro"  = custom/fast, 720ms backing   → sonnet (claude-sonnet-4-6)
+ *
+ * When SERV models are available as first-class pot-cli aliases (e.g. after
+ * pot-cli adds native SERV support), update this map — no cascade logic changes.
+ */
+export const SERV_TO_POTCLI: Record<string, string> = {
+  nano: 'gemini',
+  pro: 'sonnet',
+};
+
+export function resolveCascadeModels(cascade: string[]): string[] {
+  return cascade.map(model => SERV_TO_POTCLI[model] ?? model);
+}
+
 export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
   checkpoint: {
     tier: 'checkpoint',

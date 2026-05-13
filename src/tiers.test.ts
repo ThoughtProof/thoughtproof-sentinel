@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listTiers, getTierConfig, TIER_CONFIGS } from './tiers.js';
+import { listTiers, getTierConfig, TIER_CONFIGS, resolveCascadeModels, SERV_TO_POTCLI } from './tiers.js';
 
 describe('Sentinel tiers', () => {
   it('has exactly 2 tiers', () => {
@@ -25,5 +25,22 @@ describe('Sentinel tiers', () => {
     expect(getTierConfig().tier).toBe('standard');
     expect(getTierConfig(undefined).tier).toBe('standard');
     expect(getTierConfig('checkpoint').tier).toBe('checkpoint');
+  });
+});
+
+describe('SERV → pot-cli model resolution', () => {
+  it('maps nano → gemini, pro → sonnet', () => {
+    expect(SERV_TO_POTCLI.nano).toBe('gemini');
+    expect(SERV_TO_POTCLI.pro).toBe('sonnet');
+  });
+
+  it('resolveCascadeModels translates SERV labels', () => {
+    expect(resolveCascadeModels(['nano'])).toEqual(['gemini']);
+    expect(resolveCascadeModels(['nano', 'pro'])).toEqual(['gemini', 'sonnet']);
+  });
+
+  it('passes through unknown model names unchanged', () => {
+    expect(resolveCascadeModels(['gemini', 'sonnet'])).toEqual(['gemini', 'sonnet']);
+    expect(resolveCascadeModels(['opus'])).toEqual(['opus']);
   });
 });
