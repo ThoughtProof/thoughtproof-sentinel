@@ -19,7 +19,7 @@ import {
 
 import { runCascade, type CascadeConfig } from 'pot-cli/cascade';
 import type { SentinelTier } from '../types.js';
-import { TIER_CONFIGS, resolveCascadeModels } from '../tiers.js';
+import { TIER_CONFIGS } from '../tiers.js';
 
 export interface CascadeInput {
   evalInput: EvalInput;
@@ -41,7 +41,7 @@ export interface CascadeOutput {
  */
 export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOutput> {
   const tierConfig = TIER_CONFIGS[input.tier];
-  const stages = resolveCascadeModels(tierConfig.cascade);
+  const stages = tierConfig.cascade;
 
   const evalOptions: EvalOptions = {
     mode: input.evalMode,

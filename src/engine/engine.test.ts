@@ -83,7 +83,7 @@ describe('Sentinel Engine', () => {
       expect(res.confidence).toBeGreaterThan(0);
       expect(res.mode).toBe('handoff');
      expect(res.tier).toBe('checkpoint');
-      expect(res.meta.models_used).toEqual(['gemini']);
+      expect(res.meta.models_used).toEqual(['serv-nano']);
      expect(res.id).toMatch(/^sent_/);
       expect(res.meta.duration_ms).toBeGreaterThanOrEqual(0);
       expect(res.meta.verified_at).toBeTruthy();
@@ -122,7 +122,7 @@ describe('Sentinel Engine', () => {
       expect(res.verdict).toBe('ALLOW');
       expect(res.mode).toBe('plan_revision');
      expect(res.tier).toBe('standard'); // default
-      expect(res.meta.models_used).toEqual(['gemini', 'sonnet']);
+      expect(res.meta.models_used).toEqual(['serv-nano', 'serv-pro']);
      expect(mockRunCascade).toHaveBeenCalledOnce();
     });
 
@@ -151,7 +151,7 @@ describe('Sentinel Engine', () => {
       const res = await verify(req);
 
      expect(res.verdict).toBe('BLOCK');
-      expect(res.meta.models_used).toEqual(['gemini']); // early exit, no pro
+      expect(res.meta.models_used).toEqual(['serv-nano']); // early exit, no pro
    });
 
     it('should return UNCERTAIN for HOLD verdict', async () => {
