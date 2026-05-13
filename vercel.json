@@ -1,0 +1,5 @@
+{
+  "rewrites": [
+    { "source": "/sentinel/(.*)", "destination": "/api/sentinel/$1" }
+  ]
+}
