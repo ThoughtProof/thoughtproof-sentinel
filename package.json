@@ -16,6 +16,7 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
+    "ethers": "^6.16.0",
     "pot-cli": "^0.8.5"
   }
 }

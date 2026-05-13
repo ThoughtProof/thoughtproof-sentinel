@@ -1,6 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { validateVerifyRequest } from '../../src/validation.js';
 import { verify } from '../../src/engine/index.js';
+import { buildAttestationData, encodeAttestationData, hashToBytes32 } from '../../src/eas/attest.js';
+import { buildBillingEvent } from '../../src/billing.js';
+import type { PaymentPlatform } from '../../src/types.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
@@ -26,14 +29,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({
         error: 'Validation failed',
         code: 'INVALID_REQUEST',
-        details: result.errors,
+        details: (result as { valid: false; errors: unknown[] }).errors,
       });
     }
 
-    // Engine call — pure verification, no auth (Phase 0)
+    // --- Phase 0: Platform detection (no auth yet) ---
+    const platform: PaymentPlatform = (req.headers['x-sentinel-platform'] as PaymentPlatform) ?? 'direct';
+    const agentId = req.headers['x-sentinel-agent-id'] as string | undefined;
+
+    // --- Engine call — pure verification ---
     const response = await verify(result.data);
 
-    return res.status(200).json(response);
+    // --- EAS attestation data (prepared, not issued in Phase 0) ---
+    const attestationData = buildAttestationData(result.data, response);
+
+    // --- Billing event (logged, not settled in Phase 0) ---
+    const billingEvent = buildBillingEvent(response, { platform, agent_id: agentId });
+
+    console.log(`[sentinel/verify] id=${response.id} verdict=${response.verdict} tier=${response.tier} mode=${response.mode} duration=${response.meta.duration_ms}ms platform=${platform}`);
+
+    // Return enriched response with attestation + billing metadata
+    return res.status(200).json({
+      ...response,
+      attestation: {
+        prepared: true,
+        issued: false, // Phase 0: no on-chain issuance yet
+        schema_uid: '0x3945d7be65761ff1a83a4d6e16a7d3adbe6ced982a7e139854b5bfe4c0748d2b',
+        claim_hash: attestationData.claimHash,
+        evidence_hash: attestationData.evidenceHash,
+      },
+      billing: {
+        price_usd: billingEvent.price_usd,
+        settled: false, // Phase 0: no payment yet
+        platform: billingEvent.platform,
+      },
+    });
   } catch (error) {
     console.error('[sentinel/verify] error:', error);
     const message = error instanceof Error ? error.message : 'Internal server error';
