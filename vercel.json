@@ -1,5 +1,19 @@
 {
   "rewrites": [
     { "source": "/sentinel/(.*)", "destination": "/api/sentinel/$1" }
+  ],
+  "functions": {
+    "api/sentinel/*.ts": {
+      "maxDuration": 10
+    }
+  },
+  "headers": [
+    {
+      "source": "/sentinel/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" }
+      ]
+    }
   ]
 }
