@@ -65,31 +65,39 @@ interface BillingEvent {
   models_used: string[];        // ['nano'] or ['nano', 'pro']
   duration_ms: number;
   timestamp: string;            // ISO 8601
+  platform: 'openserv' | 'acp' | 'direct';  // attribution for per-platform revenue reporting
+  agent_id?: string;            // platform-specific identifier (e.g. OpenServ agent ID, ACP agent address)
 }
 ```
 
-The route layer creates this from the engine's `VerificationResponse` and passes it to the active payment adapter. The engine returns verification results; it has no concept of money.
+The route layer creates this from the engine's `VerificationResponse` and the platform adapter's auth context, then passes it to the active payment adapter. The engine returns verification results; it has no concept of money or platform identity.
 
 ### 4. x402 Batch Settlement Economics
 
 **Scenario:** Cobot-style autonomous trading agent, 200 plan_revision checks/day at Sentinel Checkpoint ($0.003).
 
-**Without batch settlement:**
+**Without batch settlement (median conditions):**
 - Revenue: 200 × $0.003 = **$0.60/day**
-- Gas cost: 200 on-chain tx × ~$0.001 (Base L2) = **$0.20/day**
-- Gas as % of revenue: **33%**
-- Effective margin: ~47% (after LLM cost + gas)
+- Gas cost: 200 on-chain tx × ~$0.0003 (Base L2 median, 0.005-0.05 gwei) = **$0.06/day**
+- Gas as % of revenue: **~10%**
+- Effective margin: ~70% (after LLM cost + gas)
+
+**Without batch settlement (congestion, 5-50x spike):**
+- Gas cost: 200 on-chain tx × ~$0.005 (5 gwei) = **$1.00/day**
+- Gas as % of revenue: **167%** — **verification runs at a loss**
 
 **With x402 batch settlement:**
 - Revenue: 200 × $0.003 = **$0.60/day**
 - Gas cost: 1 escrow tx + 1 batch settle tx = **~$0.002/day**
-- Gas as % of revenue: **<0.4%**
+- Gas as % of revenue: **<0.4%** (median or congestion — amortized either way)
 - Effective margin: **~80%** (LLM cost only meaningful variable)
 
 **At scale (1,000 checks/day):**
 - Revenue: $3.00/day, gas still ~$0.002 → margin approaches LLM-cost floor (~82%)
 
-Batch settlement turns Sentinel from "gas-constrained at low price points" to "viable at any volume."
+Gas estimate uses median Base L2 conditions. Under network congestion (5–50x spike), per-tx cost can exceed verification revenue entirely — batch settlement removes this tail risk, not just the median cost.
+
+Batch settlement turns Sentinel from "congestion-vulnerable at sub-cent price points" to "viable at any volume, any network condition."
 
 ### 5. x402 Composes With — Does Not Compete With — Platforms
 
@@ -123,6 +131,10 @@ An OpenServ-native agent paying via x402 is the expected composition, not an eit
 - Slightly more directory structure than a monolithic `adapters/` folder
 - Route layer has more composition responsibility (auth + verify + bill)
 - BillingEvent interface must stay stable across payment adapters
+
+### Open Questions
+
+- **Payment adapter selection mechanism:** Per-request header vs. per-API-key attribute vs. per-customer-profile? Intentionally deferred. To be decided when first payment adapter ships. Must not be solved ad-hoc during implementation — this ADR should be updated with the decision before the Stripe or x402 adapter merges.
 
 ### Neutral
 - Phase 0 (AMA demo) uses neither — open auth, no billing. Both axes are no-ops.
