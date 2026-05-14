@@ -45,11 +45,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: authResult.error, code: 'UNAUTHORIZED' });
     }
 
-    // --- Rate Limiting ---
+    // --- Rate Limiting (Upstash Redis or in-memory fallback) ---
     const rateLimitKey = (req.headers['x-sentinel-key'] as string) ?? req.headers['x-forwarded-for'] as string ?? 'anonymous';
     const rateLimit = authResult.valid && req.headers['x-sentinel-key']
-      ? checkRateLimit(rateLimitKey, 120) // Authenticated: 120/min
-      : checkGlobalRateLimit();           // Unauthenticated: 30/min
+      ? await checkRateLimit(rateLimitKey, 120) // Authenticated: 120/min
+      : await checkGlobalRateLimit();           // Unauthenticated: 30/min
 
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
 
