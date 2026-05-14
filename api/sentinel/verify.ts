@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { validateVerifyRequest } from '../../src/validation.js';
 import { verify } from '../../src/engine/index.js';
 import { buildAttestationData } from '../../src/eas/attest.js';
-import { buildBillingEvent } from '../../src/billing.js';
+import { buildBillingEvent, recordBillingEvent } from '../../src/billing.js';
 import { validateApiKey, checkRateLimit, checkGlobalRateLimit } from '../../src/auth.js';
 import type { PaymentPlatform } from '../../src/types.js';
 
@@ -91,8 +91,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // --- EAS attestation data (prepared, not issued in Phase 0) ---
     const attestationData = buildAttestationData(result.data, response);
 
-    // --- Billing event (logged, not settled in Phase 0) ---
+    // --- Billing event (logged + Stripe meter if configured) ---
     const billingEvent = buildBillingEvent(response, { platform, agent_id: agentId });
+    await recordBillingEvent(billingEvent);
 
     console.log(`[sentinel/verify:${requestId}] verdict=${response.verdict} confidence=${response.confidence} tier=${response.tier} mode=${response.mode} duration=${response.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}`);
 
