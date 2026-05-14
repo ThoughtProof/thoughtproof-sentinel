@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { validateVerifyRequest } from '../../src/validation.js';
 import { verify } from '../../src/engine/index.js';
-import { buildAttestationData } from '../../src/eas/attest.js';
+import { buildAttestationData, issueAttestation } from '../../src/eas/attest.js';
 import { buildBillingEvent, recordBillingEvent } from '../../src/billing.js';
 import { validateApiKey, checkRateLimit, checkGlobalRateLimit } from '../../src/auth.js';
 import type { PaymentPlatform } from '../../src/types.js';
@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // --- Standard Headers ---
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Sentinel-Key, X-Sentinel-Platform, X-Sentinel-Agent-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Sentinel-Key, X-Sentinel-Platform, X-Sentinel-Agent-Id, X-Sentinel-Attest, X-Sentinel-Attest-Recipient');
     res.setHeader('X-Sentinel-Version', VERSION);
     res.setHeader('X-Request-Id', requestId);
 
@@ -88,8 +88,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: 'Engine returned invalid response', code: 'ENGINE_ERROR' });
     }
 
-    // --- EAS attestation data (prepared, not issued in Phase 0) ---
+    // --- EAS attestation (opt-in via X-Sentinel-Attest header) ---
     const attestationData = buildAttestationData(result.data, response);
+    const wantsAttestation = req.headers['x-sentinel-attest'] === 'true';
+    const attestationEnabled = !!process.env.ATTESTER_PRIVATE_KEY;
+    let attestationResult: { uid: string; txHash: string } | null = null;
+
+    if (wantsAttestation && attestationEnabled && response.verdict === 'ALLOW') {
+      try {
+        const recipient = (req.headers['x-sentinel-attest-recipient'] as string) ?? undefined;
+        const result = await issueAttestation(attestationData, { recipient });
+        attestationResult = { uid: result.uid, txHash: result.txHash };
+        console.log(`[sentinel/verify:${requestId}] attestation issued: uid=${result.uid} tx=${result.txHash}`);
+      } catch (attestError) {
+        // Attestation failure should NOT block the verification response
+        console.error(`[sentinel/verify:${requestId}] attestation failed:`, attestError instanceof Error ? attestError.message : attestError);
+      }
+    }
 
     // --- Billing event (logged + Stripe meter if configured) ---
     const billingEvent = buildBillingEvent(response, { platform, agent_id: agentId });
@@ -102,14 +117,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ...response,
       attestation: {
         prepared: true,
-        issued: false, // Phase 0: no on-chain issuance yet
+        issued: !!attestationResult,
         schema_uid: '0x3945d7be65761ff1a83a4d6e16a7d3adbe6ced982a7e139854b5bfe4c0748d2b',
         claim_hash: attestationData.claimHash,
         evidence_hash: attestationData.evidenceHash,
+        ...(attestationResult && {
+          uid: attestationResult.uid,
+          tx_hash: attestationResult.txHash,
+        }),
       },
       billing: {
         price_usd: billingEvent.price_usd,
-        settled: false, // Phase 0: no payment yet
+        settled: false,
         platform: billingEvent.platform,
       },
     });
