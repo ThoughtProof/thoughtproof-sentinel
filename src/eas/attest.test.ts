@@ -85,7 +85,7 @@ describe('buildAttestationData', () => {
 });
 
 describe('encodeAttestationData', () => {
-  it('returns valid ABI-encoded hex string', () => {
+  it('returns valid ABI-encoded hex string', async () => {
     const data = buildAttestationData(
       {
         claim: 'test claim',
@@ -108,7 +108,7 @@ describe('encodeAttestationData', () => {
       },
     );
 
-    const encoded = encodeAttestationData(data);
+    const encoded = await encodeAttestationData(data);
     expect(encoded).toMatch(/^0x[a-f0-9]+$/);
     // ABI-encoded data should be substantial (multiple fields)
     expect(encoded.length).toBeGreaterThan(200);

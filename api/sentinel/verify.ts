@@ -4,6 +4,7 @@ import { verify } from '../../src/engine/index.js';
 import { buildAttestationData, issueAttestation } from '../../src/eas/attest.js';
 import { buildBillingEvent, recordBillingEvent } from '../../src/billing.js';
 import { validateApiKey, checkRateLimit, checkGlobalRateLimit } from '../../src/auth.js';
+import { x402Gate } from '../../src/middleware/x402.js';
 import type { PaymentPlatform } from '../../src/types.js';
 
 const VERSION = '0.1.0';
@@ -43,6 +44,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const authResult = validateApiKey(req.headers['x-sentinel-key'] as string | undefined);
     if (!authResult.valid) {
       return res.status(401).json({ error: authResult.error, code: 'UNAUTHORIZED' });
+    }
+
+    // --- x402 Payment Gate (after auth, before engine) ---
+    const paymentResult = await x402Gate(req, res);
+    if (!paymentResult.allowed) {
+      return; // Gate already sent the 402/4xx response
     }
 
     // --- Rate Limiting (Upstash Redis or in-memory fallback) ---
@@ -128,8 +135,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       billing: {
         price_usd: billingEvent.price_usd,
-        settled: false,
+        settled: paymentResult.paymentMethod === 'x402-facilitator' || paymentResult.paymentMethod === 'intent',
         platform: billingEvent.platform,
+        ...(paymentResult.paymentMethod && { payment_method: paymentResult.paymentMethod }),
       },
     });
   } catch (error) {

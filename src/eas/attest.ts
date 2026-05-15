@@ -8,11 +8,21 @@
  * post-verification side-effect, not part of core verification logic.
  *
  * Requires ATTESTER_PRIVATE_KEY env var for signing transactions.
+ *
+ * NOTE: ethers is lazy-loaded to keep Vercel function bundle small at cold start.
  */
 
-import { ethers } from 'ethers';
+import { createHash } from 'crypto';
 import { SENTINEL_EAS_CONFIG } from '../eas-config.js';
 import type { AttestationData, AttestationResult, SentinelVerifyResponse, SentinelVerifyRequest } from '../types.js';
+
+// Lazy ethers — only loaded when actually attesting
+let _ethers: typeof import('ethers') | null = null;
+async function getEthers() {
+  if (_ethers) return _ethers;
+  _ethers = await import('ethers');
+  return _ethers;
+}
 
 // EAS contract ABI — only the attest function we need
 const EAS_ABI = [
@@ -23,8 +33,6 @@ const EAS_ABI = [
 // keccak256("Attested(address,address,bytes32,bytes32)")
 const ATTESTED_EVENT_TOPIC = '0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75c5b2b76c2';
 
-// ABI encoder for schema fields
-const SCHEMA_ENCODER = new ethers.AbiCoder();
 const SCHEMA_TYPES = [
   'string',   // verificationId
   'bool',     // qualified
@@ -40,16 +48,17 @@ const SCHEMA_TYPES = [
 ];
 
 /**
- * Hash a string to bytes32 using keccak256.
+ * Hash a string to bytes32 using keccak256 (Node.js crypto — no ethers needed).
  * Used for claimHash and evidenceHash — on-chain fingerprint of inputs.
  */
 export function hashToBytes32(input: string): string {
-  return ethers.keccak256(ethers.toUtf8Bytes(input));
+  const hash = createHash('sha256').update(input).digest('hex');
+  return '0x' + hash;
 }
 
 /**
  * Build AttestationData from a verification request + response pair.
- * Pure function — no I/O.
+ * Pure function — no I/O, no ethers dependency.
  */
 export function buildAttestationData(
   req: SentinelVerifyRequest,
@@ -72,9 +81,12 @@ export function buildAttestationData(
 
 /**
  * Encode attestation data into ABI-encoded bytes for the EAS schema.
+ * Requires ethers (lazy-loaded).
  */
-export function encodeAttestationData(data: AttestationData): string {
-  return SCHEMA_ENCODER.encode(SCHEMA_TYPES, [
+export async function encodeAttestationData(data: AttestationData): Promise<string> {
+  const ethers = await getEthers();
+  const encoder = new ethers.AbiCoder();
+  return encoder.encode(SCHEMA_TYPES, [
     data.verificationId,
     data.qualified,
     data.qualification,
@@ -108,6 +120,8 @@ export async function issueAttestation(
     privateKey?: string; // override for testing (normally from env)
   },
 ): Promise<AttestationResult> {
+  const ethers = await getEthers();
+
   // SECURITY: Handles production wallet private key. Only call when attestation is explicitly requested.
   const privateKey = options?.privateKey ?? process.env.ATTESTER_PRIVATE_KEY;
   if (!privateKey) {
@@ -127,7 +141,7 @@ export async function issueAttestation(
     wallet,
   );
 
-  const encodedData = encodeAttestationData(data);
+  const encodedData = await encodeAttestationData(data);
 
   const attestationRequest = {
     schema: SENTINEL_EAS_CONFIG.schemas.sentinelQualified.uid,
@@ -154,11 +168,9 @@ export async function issueAttestation(
   const receipt = await tx.wait();
 
   // Extract attestation UID from EAS Attested event
-  // Event: Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)
-  // uid is a non-indexed parameter but schemaUID is indexed at topics[3]
   const easAddress = SENTINEL_EAS_CONFIG.contracts.eas.toLowerCase();
   const attestedEvent = receipt.logs.find(
-    (log: ethers.Log) =>
+    (log: { address: string; topics: string[] }) =>
       log.address.toLowerCase() === easAddress &&
       log.topics[0] === ATTESTED_EVENT_TOPIC &&
       log.topics.length >= 4,
@@ -168,9 +180,7 @@ export async function issueAttestation(
     throw new Error(`[sentinel-eas] Attested event not found in tx ${receipt.hash}. Check EAS contract address and event signature.`);
   }
 
-  // The UID is returned by the attest() function — decode from logs or use tx return value
-  // In EAS v1, uid is topics[3] (indexed schemaUID), but the attestation UID
-  // is actually the return value. For reliability, decode the Attested event data.
+  // Decode the Attested event to extract the UID
   const iface = new ethers.Interface(EAS_ABI);
   const parsed = iface.parseLog({ topics: attestedEvent.topics as string[], data: attestedEvent.data });
   const uid = parsed?.args?.[2] as string; // uid is the 3rd parameter (non-indexed)

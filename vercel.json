@@ -3,7 +3,7 @@
     { "source": "/sentinel/(.*)", "destination": "/api/sentinel/$1" }
   ],
   "functions": {
-    "api/sentinel/*.ts": {
+    "api/sentinel/**/*.ts": {
       "maxDuration": 30
     }
   },
