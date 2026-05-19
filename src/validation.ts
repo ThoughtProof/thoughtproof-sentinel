@@ -6,7 +6,7 @@ export interface ValidationError {
   message: string;
 }
 
-const VALID_MODES: SentinelMode[] = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis'];
+const VALID_MODES: SentinelMode[] = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution'];
 const VALID_TIERS: SentinelTier[] = ['checkpoint', 'standard'];
 
 export function validateVerifyRequest(body: unknown): { valid: true; data: SentinelVerifyRequest } | { valid: false; errors: ValidationError[] } {

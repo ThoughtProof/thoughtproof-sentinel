@@ -1,6 +1,6 @@
 export type SentinelTier = 'checkpoint' | 'standard';
 
-export type SentinelMode = 'handoff' | 'plan_revision' | 'memory_write' | 'output_synthesis';
+export type SentinelMode = 'handoff' | 'plan_revision' | 'memory_write' | 'output_synthesis' | 'trade_execution';
 
 export interface SentinelVerifyRequest {
   /** Unique identifier (optional, auto-generated) */

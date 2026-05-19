@@ -49,8 +49,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     tier,
   });
 
-  // 3. Map verdict
-  const verdict = mapVerdict(cascadeOutput.result.verdict);
+  // 3. Map verdict (mode-aware: trade_execution is conservative)
+  const verdict = mapVerdict(cascadeOutput.result.verdict, req.mode);
 
   // 4. Calculate confidence from step scores
   const steps = cascadeOutput.result.step_evaluations;

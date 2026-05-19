@@ -213,7 +213,7 @@ describe('Sentinel Engine', () => {
 
   describe('mode handlers', () => {
     it('should use correct eval input for each mode', async () => {
-      const modes = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis'] as const;
+      const modes = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution'] as const;
 
       for (const mode of modes) {
         vi.clearAllMocks();
@@ -265,6 +265,49 @@ describe('Sentinel Engine', () => {
 
       const evalInput = mockEvaluateItem.mock.calls[0][0];
       expect(evalInput.gold_plan_steps).toHaveLength(2);
+    });
+
+    it('trade_execution should have 3 gold steps (thresholds + direction + fabrication)', async () => {
+      mockEvaluateItem.mockResolvedValueOnce(makeItemResult('ALLOW') as any);
+
+      await verify({
+        claim: 'buy BTC',
+        evidence: 'price data',
+        mode: 'trade_execution',
+        tier: 'checkpoint',
+      });
+
+      const evalInput = mockEvaluateItem.mock.calls[0][0];
+      expect(evalInput.gold_plan_steps).toHaveLength(3);
+      expect(evalInput.gold_plan_steps[0].criticality).toBe('critical');
+      expect(evalInput.gold_plan_steps[1].criticality).toBe('critical');
+      expect(evalInput.gold_plan_steps[2].criticality).toBe('critical');
+    });
+
+    it('trade_execution maps CONDITIONAL_ALLOW to UNCERTAIN (conservative)', async () => {
+      mockEvaluateItem.mockResolvedValueOnce(makeItemResult('CONDITIONAL_ALLOW') as any);
+
+      const res = await verify({
+        claim: 'buy BTC borderline',
+        evidence: 'weak data',
+        mode: 'trade_execution',
+        tier: 'checkpoint',
+      });
+
+      expect(res.verdict).toBe('UNCERTAIN');
+    });
+
+    it('output_synthesis maps CONDITIONAL_ALLOW to ALLOW (default)', async () => {
+      mockEvaluateItem.mockResolvedValueOnce(makeItemResult('CONDITIONAL_ALLOW') as any);
+
+      const res = await verify({
+        claim: 'output claim',
+        evidence: 'evidence',
+        mode: 'output_synthesis',
+        tier: 'checkpoint',
+      });
+
+      expect(res.verdict).toBe('ALLOW');
     });
   });
 
