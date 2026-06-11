@@ -191,13 +191,14 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
     }
 
     // Detect which network the payment targets
+    // SECURITY: Network field MUST explicitly declare GOAT — orderId alone is NOT sufficient
+    // (prevents injection: attacker sending orderId in a Base-network payload to route to GOAT)
     const payloadNetwork = (payload.network as string) ?? '';
     const isGoatPayment =
-      payloadNetwork === GOAT_NETWORK ||
-      payloadNetwork === `eip155:2345` ||
-      Boolean(payload.orderId); // GOAT flow uses orderId
+      (payloadNetwork === GOAT_NETWORK || payloadNetwork === `eip155:${2345}`) &&
+      isGoatEnabled();
 
-    if (isGoatPayment && isGoatEnabled()) {
+    if (isGoatPayment) {
       // ── GOAT Network x402 flow ────────────────────────────────────────
       let verification = await goatVerifyPayment(payload);
       if (!verification.isValid) {

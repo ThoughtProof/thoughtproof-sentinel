@@ -34,7 +34,12 @@ export function getGoatConfig() {
 
 export function isGoatEnabled(): boolean {
   const cfg = getGoatConfig();
-  return Boolean(cfg.apiKey && cfg.apiSecret && cfg.usdcAddress);
+  return Boolean(
+    cfg.apiKey?.trim() &&
+    cfg.apiSecret?.trim() &&
+    cfg.usdcAddress?.trim() &&
+    cfg.usdcAddress.startsWith('0x'),
+  );
 }
 
 // ── HMAC Signing (matches GOAT gateway expectations) ──────────────────────
