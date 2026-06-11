@@ -2,14 +2,24 @@
  * x402 Payment Middleware for ThoughtProof Sentinel
  *
  * Lightweight implementation — NO heavy dependencies.
- * Uses the x402 Facilitator REST API instead of @circle-fin/x402-batching SDK.
+ * Supports two payment networks:
+ *   - Base mainnet (eip155:8453) via Circle x402 Facilitator
+ *   - GOAT Network (eip155:2345) via GOAT x402 Merchant Gateway (opt-in, ENV-gated)
  *
- * Three auth flows:
- *   Flow A (API key): X-Sentinel-Key present → skip payment
- *   Flow B1 (x402 Facilitator): PAYMENT-SIGNATURE header → verify + settle via HTTP API
- *   Flow B2 (manual intent): X-Payment-Intent header → Upstash Redis-backed flow
+ * Four auth flows:
+ *   Flow A  (API key):  X-Sentinel-Key present → skip payment
+ *   Flow B1a (Base):    PAYMENT-SIGNATURE header + Base network → Circle facilitator verify/settle
+ *   Flow B1b (GOAT):    PAYMENT-SIGNATURE header + GOAT network/orderId → GOAT gateway verify/settle
+ *   Flow B2  (intent):  X-Payment-Intent header → Upstash Redis-backed manual flow
  *
  * Platform traffic (OpenServ, ACP) is billed post-hoc, not gated.
+ *
+ * GOAT ENV (all required for GOAT activation):
+ *   GOAT_X402_API_KEY       — Merchant API key from GOAT x402 onboarding
+ *   GOAT_X402_API_SECRET    — Merchant API secret for HMAC signing
+ *   GOAT_USDC_ADDRESS       — USDC contract address on GOAT mainnet (eip155:2345)
+ *   GOAT_X402_BASE_URL      — Gateway URL (default: https://api.goatx402.com)
+ *   GOAT_X402_PAYMENT_WALLET — Payment wallet on GOAT (default: PAYMENT_WALLET)
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
