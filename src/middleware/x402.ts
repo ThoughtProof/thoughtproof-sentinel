@@ -17,6 +17,13 @@ import { createHash, randomBytes } from 'crypto';
 import { Redis } from '@upstash/redis';
 import { TIER_CONFIGS } from '../tiers.js';
 import type { SentinelTier, PaymentPlatform } from '../types.js';
+import {
+  GOAT_NETWORK,
+  isGoatEnabled,
+  getGoatConfig,
+  goatVerifyPayment,
+  goatSettlePayment,
+} from './goat-x402.js';
 
 // ── Config ────────────────────────────────────────────────────────────────
 
@@ -165,7 +172,7 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
     const { price } = resolvePrice(req.body);
     const amountMicro = Math.round(parseFloat(price) * 1_000_000).toString();
 
-    let payload: unknown;
+    let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(Buffer.from(paymentSig, 'base64').toString());
     } catch {
@@ -173,6 +180,45 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
       return { allowed: false };
     }
 
+    // Detect which network the payment targets
+    const payloadNetwork = (payload.network as string) ?? '';
+    const isGoatPayment =
+      payloadNetwork === GOAT_NETWORK ||
+      payloadNetwork === `eip155:2345` ||
+      Boolean(payload.orderId); // GOAT flow uses orderId
+
+    if (isGoatPayment && isGoatEnabled()) {
+      // ── GOAT Network x402 flow ────────────────────────────────────────
+      let verification = await goatVerifyPayment(payload);
+      if (!verification.isValid) {
+        res.status(402).json({
+          error: 'GOAT payment verification failed',
+          reason: verification.invalidReason,
+        });
+        return { allowed: false };
+      }
+
+      let settlement = await goatSettlePayment(payload);
+      if (!settlement.success) {
+        res.status(402).json({
+          error: 'GOAT settlement failed',
+          details: settlement.error,
+        });
+        return { allowed: false };
+      }
+
+      const receipt = {
+        txHash: settlement.txHash,
+        orderId: settlement.orderId,
+        network: GOAT_NETWORK,
+        paidWith: 'x402-goat',
+      };
+      res.setHeader('payment-response', Buffer.from(JSON.stringify(receipt)).toString('base64'));
+
+      return { allowed: true, paymentMethod: 'x402-facilitator' };
+    }
+
+    // ── Base/Circle x402 flow (default) ─────────────────────────────────
     const paymentRequirements = {
       scheme: 'exact',
       network: 'eip155:8453', // Base mainnet
@@ -269,6 +315,7 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
         mimeType: 'application/json',
       },
       accepts: [
+        // Option 1: USDC on Base mainnet (Circle facilitator)
         {
           scheme: 'exact',
           network: 'eip155:8453',
@@ -278,6 +325,20 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
           maxTimeoutSeconds: 300,
           extra: { name: 'USD Coin', version: '2' },
         },
+        // Option 2: USDC on GOAT Network (GOAT x402 gateway) — when configured
+        ...(isGoatEnabled()
+          ? [
+              {
+                scheme: 'exact',
+                network: GOAT_NETWORK,
+                amount: amountMicro,
+                asset: getGoatConfig().usdcAddress,
+                payTo: getGoatConfig().paymentWallet,
+                maxTimeoutSeconds: 300,
+                extra: { name: 'USD Coin', gateway: 'goat-x402' },
+              },
+            ]
+          : []),
       ],
     };
     const x402Header = Buffer.from(JSON.stringify(x402Challenge)).toString('base64');
@@ -298,10 +359,13 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
           expiresAt: intent.expires_at,
         },
         instructions: [
-          'Option A (x402): Send PAYMENT-SIGNATURE header with base64-encoded EIP-3009 payload',
-          `Option B (manual): 1. Send ${price} USDC to ${PAYMENT_WALLET} on Base`,
-          `2. Confirm payment at POST /sentinel/payment-intents/${intent.id}/confirm with { "txHash": "0x..." }`,
-          `3. Retry this request with header X-Payment-Intent: ${intent.id}`,
+          'Option A (x402): Send PAYMENT-SIGNATURE header with base64-encoded payment payload',
+          `Option B (Base): Send ${price} USDC to ${PAYMENT_WALLET} on Base (eip155:8453)`,
+          ...(isGoatEnabled()
+            ? [`Option C (GOAT): Pay via GOAT x402 gateway (eip155:2345) — include orderId in payload`]
+            : []),
+          `Confirm payment: POST /sentinel/payment-intents/${intent.id}/confirm with { "txHash": "0x..." }`,
+          `Retry with header X-Payment-Intent: ${intent.id}`,
         ],
       });
     return { allowed: false };
