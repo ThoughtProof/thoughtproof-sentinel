@@ -59,14 +59,29 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     : 0;
 
   // 5. Surface per-step objections (the actionable substance). pot-cli
-  //    already computed these; we slim them to client-relevant fields.
-  const objections = steps.map((s) => ({
-    step_id: s.step_id,
-    score: Math.round(s.score * 1000) / 1000,
-    predicate: String(s.predicate),
-    quote: s.quote,
-    reasoning: s.reasoning,
-  }));
+  //    already computes these; we slim them to client-relevant fields and
+  //    attach the gold-step criterion (always deterministic). When the cheap
+  //    SERV tiers omit per-step prose, synthesize a reasoning fallback so the
+  //    objection is never opaque.
+  const criterionByStepId = new Map<string, string>();
+  for (const gs of modeOutput.evalInput.gold_plan_steps) {
+    criterionByStepId.set(`step_${gs.index}`, gs.acceptance_criterion ?? gs.description);
+  }
+
+  const objections = steps.map((s) => {
+    const criterion = criterionByStepId.get(s.step_id) ?? '';
+    const prose = (s.reasoning ?? '').trim();
+    return {
+      step_id: s.step_id,
+      criterion,
+      score: Math.round(s.score * 1000) / 1000,
+      predicate: String(s.predicate),
+      quote: s.quote,
+      reasoning: prose.length > 0
+        ? prose
+        : synthesizeReasoning(String(s.predicate), criterion, s.quote),
+    };
+  });
 
   const durationMs = Date.now() - startMs;
 
@@ -84,4 +99,31 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       verified_at: new Date().toISOString(),
     },
   };
+}
+
+/**
+ * Deterministic per-step reasoning fallback.
+ *
+ * The cheap SERV tiers (Nano) frequently omit the per-step `reasoning` prose
+ * the evaluator prompt requests, leaving only predicate + score + quote. This
+ * synthesizes a human-actionable sentence from the structured signal so a
+ * consumer (agent or dashboard) is never handed an objection with no
+ * explanation.
+ */
+function synthesizeReasoning(predicate: string, criterion: string, quote: string | null): string {
+  const verdictPhrase: Record<string, string> = {
+    unsupported: 'failed: the evidence does not support this criterion',
+    unfaithful: 'failed: the decision is not faithful to the evidence for this criterion',
+    partial: 'only partially met by the evidence',
+    weakly_faithful: 'only weakly supported by the evidence',
+    partially_faithful: 'only partially faithful to the evidence',
+    supported: 'met by the evidence',
+    faithful: 'faithful to the evidence',
+    skipped: 'was not evaluated',
+  };
+  const phrase = verdictPhrase[predicate] ?? `evaluated as "${predicate}"`;
+  const base = criterion
+    ? `Criterion "${criterion}" was ${phrase}.`
+    : `This step was ${phrase}.`;
+  return quote ? `${base} Keyed on: "${quote}"` : base;
 }

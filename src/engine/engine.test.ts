@@ -47,7 +47,7 @@ function makeItemResult(verdict: string, score: number = 0.85) {
     verdict_reasoning: `Test reasoning for ${verdict}`,
     step_evaluations: [
       {
-        step_id: 'step-0',
+        step_id: 'step_0',
         predicate: 'supported',
         score,
         quote: 'test quote',
@@ -426,11 +426,33 @@ describe('Sentinel Engine', () => {
       expect(Array.isArray(res.objections)).toBe(true);
       expect(res.objections).toHaveLength(1);
       const obj = res.objections[0];
-      expect(obj.step_id).toBe('step-0');
+      expect(obj.step_id).toBe('step_0');
       expect(obj.predicate).toBe('supported');
       expect(obj.quote).toBe('test quote');
-      expect(obj.reasoning).toBe('step reasoning');
+      expect(obj.reasoning).toBe('step reasoning'); // evaluator prose preserved
       expect(obj.score).toBe(0.2);
+      // criterion is attached from the trade_execution gold step 0
+      expect(typeof obj.criterion).toBe('string');
+      expect(obj.criterion.length).toBeGreaterThan(0);
+    });
+
+    it('synthesizes reasoning fallback when evaluator omits per-step prose', async () => {
+      const result = makeItemResult('BLOCK', 0.0);
+      // SERV Nano frequently omits per-step reasoning — simulate empty prose
+      result.step_evaluations[0].reasoning = '';
+      result.step_evaluations[0].predicate = 'unfaithful';
+      mockEvaluateItem.mockResolvedValueOnce(result as any);
+
+      const res = await verify({
+        claim: 'test', evidence: 'test', mode: 'trade_execution', tier: 'checkpoint',
+      });
+
+      const obj = res.objections[0];
+      expect(obj.reasoning.length).toBeGreaterThan(0);
+      expect(obj.reasoning).toMatch(/not faithful/i);
+      // fallback references the criterion and the quote
+      expect(obj.reasoning).toMatch(/Criterion/);
+      expect(obj.reasoning).toContain('test quote');
     });
 
     it('returns empty objections array when no step evaluations', async () => {

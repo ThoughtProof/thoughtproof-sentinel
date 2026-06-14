@@ -30,13 +30,19 @@ export type SentinelVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
 export interface SentinelStepObjection {
   /** Gold-step identifier (e.g. 'step_0') */
   step_id: string;
+  /** Human-readable description of what this step checks (the gold-step criterion) */
+  criterion: string;
   /** Support score, 0.0–1.0 */
   score: number;
   /** Graded/faithfulness predicate (e.g. 'supported', 'partial', 'unsupported') */
   predicate: string;
   /** Verbatim quote from evidence the evaluator keyed on, if any */
   quote: string | null;
-  /** Per-step reasoning — the human-actionable explanation */
+  /**
+   * Per-step reasoning. Uses the evaluator's prose when present; otherwise a
+   * deterministic fallback synthesized from predicate + criterion (the cheap
+   * SERV tiers do not always emit per-step prose).
+   */
   reasoning: string;
 }
 
