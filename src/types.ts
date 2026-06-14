@@ -17,11 +17,41 @@ export interface SentinelVerifyRequest {
 
 export type SentinelVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
 
+/**
+ * Per-step objection surfaced to the API client.
+ *
+ * This is the actionable substance the engine already computes internally
+ * (pot-cli StepEvaluation) but historically discarded before the HTTP
+ * boundary. Slimmed to the fields a consuming agent needs to re-plan:
+ * which step failed, how badly (score), the verbatim quote it keyed on,
+ * and why. Internal noise (quote_location, abstain_if_uncertain,
+ * quote_to_criterion_mapping) is intentionally omitted.
+ */
+export interface SentinelStepObjection {
+  /** Gold-step identifier (e.g. 'step_0') */
+  step_id: string;
+  /** Support score, 0.0–1.0 */
+  score: number;
+  /** Graded/faithfulness predicate (e.g. 'supported', 'partial', 'unsupported') */
+  predicate: string;
+  /** Verbatim quote from evidence the evaluator keyed on, if any */
+  quote: string | null;
+  /** Per-step reasoning — the human-actionable explanation */
+  reasoning: string;
+}
+
 export interface SentinelVerifyResponse {
   id: string;
   verdict: SentinelVerdict;
   confidence: number;
   reasoning: string;
+  /**
+   * Structured per-step objections (since 2026-06-13). The actionable
+   * substance behind the verdict — empty array if the evaluator produced
+   * no step evaluations. Consumers can filter to low scores / failing
+   * predicates to drive agent re-planning.
+   */
+  objections: SentinelStepObjection[];
   mode: SentinelMode;
   tier: SentinelTier;
   meta: {

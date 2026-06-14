@@ -41,6 +41,7 @@ describe('buildAttestationData', () => {
     verdict: 'ALLOW',
     confidence: 0.875,
     reasoning: 'Output aligns with handoff context.',
+    objections: [],
     mode: 'handoff',
     tier: 'standard',
     meta: {
@@ -98,6 +99,7 @@ describe('encodeAttestationData', () => {
         verdict: 'ALLOW',
         confidence: 1.0,
         reasoning: 'test',
+        objections: [],
         mode: 'handoff',
         tier: 'checkpoint',
         meta: {

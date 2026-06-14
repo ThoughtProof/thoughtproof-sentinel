@@ -384,6 +384,7 @@ describe('Sentinel Engine', () => {
       expect(res).toHaveProperty('verdict');
       expect(res).toHaveProperty('confidence');
       expect(res).toHaveProperty('reasoning');
+      expect(res).toHaveProperty('objections');
       expect(res).toHaveProperty('mode');
       expect(res).toHaveProperty('tier');
       expect(res).toHaveProperty('meta');
@@ -412,6 +413,36 @@ describe('Sentinel Engine', () => {
 
       // Should be rounded: 0.877
       expect(res.confidence.toString().split('.')[1]?.length ?? 0).toBeLessThanOrEqual(3);
+    });
+
+    it('surfaces per-step objections mapped from step_evaluations', async () => {
+      const result = makeItemResult('BLOCK', 0.2);
+      mockEvaluateItem.mockResolvedValueOnce(result as any);
+
+      const res = await verify({
+        claim: 'test', evidence: 'test', mode: 'trade_execution', tier: 'checkpoint',
+      });
+
+      expect(Array.isArray(res.objections)).toBe(true);
+      expect(res.objections).toHaveLength(1);
+      const obj = res.objections[0];
+      expect(obj.step_id).toBe('step-0');
+      expect(obj.predicate).toBe('supported');
+      expect(obj.quote).toBe('test quote');
+      expect(obj.reasoning).toBe('step reasoning');
+      expect(obj.score).toBe(0.2);
+    });
+
+    it('returns empty objections array when no step evaluations', async () => {
+      const result = { ...makeItemResult('ALLOW'), step_evaluations: [] };
+      mockEvaluateItem.mockResolvedValueOnce(result as any);
+
+      const res = await verify({
+        claim: 'test', evidence: 'test', mode: 'handoff', tier: 'checkpoint',
+      });
+
+      expect(res.objections).toEqual([]);
+      expect(res.confidence).toBe(0);
     });
   });
 });

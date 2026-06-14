@@ -12,6 +12,7 @@ describe('buildBillingEvent', () => {
     verdict: 'ALLOW',
     confidence: 0.875,
     reasoning: 'Output aligns with context.',
+    objections: [],
     mode: 'handoff',
     tier: 'standard',
     meta: {

@@ -58,6 +58,16 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     ? steps.reduce((sum, s) => sum + s.score, 0) / steps.length
     : 0;
 
+  // 5. Surface per-step objections (the actionable substance). pot-cli
+  //    already computed these; we slim them to client-relevant fields.
+  const objections = steps.map((s) => ({
+    step_id: s.step_id,
+    score: Math.round(s.score * 1000) / 1000,
+    predicate: String(s.predicate),
+    quote: s.quote,
+    reasoning: s.reasoning,
+  }));
+
   const durationMs = Date.now() - startMs;
 
   return {
@@ -65,6 +75,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     verdict,
     confidence: Math.round(avgScore * 1000) / 1000,
     reasoning: cascadeOutput.result.verdict_reasoning,
+    objections,
     mode: req.mode,
     tier,
     meta: {
