@@ -130,6 +130,38 @@ value, but a *narrower* claim than what RV (Generator ≠ Verifier) provides.
 
 ---
 
+## Research grounding (Paul + Computer, 2026-06-17)
+
+> ⚠️ Citations below are reported by the research track and **not yet
+> independently verified**. Verify arXiv IDs + authors + venue before any of
+> these move into externally-visible material (whitepaper, sales sheet).
+
+**Why the cascade-disagreement override (cut from Phase 1) stays cut.**
+The pattern is real — "Trust or Escalate: LLM Judges with Provable Guarantees for
+Human Agreement" (Jung et al., ICLR 2025) describes Cascaded Selective
+Evaluation: a weaker judge first, escalate to a stronger one on low confidence.
+BUT the provable guarantee P(judge agrees with human) ≥ 1−α holds **only with
+thresholds calibrated against a labeled set** (simulated annotators + fixed
+sequence testing). pot-cli's confidence is an uncalibrated avg step-score — never
+validated against labels. "Gatekeeper: Improving Model Cascades Through
+Confidence Tuning" (Rabanser et al., Google 2025) reinforces this: cascade
+confidence override needs an explicitly fine-tuned confidence head; off-the-shelf
+scores are insufficient. → ADR-0007 ("disagreement = caution") stands until we
+have a labeled calibration set + a statistical guarantee. The override is not
+forbidden — it is *unfunded* until that tooling exists.
+
+**Name for the three-layer split: Neuro-Symbolic Verification.**
+The deterministic fact-layer + LLM coherence-layer is the established
+neuro-symbolic guardrail pattern: symbolic component does fact-checking / rule
+validation / data reconciliation; neural component does reasoning / coherence.
+Refs (to verify): "Bridging Symbolic Control and Neural Reasoning in LLM Agents"
+(arXiv:2511.17673, "Symbolic Control Layer"); "AI Agent Systems: Architectures,
+Applications, and Evaluation" (arXiv:2601.01743). Internal/whitepaper language:
+**"Neuro-Symbolic Verification Split."** Sales/external language: **"deterministic
+fact-checking + AI reasoning verification"** (no paper context needed).
+
+---
+
 ## Validation plan (gates before live)
 
 1. Log decision-time `marketSnapshot` into every CycleRecord (DONE 2026-06-17).
