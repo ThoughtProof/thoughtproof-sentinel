@@ -19,7 +19,7 @@ import type {
 
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
-import { mapVerdict } from './verdict.js';
+import { mapVerdict, canPromoteStep2Only } from './verdict.js';
 import { randomUUID } from 'crypto';
 
 /**
@@ -49,8 +49,25 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     tier,
   });
 
-  // 3. Map verdict (mode-aware: trade_execution is conservative)
-  const verdict = mapVerdict(cascadeOutput.result.verdict, req.mode);
+  // 3. Map verdict (mode-aware: trade_execution & trade_reasoning are conservative)
+  let verdict = mapVerdict(cascadeOutput.result.verdict, req.mode);
+
+  // 3b. trade_reasoning step_2-only promotion (ADR-0018). If the conservative
+  //     remap produced UNCERTAIN but the two FACTUAL steps (thresholds,
+  //     direction) both clear the SUPPORTED bar and only the inferential-
+  //     integrity step (step_2) is weak, promote back to ALLOW: the facts
+  //     checked out (and are backstopped by the deterministic structural
+  //     layer), so a marginally-imperfect self-coherence step should not gate.
+  const steps3b = cascadeOutput.result.step_evaluations;
+  if (
+    req.mode === 'trade_reasoning' &&
+    verdict === 'UNCERTAIN' &&
+    canPromoteStep2Only(
+      steps3b.map((s) => ({ step_id: s.step_id, score: s.score, predicate: String(s.predicate) })),
+    )
+  ) {
+    verdict = 'ALLOW';
+  }
 
   // 4. Calculate confidence from step scores
   const steps = cascadeOutput.result.step_evaluations;
