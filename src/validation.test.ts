@@ -17,8 +17,8 @@ describe('validateVerifyRequest', () => {
     }
   });
 
-  it('accepts all 5 modes', () => {
-    for (const mode of ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution']) {
+  it('accepts all 6 modes', () => {
+    for (const mode of ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning']) {
       const result = validateVerifyRequest({ ...validBody, mode });
       expect(result.valid).toBe(true);
     }

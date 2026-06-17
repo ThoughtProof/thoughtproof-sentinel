@@ -11,6 +11,7 @@ import { planRevision } from './plan_revision.js';
 import { memoryWrite } from './memory_write.js';
 import { outputSynthesis } from './output_synthesis.js';
 import { tradeExecution } from './trade_execution.js';
+import { tradeReasoning } from './trade_reasoning.js';
 
 export type { ModeHandler, ModeInput, ModeOutput } from './types.js';
 
@@ -20,6 +21,7 @@ const MODE_HANDLERS: Record<SentinelMode, ModeHandler> = {
   memory_write: memoryWrite,
   output_synthesis: outputSynthesis,
   trade_execution: tradeExecution,
+  trade_reasoning: tradeReasoning,
 };
 
 export function getModeHandler(mode: SentinelMode): ModeHandler {
