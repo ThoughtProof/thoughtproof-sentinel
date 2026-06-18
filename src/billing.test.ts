@@ -30,7 +30,7 @@ describe('buildBillingEvent', () => {
 
     expect(event.verification_id).toBe('sent_abc123');
     expect(event.tier).toBe('standard');
-    expect(event.price_usd).toBe(0.005);
+    expect(event.price_usd).toBe(0.008);
     expect(event.mode).toBe('handoff');
     expect(event.models_used).toEqual(['serv-nano', 'serv-pro']);
     expect(event.duration_ms).toBe(1200);
@@ -42,7 +42,7 @@ describe('buildBillingEvent', () => {
     const checkpointRes = { ...mockResponse, tier: 'checkpoint' as const };
     const event = buildBillingEvent(checkpointRes, { platform: 'direct' });
 
-    expect(event.price_usd).toBe(0.003);
+    expect(event.price_usd).toBe(0.005);
     expect(event.agent_id).toBeUndefined();
   });
 
@@ -73,7 +73,7 @@ describe('recordBillingEvent — Stripe integration', () => {
   const mockEvent = {
     verification_id: 'sent_test001',
     tier: 'standard' as const,
-    price_usd: 0.005,
+    price_usd: 0.008,
     mode: 'handoff' as const,
     models_used: ['serv-nano', 'serv-pro'],
     duration_ms: 1200,
@@ -93,7 +93,7 @@ describe('recordBillingEvent — Stripe integration', () => {
     const logged = JSON.parse((console.log as ReturnType<typeof vi.fn>).mock.calls[0][0]);
     expect(logged.event).toBe('sentinel_billing_event');
     expect(logged.verification_id).toBe('sent_test001');
-    expect(logged.price_usd).toBe(0.005);
+    expect(logged.price_usd).toBe(0.008);
   });
 
   it('submits to Stripe when fully configured', async () => {
@@ -121,7 +121,7 @@ describe('recordBillingEvent — Stripe integration', () => {
     expect(body.get('event_name')).toBe('sentinel_verification');
     expect(body.get('identifier')).toBe('sent_test001');
     expect(body.get('payload[stripe_customer_id]')).toBe('cus_abc123');
-    expect(body.get('payload[value]')).toBe('1'); // 0.005 * 100 = 0.5, rounded = 1
+    expect(body.get('payload[value]')).toBe('1'); // 0.008 * 100 = 0.8, rounded = 1
     expect(body.get('payload[tier]')).toBe('standard');
     expect(body.get('payload[platform]')).toBe('openserv');
     expect(body.get('payload[agent_id]')).toBe('agent-42');

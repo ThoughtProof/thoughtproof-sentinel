@@ -16,24 +16,24 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
   checkpoint: {
     tier: 'checkpoint',
     label: 'Checkpoint',
-    price_usd: 0.003,
+    price_usd: 0.005,
     cascade: ['serv-nano'],
     accuracy: 0.833,
     false_allows: 0,
     latency_median: '0.9s',
     default: false,
-    notes: 'Nano solo. High-volume, individually low-stakes checks. ~80% margin at $0.003.',
+    notes: 'Nano solo. High-volume, individually low-stakes checks.',
   },
   standard: {
     tier: 'standard',
     label: 'Standard',
-    price_usd: 0.005,
+    price_usd: 0.008,
     cascade: ['serv-nano', 'serv-pro'],
     accuracy: 0.813,
     false_allows: 0,
     latency_median: '1.3s',
     default: true,
-    notes: 'Nano→Pro cascade. Default Sentinel tier. 0 False ALLOWs, ~70% margin at $0.005.',
+    notes: 'Nano→Pro cascade. Default Sentinel tier. 0 False ALLOWs.',
   },
 };
 

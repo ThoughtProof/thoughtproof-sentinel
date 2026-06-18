@@ -11,7 +11,7 @@ function makeBillingEvent(overrides?: Partial<BillingEvent>): BillingEvent {
   return {
     verification_id: 'sent_test001',
     tier: 'checkpoint',
-    price_usd: 0.003,
+    price_usd: 0.005,
     mode: 'handoff',
     models_used: ['serv-nano'],
     duration_ms: 800,

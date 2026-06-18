@@ -6,16 +6,16 @@ describe('Sentinel tiers', () => {
     expect(listTiers()).toHaveLength(2);
   });
 
-  it('checkpoint is Nano solo at $0.003', () => {
-    const cp = TIER_CONFIGS.checkpoint;
-    expect(cp.price_usd).toBe(0.003);
+  it('checkpoint is Nano solo at $0.005', () => {
+    const cp = getTierConfig('checkpoint');
+    expect(cp.price_usd).toBe(0.005);
     expect(cp.cascade).toEqual(['serv-nano']);
     expect(cp.false_allows).toBe(0);
   });
 
-  it('standard is Nano→Pro at $0.005 and is default', () => {
-    const std = TIER_CONFIGS.standard;
-    expect(std.price_usd).toBe(0.005);
+  it('standard is Nano→Pro at $0.008 and is default', () => {
+    const std = getTierConfig('standard');
+    expect(std.price_usd).toBe(0.008);
     expect(std.cascade).toEqual(['serv-nano', 'serv-pro']);
     expect(std.default).toBe(true);
     expect(std.false_allows).toBe(0);
