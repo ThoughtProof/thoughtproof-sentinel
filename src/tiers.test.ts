@@ -3,7 +3,7 @@ import { listTiers, getTierConfig, TIER_CONFIGS } from './tiers.js';
 
 describe('Sentinel tiers', () => {
   it('has exactly 2 tiers', () => {
-    expect(listTiers()).toHaveLength(2);
+    expect(listTiers()).toHaveLength(3);
   });
 
   it('checkpoint is Nano solo at $0.005', () => {

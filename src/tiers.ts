@@ -35,6 +35,17 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     default: true,
     notes: 'Nano→Pro cascade. Default Sentinel tier. 0 False ALLOWs.',
   },
+  swift: {
+    tier: 'swift',
+    label: 'Swift',
+    price_usd: 0.008,
+    cascade: ['serv-nano', 'serv-swift'],
+    accuracy: 0.813,
+    false_allows: 0,
+    latency_median: '1.2s',
+    default: false,
+    notes: 'Nano→Swift cascade. Cost-optimized alternative to Standard. Under evaluation.',
+  },
 };
 
 export function getTierConfig(tier?: SentinelTier): TierConfig {

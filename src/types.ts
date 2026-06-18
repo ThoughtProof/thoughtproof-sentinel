@@ -1,4 +1,4 @@
-export type SentinelTier = 'checkpoint' | 'standard';
+export type SentinelTier = 'checkpoint' | 'standard' | 'swift';
 
 export type SentinelMode = 'handoff' | 'plan_revision' | 'memory_write' | 'output_synthesis' | 'trade_execution' | 'trade_reasoning';
 
