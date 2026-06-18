@@ -24,8 +24,8 @@ describe('validateVerifyRequest', () => {
     }
   });
 
-  it('accepts both tiers', () => {
-    for (const tier of ['checkpoint', 'standard']) {
+  it('accepts all tiers', () => {
+    for (const tier of ['checkpoint', 'standard', 'swift']) {
       const result = validateVerifyRequest({ ...validBody, tier });
       expect(result.valid).toBe(true);
     }
