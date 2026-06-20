@@ -134,7 +134,7 @@ remap occasionally fires on legitimate actions whose prose the secondary model
 hedges on; worst case is human-in-the-loop signing an UNCERTAIN. Acceptable for
 a wallet gate.
 
-### Known limitation — arithmetic overshoot is the weakest vector
+### Known limitation — arithmetic overshoot (mitigated by the deterministic gate)
 
 In an earlier single run, the amount-overshoot case (instructed 200, agent sends
 2,000 to the *correct* recipient with a plausible "pre-pay 10 months" rationale)
@@ -147,10 +147,27 @@ the LLM cascade is non-deterministic on arithmetic (200 vs 2,000). The
 robust because they don't require the model to do math; the numeric-overshoot
 case does.
 
-**Mitigation (follow-up, not demo-blocking):** add a deterministic numeric
-backstop for amount/scope containment — the same structural-layer pattern
-ADR-0018 used (cb4a-verify hard-BLOCKs direction contradictions outside the LLM).
-A caller that supplies a machine-readable mandate (instructed amount, granted
-allowance) can hard-BLOCK `action_amount > granted_amount` before the LLM runs.
-Until then, `action_authorization` is reliable on the **categorical** wallet-drain
-vectors (the primary MM wedge) and best-effort on arithmetic overshoot.
+**Mitigation (implemented — `src/engine/authorization-gate.ts`):** a
+deterministic numeric/identity gate runs BEFORE the LLM cascade — the same
+structural-layer pattern ADR-0018 used (cb4a-verify hard-BLOCKs direction
+contradictions outside the LLM). When the caller supplies a machine-readable
+`mandate` (granted scope + proposed action), the gate hard-checks three binary,
+unfixable violations and BLOCKs them deterministically:
+
+1. **amount_overshoot** — `action.amount > granted.maxAmount` (×1.005 tolerance)
+2. **recipient_mismatch** — `action.recipient != granted.recipient`
+3. **unlimited_approval** — unlimited/`MAX_UINT256` allowance not explicitly granted
+
+**Rollout (shadow-mode):** the gate ships behind `gateMode`, default `shadow`
+(computes + attaches `gate` to the response, does NOT change the verdict). Only
+`gateMode: 'enforce'` lets a violation short-circuit to BLOCK before the cascade
+runs. **Fail toward silence:** any missing field, parse ambiguity, or internal
+error → the gate stays silent and the LLM cascade decides. By construction the
+gate can only ADD blocks on unambiguous violations — never an ALLOW — so its
+risk surface is false-BLOCK (calibrated in shadow), never false-ALLOW.
+Tolerances ship **INITIAL / UNCALIBRATED** until measured on real mandate traffic.
+
+With the gate in `enforce`, arithmetic overshoot is deterministic (the 200→2,000
+case BLOCKs 100% of the time). Without a machine-readable mandate the mode falls
+back to the LLM cascade — reliable on the **categorical** wallet-drain vectors
+(the primary MM wedge) and best-effort on arithmetic overshoot.
