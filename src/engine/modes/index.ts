@@ -12,6 +12,7 @@ import { memoryWrite } from './memory_write.js';
 import { outputSynthesis } from './output_synthesis.js';
 import { tradeExecution } from './trade_execution.js';
 import { tradeReasoning } from './trade_reasoning.js';
+import { actionAuthorization } from './action_authorization.js';
 
 export type { ModeHandler, ModeInput, ModeOutput } from './types.js';
 
@@ -22,6 +23,7 @@ const MODE_HANDLERS: Record<SentinelMode, ModeHandler> = {
   output_synthesis: outputSynthesis,
   trade_execution: tradeExecution,
   trade_reasoning: tradeReasoning,
+  action_authorization: actionAuthorization,
 };
 
 export function getModeHandler(mode: SentinelMode): ModeHandler {

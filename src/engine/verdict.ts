@@ -17,7 +17,7 @@ import type { SentinelVerdict, SentinelMode } from '../types.js';
  * For example, trade_execution maps CONDITIONAL_ALLOW → UNCERTAIN because
  * "if in doubt, don't trade" is the correct default for capital-at-risk.
  */
-const CONSERVATIVE_MODES: Set<SentinelMode> = new Set<SentinelMode>(['trade_execution', 'trade_reasoning']);
+const CONSERVATIVE_MODES: Set<SentinelMode> = new Set<SentinelMode>(['trade_execution', 'trade_reasoning', 'action_authorization']);
 
 /**
  * trade_reasoning step_2-only promotion (ADR-0018).
