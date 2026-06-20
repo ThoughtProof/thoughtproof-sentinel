@@ -19,7 +19,7 @@ import type {
 
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
-import { mapVerdict, canPromoteStep2Only } from './verdict.js';
+import { mapVerdict, canPromoteStep2Only, canPromoteAllStepsPass } from './verdict.js';
 import { randomUUID } from 'crypto';
 
 /**
@@ -63,6 +63,22 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     req.mode === 'trade_reasoning' &&
     verdict === 'UNCERTAIN' &&
     canPromoteStep2Only(
+      steps3b.map((s) => ({ step_id: s.step_id, score: s.score, predicate: String(s.predicate) })),
+    )
+  ) {
+    verdict = 'ALLOW';
+  }
+
+  // 3c. action_authorization all-steps-pass promotion (ADR-0019). Every gold
+  //     step is a hard authority check; a drain/over-scope case always fails at
+  //     least one. So if the conservative remap produced UNCERTAIN but ALL steps
+  //     clear the SUPPORTED bar, the action is fully authorized — the UNCERTAIN
+  //     is cascade prose-caution (CONDITIONAL_ALLOW), not a real concern. Safe
+  //     by construction: a drain case can never have all steps pass.
+  if (
+    req.mode === 'action_authorization' &&
+    verdict === 'UNCERTAIN' &&
+    canPromoteAllStepsPass(
       steps3b.map((s) => ({ step_id: s.step_id, score: s.score, predicate: String(s.predicate) })),
     )
   ) {

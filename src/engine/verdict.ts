@@ -66,6 +66,24 @@ export function canPromoteStep2Only(steps: StepLite[]): boolean {
 }
 
 /**
+ * action_authorization all-steps-pass promotion (ADR-0019).
+ *
+ * Every gold step in action_authorization is a HARD authority check (scope,
+ * recipient, mandate-alignment, least-privilege). A drain/over-scope case always
+ * fails at least one of them. So when ALL steps clear the SUPPORTED bar, the
+ * action is fully authorized — and a CONDITIONAL_ALLOW → UNCERTAIN remap (the
+ * conservative tax) is mere cascade prose-caution, not a real authority concern.
+ *
+ * This returns true iff EVERY step passes. By construction it can never promote
+ * a drain case (which fails ≥1 step), so the 0-false-ALLOW property is preserved.
+ * Stricter than canPromoteStep2Only: no single step is allowed to be weak.
+ */
+export function canPromoteAllStepsPass(steps: StepLite[]): boolean {
+  if (steps.length === 0) return false;
+  return steps.every(stepPasses);
+}
+
+/**
  * Map pot-cli's internal verdict to Sentinel's public verdict.
  *
  * pot-cli emits: ALLOW | CONDITIONAL_ALLOW | HOLD | BLOCK | DISSENT
