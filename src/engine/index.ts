@@ -19,7 +19,8 @@ import type {
 
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
-import { mapVerdict, canPromoteStep2Only } from './verdict.js';
+import { mapVerdict, canPromoteStep2Only, canPromoteAllStepsPass } from './verdict.js';
+import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import { randomUUID } from 'crypto';
 
 /**
@@ -32,6 +33,60 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const startMs = Date.now();
   const id = req.id ?? `sent_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const tier: SentinelTier = req.tier ?? 'standard';
+
+  // 0. Deterministic authorization gate (ADR-0019 follow-up). Only runs for
+  //    action_authorization with a machine-readable mandate. It hard-checks the
+  //    BINARY, UNFIXABLE authority violations the LLM cascade is unreliable on
+  //    (arithmetic overshoot, recipient identity, unlimited approval) — the
+  //    same neuro-symbolic split cb4a-verify uses. Default gateMode 'shadow':
+  //    compute + attach, do NOT gate. 'enforce': a violation short-circuits to
+  //    BLOCK before spending the LLM cascade. By construction the gate can only
+  //    ADD blocks on unambiguous violations, never allow — so it cannot create
+  //    a false ALLOW.
+  const gateMode: GateMode = req.gateMode ?? 'shadow';
+  const gateResult =
+    req.mode === 'action_authorization'
+      ? runAuthorizationGate(req.mandate, gateMode)
+      : null;
+
+  const gateField = gateResult && !gateResult.silent
+    ? {
+        mode: gateResult.mode,
+        wouldBlock: gateResult.wouldBlock,
+        enforced: gateResult.enforcedVerdict !== null,
+        violations: gateResult.violations,
+      }
+    : undefined;
+
+  // 0b. Enforce-mode short-circuit: a hard violation BLOCKs without spending the
+  //     cascade (cb4a structural pre-check pattern). Shadow mode never gates here.
+  if (gateResult && gateResult.enforcedVerdict === 'BLOCK') {
+    const reason =
+      'Deterministic authorization gate: ' +
+      gateResult.violations.map((v) => v.detail).join(' ');
+    return {
+      id,
+      verdict: 'BLOCK',
+      confidence: 1,
+      reasoning: reason,
+      objections: gateResult.violations.map((v, i) => ({
+        step_id: `gate_${v.kind}`,
+        criterion: `Deterministic authorization gate: ${v.kind}`,
+        score: 0,
+        predicate: 'unauthorized',
+        quote: null,
+        reasoning: v.detail,
+      })),
+      mode: req.mode,
+      tier,
+      gate: gateField,
+      meta: {
+        duration_ms: Date.now() - startMs,
+        models_used: [],
+        verified_at: new Date().toISOString(),
+      },
+    };
+  }
 
   // 1. Get mode handler and shape claim/evidence into EvalInput
   const modeHandler = getModeHandler(req.mode);
@@ -63,6 +118,22 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     req.mode === 'trade_reasoning' &&
     verdict === 'UNCERTAIN' &&
     canPromoteStep2Only(
+      steps3b.map((s) => ({ step_id: s.step_id, score: s.score, predicate: String(s.predicate) })),
+    )
+  ) {
+    verdict = 'ALLOW';
+  }
+
+  // 3c. action_authorization all-steps-pass promotion (ADR-0019). Every gold
+  //     step is a hard authority check; a drain/over-scope case always fails at
+  //     least one. So if the conservative remap produced UNCERTAIN but ALL steps
+  //     clear the SUPPORTED bar, the action is fully authorized — the UNCERTAIN
+  //     is cascade prose-caution (CONDITIONAL_ALLOW), not a real concern. Safe
+  //     by construction: a drain case can never have all steps pass.
+  if (
+    req.mode === 'action_authorization' &&
+    verdict === 'UNCERTAIN' &&
+    canPromoteAllStepsPass(
       steps3b.map((s) => ({ step_id: s.step_id, score: s.score, predicate: String(s.predicate) })),
     )
   ) {
@@ -110,6 +181,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     objections,
     mode: req.mode,
     tier,
+    gate: gateField,
     meta: {
       duration_ms: durationMs,
       models_used: cascadeOutput.modelsUsed,

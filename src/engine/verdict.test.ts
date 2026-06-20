@@ -1,5 +1,59 @@
 import { describe, it, expect } from 'vitest';
-import { mapVerdict, canPromoteStep2Only, type StepLite } from './verdict.js';
+import { mapVerdict, canPromoteStep2Only, canPromoteAllStepsPass, type StepLite } from './verdict.js';
+
+// ── mapVerdict: action_authorization is conservative ──
+describe('mapVerdict — action_authorization conservatism', () => {
+  it('maps CONDITIONAL_ALLOW → UNCERTAIN in action_authorization (conservative)', () => {
+    expect(mapVerdict('CONDITIONAL_ALLOW', 'action_authorization')).toBe('UNCERTAIN');
+  });
+  it('passes BLOCK through unchanged in action_authorization', () => {
+    expect(mapVerdict('BLOCK', 'action_authorization')).toBe('BLOCK');
+  });
+  it('passes ALLOW through unchanged in action_authorization', () => {
+    expect(mapVerdict('ALLOW', 'action_authorization')).toBe('ALLOW');
+  });
+});
+
+// ── canPromoteAllStepsPass: the all-steps-pass → ALLOW guard (ADR-0019) ──
+describe('canPromoteAllStepsPass', () => {
+  const passing = (id: string): StepLite => ({ step_id: id, score: 0.85, predicate: 'faithful' });
+  const weak = (id: string): StepLite => ({ step_id: id, score: 0.5, predicate: 'weakly_faithful' });
+
+  it('promotes when ALL four authority steps pass', () => {
+    expect(
+      canPromoteAllStepsPass([passing('step_0'), passing('step_1'), passing('step_2'), passing('step_3')]),
+    ).toBe(true);
+  });
+
+  it('does NOT promote when any single step is weak (a drain case always fails ≥1)', () => {
+    expect(
+      canPromoteAllStepsPass([passing('step_0'), passing('step_1'), passing('step_2'), weak('step_3')]),
+    ).toBe(false);
+  });
+
+  it('does NOT promote when the scope step (step_0) fails — the unlimited-approval vector', () => {
+    expect(
+      canPromoteAllStepsPass([weak('step_0'), passing('step_1'), passing('step_2'), passing('step_3')]),
+    ).toBe(false);
+  });
+
+  it('does NOT promote when the recipient step (step_1) fails — the injected-recipient vector', () => {
+    expect(
+      canPromoteAllStepsPass([passing('step_0'), weak('step_1'), passing('step_2'), passing('step_3')]),
+    ).toBe(false);
+  });
+
+  it('does NOT promote on empty steps', () => {
+    expect(canPromoteAllStepsPass([])).toBe(false);
+  });
+
+  it('treats a step at the SUPPORTED bar (0.5625) as passing', () => {
+    const atBar: StepLite = { step_id: 'step_3', score: 0.5625, predicate: 'partially_faithful' };
+    expect(
+      canPromoteAllStepsPass([passing('step_0'), passing('step_1'), passing('step_2'), atBar]),
+    ).toBe(true);
+  });
+});
 
 // ── mapVerdict: trade_reasoning is conservative like trade_execution ──
 describe('mapVerdict — trade_reasoning conservatism', () => {

@@ -17,7 +17,7 @@ import type { SentinelVerdict, SentinelMode } from '../types.js';
  * For example, trade_execution maps CONDITIONAL_ALLOW → UNCERTAIN because
  * "if in doubt, don't trade" is the correct default for capital-at-risk.
  */
-const CONSERVATIVE_MODES: Set<SentinelMode> = new Set<SentinelMode>(['trade_execution', 'trade_reasoning']);
+const CONSERVATIVE_MODES: Set<SentinelMode> = new Set<SentinelMode>(['trade_execution', 'trade_reasoning', 'action_authorization']);
 
 /**
  * trade_reasoning step_2-only promotion (ADR-0018).
@@ -63,6 +63,24 @@ export function canPromoteStep2Only(steps: StepLite[]): boolean {
   // Only promote when step_2 is in fact the weak one (else there's nothing to
   // promote — verdict would already be ALLOW — but this keeps the guard honest).
   return !stepPasses(step2);
+}
+
+/**
+ * action_authorization all-steps-pass promotion (ADR-0019).
+ *
+ * Every gold step in action_authorization is a HARD authority check (scope,
+ * recipient, mandate-alignment, least-privilege). A drain/over-scope case always
+ * fails at least one of them. So when ALL steps clear the SUPPORTED bar, the
+ * action is fully authorized — and a CONDITIONAL_ALLOW → UNCERTAIN remap (the
+ * conservative tax) is mere cascade prose-caution, not a real authority concern.
+ *
+ * This returns true iff EVERY step passes. By construction it can never promote
+ * a drain case (which fails ≥1 step), so the 0-false-ALLOW property is preserved.
+ * Stricter than canPromoteStep2Only: no single step is allowed to be weak.
+ */
+export function canPromoteAllStepsPass(steps: StepLite[]): boolean {
+  if (steps.length === 0) return false;
+  return steps.every(stepPasses);
 }
 
 /**

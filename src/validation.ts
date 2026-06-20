@@ -1,4 +1,5 @@
 import type { SentinelVerifyRequest, SentinelMode, SentinelTier } from './types.js';
+import type { AuthorizationMandate, GateMode } from './engine/authorization-gate.js';
 import { TIER_CONFIGS } from './tiers.js';
 
 export interface ValidationError {
@@ -6,8 +7,9 @@ export interface ValidationError {
   message: string;
 }
 
-const VALID_MODES: SentinelMode[] = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning'];
+const VALID_MODES: SentinelMode[] = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning', 'action_authorization'];
 const VALID_TIERS: SentinelTier[] = ['checkpoint', 'standard', 'swift'];
+const VALID_GATE_MODES: GateMode[] = ['shadow', 'enforce'];
 
 export function validateVerifyRequest(body: unknown): { valid: true; data: SentinelVerifyRequest } | { valid: false; errors: ValidationError[] } {
   const errors: ValidationError[] = [];
@@ -33,6 +35,12 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
   if (b.id !== undefined && typeof b.id !== 'string') {
     errors.push({ field: 'id', message: 'Must be a string' });
   }
+  if (b.gateMode !== undefined && !VALID_GATE_MODES.includes(b.gateMode as GateMode)) {
+    errors.push({ field: 'gateMode', message: `Must be one of: ${VALID_GATE_MODES.join(', ')}` });
+  }
+  if (b.mandate !== undefined && (typeof b.mandate !== 'object' || b.mandate === null || Array.isArray(b.mandate))) {
+    errors.push({ field: 'mandate', message: 'Must be an object with optional { granted, action }' });
+  }
 
   // Size limits
   if (typeof b.claim === 'string' && b.claim.length > 100_000) {
@@ -54,6 +62,8 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       evidence: (b.evidence as string).trim(),
       mode: b.mode as SentinelMode,
       tier: (b.tier as SentinelTier | undefined) ?? 'standard',
+      mandate: b.mandate as AuthorizationMandate | undefined,
+      gateMode: b.gateMode as GateMode | undefined,
     },
   };
 }

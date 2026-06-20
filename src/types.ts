@@ -1,6 +1,8 @@
+import type { AuthorizationMandate, GateMode, GateViolation } from './engine/authorization-gate.js';
+
 export type SentinelTier = 'checkpoint' | 'standard' | 'swift';
 
-export type SentinelMode = 'handoff' | 'plan_revision' | 'memory_write' | 'output_synthesis' | 'trade_execution' | 'trade_reasoning';
+export type SentinelMode = 'handoff' | 'plan_revision' | 'memory_write' | 'output_synthesis' | 'trade_execution' | 'trade_reasoning' | 'action_authorization';
 
 export interface SentinelVerifyRequest {
   /** Unique identifier (optional, auto-generated) */
@@ -13,6 +15,20 @@ export interface SentinelVerifyRequest {
   mode: SentinelMode;
   /** Tier selection (default: standard) */
   tier?: SentinelTier;
+  /**
+   * Optional machine-readable mandate for the deterministic authorization gate
+   * (ADR-0019, action_authorization mode only). When supplied, the gate
+   * hard-checks binary/unfixable authority violations (amount overshoot,
+   * recipient mismatch, unlimited approval) BEFORE the LLM. Ignored by all
+   * other modes. See engine/authorization-gate.ts.
+   */
+  mandate?: AuthorizationMandate;
+  /**
+   * Deterministic-gate rollout stage (action_authorization only). Default
+   * 'shadow': the gate computes and logs but does NOT change the verdict.
+   * 'enforce': a gate violation hard-BLOCKs. See shadow-mode-rollout.
+   */
+  gateMode?: GateMode;
 }
 
 export type SentinelVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
@@ -60,6 +76,18 @@ export interface SentinelVerifyResponse {
   objections: SentinelStepObjection[];
   mode: SentinelMode;
   tier: SentinelTier;
+  /**
+   * Deterministic authorization-gate result (ADR-0019, action_authorization
+   * only). Present when a machine-readable mandate was supplied. In 'shadow'
+   * mode this is informational (wouldBlock + violations logged, verdict
+   * unchanged); in 'enforce' a violation forces verdict=BLOCK.
+   */
+  gate?: {
+    mode: GateMode;
+    wouldBlock: boolean;
+    enforced: boolean;
+    violations: GateViolation[];
+  };
   meta: {
     duration_ms: number;
     models_used: string[];
