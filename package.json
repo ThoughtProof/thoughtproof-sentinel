@@ -19,6 +19,6 @@
   "dependencies": {
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
-    "pot-cli": "^0.8.5"
+    "pot-cli": "^0.8.6"
   }
 }
