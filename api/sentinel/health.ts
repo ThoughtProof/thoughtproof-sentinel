@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const VERSION = '0.1.0';
-const MODES = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis'] as const;
+const MODES = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning', 'action_authorization'] as const;
 const TIERS = ['checkpoint', 'standard'] as const;
 
 export default function handler(_req: VercelRequest, res: VercelResponse) {
