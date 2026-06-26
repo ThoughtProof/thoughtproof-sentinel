@@ -12,9 +12,12 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const tiers = listTiers();
+    // Derive default_tier from the single source of truth (TIER_CONFIGS.default)
+    // so the advertised default can never drift from the actual routing default.
+    const defaultTier = tiers.find((t) => t.default)?.tier ?? 'swift';
     res.status(200).json({
       tiers,
-      default_tier: 'standard',
+      default_tier: defaultTier,
       count: tiers.length,
     });
   } catch (error) {
