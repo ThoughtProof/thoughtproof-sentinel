@@ -32,8 +32,8 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     accuracy: 0.813,
     false_allows: 0,
     latency_median: '1.3s',
-    default: true,
-    notes: 'Nano→Pro cascade. Default Sentinel tier. 0 False ALLOWs.',
+    default: false,
+    notes: 'Nano→Pro cascade. 0 False ALLOWs. Higher-cost alternative to Swift.',
   },
   swift: {
     tier: 'swift',
@@ -43,13 +43,13 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     accuracy: 0.813,
     false_allows: 0,
     latency_median: '1.2s',
-    default: false,
-    notes: 'Nano→Swift cascade. Cost-optimized alternative to Standard. Under evaluation.',
+    default: true,
+    notes: 'Nano→Swift cascade. Default Sentinel tier. 0 False ALLOWs, same calibration as Standard (2.6 obj/block) at lower COGS.',
   },
 };
 
 export function getTierConfig(tier?: SentinelTier): TierConfig {
-  return TIER_CONFIGS[tier ?? 'standard'];
+  return TIER_CONFIGS[tier ?? 'swift'];
 }
 
 export function listTiers(): TierConfig[] {
