@@ -8,7 +8,9 @@ export interface ValidationError {
 }
 
 const VALID_MODES: SentinelMode[] = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning', 'action_authorization'];
-const VALID_TIERS: SentinelTier[] = ['checkpoint', 'standard', 'swift'];
+// Derived from TIER_CONFIGS (includes hidden tiers swift/pro) so /verify accepts
+// any routable tier while /tiers only advertises the public ones.
+const VALID_TIERS = Object.keys(TIER_CONFIGS) as SentinelTier[];
 const VALID_GATE_MODES: GateMode[] = ['shadow', 'enforce'];
 
 export function validateVerifyRequest(body: unknown): { valid: true; data: SentinelVerifyRequest } | { valid: false; errors: ValidationError[] } {
