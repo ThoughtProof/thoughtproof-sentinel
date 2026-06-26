@@ -230,12 +230,19 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
     }
 
     // ── Base/Circle x402 flow (default) ─────────────────────────────────
+    // Echo back the network token the client actually used ("base" or
+    // "eip155:8453") so the facilitator's network match succeeds either way.
+    // Default to CAIP-2 form when the payload omits it.
+    const clientNetwork =
+      payloadNetwork === 'base' ? 'base' : 'eip155:8453';
     const paymentRequirements = {
       scheme: 'exact',
-      network: 'eip155:8453', // Base mainnet
+      network: clientNetwork,
       amount: amountMicro,
+      maxAmountRequired: amountMicro,
       asset: USDC_BASE,
       payTo: PAYMENT_WALLET,
+      resource: 'https://sentinel.thoughtproof.ai/sentinel/verify',
       maxTimeoutSeconds: 300,
       extra: { name: 'USD Coin', version: '2' },
     };
@@ -326,13 +333,30 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
         mimeType: 'application/json',
       },
       accepts: [
-        // Option 1: USDC on Base mainnet (Circle facilitator)
+        // Option 1: USDC on Base mainnet — CAIP-2 form (current x402 spec, docs.x402.org)
         {
           scheme: 'exact',
           network: 'eip155:8453',
           amount: amountMicro,
+          maxAmountRequired: amountMicro,
           asset: USDC_BASE,
           payTo: PAYMENT_WALLET,
+          resource: 'https://sentinel.thoughtproof.ai/sentinel/verify',
+          maxTimeoutSeconds: 300,
+          extra: { name: 'USD Coin', version: '2' },
+        },
+        // Option 1b: USDC on Base mainnet — legacy string token form.
+        // Many production x402 clients (x402scan, AgentCash, Coinbase's original
+        // facilitator) match literally on network === "base" and cannot construct
+        // a payment payload from the CAIP-2 URN. Advertise both so neither breaks.
+        {
+          scheme: 'exact',
+          network: 'base',
+          amount: amountMicro,
+          maxAmountRequired: amountMicro,
+          asset: USDC_BASE,
+          payTo: PAYMENT_WALLET,
+          resource: 'https://sentinel.thoughtproof.ai/sentinel/verify',
           maxTimeoutSeconds: 300,
           extra: { name: 'USD Coin', version: '2' },
         },
@@ -343,8 +367,10 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
                 scheme: 'exact',
                 network: GOAT_NETWORK,
                 amount: amountMicro,
+                maxAmountRequired: amountMicro,
                 asset: getGoatConfig().usdcAddress,
                 payTo: getGoatConfig().paymentWallet,
+                resource: 'https://sentinel.thoughtproof.ai/sentinel/verify',
                 maxTimeoutSeconds: 300,
                 extra: { name: 'USD Coin', gateway: 'goat-x402' },
               },

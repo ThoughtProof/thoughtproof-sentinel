@@ -92,16 +92,26 @@ describe('x402Gate', () => {
       expect(res._json).toHaveProperty('payment');
     });
 
-    it('includes x402 v2 payment-required header in 402 response', async () => {
+    it('includes x402 v2 payment-required header advertising both base network tokens', async () => {
       const res = mockRes();
       await x402Gate(mockReq(), res);
       expect(res._headers['payment-required']).toBeDefined();
       const challenge = JSON.parse(Buffer.from(res._headers['payment-required'], 'base64').toString());
       expect(challenge.x402Version).toBe(2);
-      expect(challenge.accepts).toHaveLength(1);
-      expect(challenge.accepts[0].scheme).toBe('exact');
-      expect(challenge.accepts[0].network).toBe('eip155:8453');
-      expect(challenge.accepts[0].asset).toBe('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+      // Dual-format: both CAIP-2 ("eip155:8453") and legacy string ("base") are advertised
+      // so spec-compliant clients AND legacy clients (x402scan, AgentCash) can both pay.
+      expect(challenge.accepts).toHaveLength(2);
+      const networks = challenge.accepts.map((a: { network: string }) => a.network);
+      expect(networks).toContain('eip155:8453');
+      expect(networks).toContain('base');
+      for (const a of challenge.accepts) {
+        expect(a.scheme).toBe('exact');
+        expect(a.asset).toBe('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+        // every accepts entry must be a fully-formed paymentRequirements object
+        expect(a.maxAmountRequired).toBeDefined();
+        expect(a.resource).toBe('https://sentinel.thoughtproof.ai/sentinel/verify');
+        expect(a.payTo).toBeDefined();
+      }
     });
 
     it('includes payment intent instructions', async () => {
