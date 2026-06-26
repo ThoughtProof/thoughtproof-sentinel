@@ -1,6 +1,6 @@
 import type { AuthorizationMandate, GateMode, GateViolation } from './engine/authorization-gate.js';
 
-export type SentinelTier = 'checkpoint' | 'standard' | 'swift';
+export type SentinelTier = 'checkpoint' | 'standard' | 'swift' | 'pro';
 
 export type SentinelMode = 'handoff' | 'plan_revision' | 'memory_write' | 'output_synthesis' | 'trade_execution' | 'trade_reasoning' | 'action_authorization';
 

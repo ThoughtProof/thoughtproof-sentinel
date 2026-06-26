@@ -121,8 +121,8 @@ describe('Sentinel Engine', () => {
 
       expect(res.verdict).toBe('ALLOW');
       expect(res.mode).toBe('plan_revision');
-     expect(res.tier).toBe('standard'); // default
-      expect(res.meta.models_used).toEqual(['serv-nano', 'serv-pro']);
+      expect(res.tier).toBe('standard'); // default
+      expect(res.meta.models_used).toEqual(['serv-nano', 'serv-swift']); // standard now runs the swift cascade
      expect(mockRunCascade).toHaveBeenCalledOnce();
     });
 
