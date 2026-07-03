@@ -31,7 +31,12 @@ const EAS_ABI = [
 ];
 
 // keccak256("Attested(address,address,bytes32,bytes32)")
-const ATTESTED_EVENT_TOPIC = '0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75c5b2b76c2';
+// Verified on-chain: this is the topic0 the EAS contract actually emits on Base
+// (cast keccak "Attested(address,address,bytes32,bytes32)"). The previous value
+// (…c5b2b76c2) was wrong, so the Attested event was never matched and issueAttestation
+// threw "Attested event not found" AFTER the attestation had already been mined —
+// burning gas and returning no UID on every successful attestation.
+export const ATTESTED_EVENT_TOPIC = '0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75685141b35';
 
 const SCHEMA_TYPES = [
   'string',   // verificationId
