@@ -6,8 +6,26 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildAttestationData, encodeAttestationData, hashToBytes32 } from './attest.js';
+import { id as keccakId } from 'ethers';
+import { buildAttestationData, encodeAttestationData, hashToBytes32, ATTESTED_EVENT_TOPIC } from './attest.js';
 import type { SentinelVerifyRequest, SentinelVerifyResponse } from '../types.js';
+
+describe('ATTESTED_EVENT_TOPIC', () => {
+  // Regression guard: a wrong topic0 (previously …c5b2b76c2) made issueAttestation throw
+  // "Attested event not found" on every SUCCESSFUL attestation — gas burned, no UID returned.
+  // The topic0 MUST equal keccak256 of the exact EAS event signature.
+  it('equals keccak256 of the canonical EAS Attested event signature', () => {
+    const canonical = keccakId('Attested(address,address,bytes32,bytes32)');
+    expect(ATTESTED_EVENT_TOPIC).toBe(canonical);
+  });
+
+  it('is the value observed on-chain from the Base EAS contract', () => {
+    // pinned from a real Base mainnet attestation receipt
+    expect(ATTESTED_EVENT_TOPIC).toBe(
+      '0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75685141b35',
+    );
+  });
+});
 
 describe('hashToBytes32', () => {
   it('returns a 66-char hex string (0x + 64)', () => {
