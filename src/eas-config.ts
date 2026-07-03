@@ -22,7 +22,14 @@ export const SENTINEL_EAS_CONFIG = {
     },
   },
   issuer: {
-    /** Same production wallet as PLV — shared ThoughtProof attester identity. */
-    productionWallet: '0x9C7C6F932A87Ee6Ac1B7183DEB58E00443CE999a',
+    /**
+     * Dedicated Sentinel attester wallet — intentionally SEPARATE from the PLV
+     * issuer (0x9C7C…) so an anchoring-key compromise cannot touch PLV's issuer
+     * identity, and the two can be rotated independently. Doc-only field: the
+     * actual signer is derived from ATTESTER_PRIVATE_KEY at runtime.
+     * NOTE: this key has passed through a chat session — rotate to a freshly
+     * generated wallet before Sentinel attestations carry real reliance value.
+     */
+    productionWallet: '0x4216034851c14B77aebB63E84dEAA4A7E3E2710d',
   },
 } as const;
