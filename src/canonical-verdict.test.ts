@@ -115,4 +115,52 @@ describe('CanonicalSentinelVerdict', () => {
     expect(parsed.artifactSchema).toBe('sentinel.verdict.canonical.v1');
     expect(parsed.verdict).toBe('ALLOW');
   });
+
+  // ⭐ EXTERNAL-ANCHOR REGRESSION: reproduce the committed public fixture
+  // byte-exact + its known anchored hash. This is the test that actually
+  // protects the separable-attribution property: the fixture in the PUBLIC
+  // composed-evaluators/verdict-envelope repo (canonical.json) was recomputed
+  // by invinoveritas as sha256 419c360d…; if our builder ever drifts from it,
+  // the partner's independent recompute stops matching and the composition
+  // breaks. The self-consistency tests above ('same input → same hash') do NOT
+  // catch drift away from the committed bytes — only this one does.
+  const FIXTURE_JCS =
+    '{"apiVersion":"sentinel-api-0.1.0","artifactSchema":"sentinel.verdict.canonical.v1","confidence":84,"evaluatedAt":1782916498,"mode":"trade_execution","models":{"primary":"serv-nano","secondary":"serv-swift"},"objections":["step_0: Direction claim verified against market data."],"reasoning":"All steps adequately supported by the evidence.","tier":"standard","verdict":"ALLOW","verificationId":"sent_9f3c2a7b1e004d68"}';
+  const FIXTURE_HASH_0x =
+    '0x419c360db82ee72be3411acd2d30f560b3f62842c2162fa3cb4a08c1fa4ce65a';
+
+  // A response engineered to project exactly onto the committed fixture body.
+  const fixtureResponse: SentinelVerifyResponse = makeResponse({
+    id: 'sent_9f3c2a7b1e004d68',
+    confidence: 0.84,
+    objections: [
+      {
+        step_id: 'step_0',
+        criterion: 'Direction check',
+        score: 0.9,
+        predicate: 'supported',
+        quote: null,
+        reasoning: 'Direction claim verified against market data.',
+      },
+    ],
+    meta: {
+      duration_ms: 1200,
+      models_used: ['serv-nano', 'serv-swift'],
+      verified_at: '2026-07-01T14:34:58.000Z', // floor(/1000) → 1782916498
+    },
+  });
+
+  it('reproduces the committed verdict-envelope fixture bytes exactly', () => {
+    const jcs = serializeCanonicalSentinelVerdict(
+      buildCanonicalSentinelVerdict(fixtureResponse),
+    );
+    expect(jcs).toBe(FIXTURE_JCS);
+  });
+
+  it('reproduces the known anchored hash 0x419c360d… (independent recompute target)', () => {
+    const hash = hashCanonicalSentinelVerdict(
+      buildCanonicalSentinelVerdict(fixtureResponse),
+    );
+    expect(hash).toBe(FIXTURE_HASH_0x);
+  });
 });
