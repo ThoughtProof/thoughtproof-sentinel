@@ -49,7 +49,7 @@ const fixtureResponse: SentinelVerifyResponse = {
 } as SentinelVerifyResponse;
 
 describe("buildCanonicalSentinelVerdict — fixture regression", () => {
-  it("reproduces the committed canonical.json body exactly", () => {
+  it("reproduces the committed canonical.json bytes (when the fixture repo is checked out adjacent)", () => {
     const jcs = canonicalizeVerdict(buildCanonicalSentinelVerdict(fixtureResponse));
     // Read the committed fixture and compare byte-for-byte.
     const fixturePath = resolve(__dirname, "../../verdict-envelope/canonical.json");

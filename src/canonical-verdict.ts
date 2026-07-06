@@ -52,6 +52,9 @@ export function buildCanonicalSentinelVerdict(
   apiVersion: string = CANONICAL_API_VERSION,
 ): CanonicalSentinelVerdict {
   // confidence: 0-1 float → 0-100 int, clamped.
+  // ROUNDING RULE (must match any independent recomputation): round-half-up via
+  // Math.round (JS: 0.845*100=84.5→85; .5 always rounds toward +Inf). A partner
+  // recomputing the body_hash MUST use the same rule or .5-boundary values diverge.
   const confidence = Math.max(0, Math.min(100, Math.round(resp.confidence * 100)));
 
   // objections: deterministic "${step_id}: ${reasoning}" mapping, in response order.
