@@ -56,6 +56,33 @@ brechen kann:
   sein, strukturiert weitergereicht — NICHT `evidenceLine`-Prosa, NICHT Agent-behauptet.
   Das ist der eine Punkt, den diese Pipeline schließt.
 
+## Federico-Schärfungen (07.07. — festgenagelt, NICHT über die Zeit weichspülen)
+
+**S1 — ZWEI getrennte Efforts, ZWEI Verifikationslatten (nicht ein "measurement-pipeline"-Item):**
+- **cb4a-Pfad = einen discard STOPPEN.** cb4a erzeugt die strukturierten Werte schon, verflacht
+  sie nur. Arbeit = das Verflachen weglassen + durchreichen. Risiko: NIEDRIG (kein neuer Code,
+  eine Zeile weniger). Verifikationslatte: byte-genaue Äquivalenz (haben wir schon:
+  byte-equivalence.test).
+- **VTA-Pfad = Struktur NEU BAUEN die nie existierte.** VTA hat die Werte nie strukturiert.
+  Arbeit = neuer Rückgabetyp + Extraktions-Verdrahtung. Risiko: HÖHER (neuer Code = neue
+  Bug-Fläche). Verifikationslatte: eigene Tests für die neu erzeugte Struktur, nicht nur
+  Äquivalenz. → Als ZWEI Efforts behandeln, nie als einen.
+
+**S2 — assertion-gap vs timing-gap (die schärfere Korrektur, Linie HALTEN):**
+- Die Pipeline schließt die ASSERTION-Lücke: der Agent kann uns KEINE Zahl mehr geben.
+- Sie schließt NICHT die TIMING-Lücke: der Agent kann weiter Moment + Asset wählen und so
+  formen, WAS der Snapshot enthält. Das ist ein separates Residualrisiko, näher an Timing-
+  Manipulation als an Lügen.
+- EXAKTE FORMULIERUNG, die bleibt (nie zum größeren Claim aufweichen lassen, auch nicht nach
+  ship): **"measured from the data source, not asserted by the agent"** — NICHT "agent-independent".
+
+**S3 — Acceptance-Test bleibt HART (nicht abschwächen):**
+- Eine Revision trägt eine FALSCHE Zahl → die Pipeline IGNORIERT sie → das Gate entscheidet auf
+  dem GEMESSENEN Wert → *beweisbar*, die Agent-Zahl hat das Gate nie erreicht.
+- Ein Test der LAUT fehlschlagen kann = echte Latte, nicht bloß Beschreibung. Genau so behalten.
+- GUARD (Federico): eine Mess-Pipeline gegen einen Deadline gebaut ist genau das, was still
+  Vertrauen an der falschen Stelle wieder einführt. Erst real, dann live — nie umgekehrt.
+
 ## Die Trust-Boundary — der Kern
 
 Aktuelles `checkRevision(predicate, measured: MeasuredValue)` hat die Lücke: der Aufrufer
