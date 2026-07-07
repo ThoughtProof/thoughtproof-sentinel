@@ -17,6 +17,7 @@
     "vitest": "^3.2.0"
   },
   "dependencies": {
+    "@thoughtproof/fact-check-core": "github:ThoughtProof/fact-check-core",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
     "canonicalize": "^3.0.0",
