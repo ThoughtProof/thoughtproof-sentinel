@@ -3,8 +3,12 @@ import {
   predicateFromFlag,
   satisfiesPredicate,
   enforcementLevel,
+  measureRevisedValue,
+  checkRevision,
   type VerifiedFactFlag,
   type ObjectionPredicate,
+  type VerifiedMarketFacts,
+  type MeasuredValue,
 } from './objection-predicate.js';
 
 describe('objection-predicate — numeric-class binding (Federico design)', () => {
@@ -119,5 +123,63 @@ describe('objection-predicate — numeric-class binding (Federico design)', () =
     expect(pred.actualValue).toBe(12);
     expect(pred.field).toBe('move_pct');
     expect(pred.op).toBe('approx');
+  });
+
+  // ── VERIFIED-REVISION MEASUREMENT: the "given a measured value" clause enforced. ──
+  describe('measureRevisedValue draws from the snapshot, not agent text', () => {
+    const facts: VerifiedMarketFacts = {
+      priceChangePct24h: 44.0, change7dPct: 41.0,
+      price: 0.0089, low24h: 0.006, high24h: 0.010,
+    };
+    it('magnitude: measures the nearest verified move, ignores any agent claim', () => {
+      const pred = predicateFromFlag({ kind: 'magnitude', claimedValue: 186, actualValue: 41, evidenceLine: 'x' });
+      const m = measureRevisedValue(pred, facts);
+      expect(m.source).toBe('fact-checker');       // provenance stamped
+      expect(m.field).toBe('move_pct');
+      // nearest of |44|,|41| to predicate.value 41 → 41 (not any agent-claimed number)
+      expect(m.value).toBe(41);
+    });
+    it('direction: measures trend sign from change7dPct', () => {
+      const pred = predicateFromFlag({ kind: 'direction', claimedValue: 1, actualValue: -6.2, evidenceLine: 'x' });
+      const m = measureRevisedValue(pred, { ...facts, change7dPct: -6.2 });
+      expect(m.value).toBe(-1);
+    });
+    it('range_pct: computes position from price/low/high, degenerate range → NaN (fail-closed)', () => {
+      const pred = predicateFromFlag({ kind: 'range_position', claimedValue: 90, actualValue: 55, evidenceLine: 'x' });
+      const m = measureRevisedValue(pred, { ...facts, low24h: 0.01, high24h: 0.01 });
+      expect(Number.isNaN(m.value)).toBe(true);
+    });
+  });
+
+  describe('checkRevision enforces provenance — agent-asserted numbers cannot pass', () => {
+    const pred = predicateFromFlag({ kind: 'magnitude', claimedValue: 186, actualValue: 41, evidenceLine: 'x' });
+
+    it('accepts a fact-checker-measured value and applies the boolean gate', () => {
+      const measured: MeasuredValue = { value: 44, source: 'fact-checker', field: 'move_pct' };
+      const r = checkRevision(pred, measured);
+      expect(r.satisfied).toBe(true); // |44-41| <= 10
+    });
+    it('fails closed when the value did not come from the fact-checker', () => {
+      // Simulate an agent-asserted value that lies about its source.
+      const spoofed = { value: 41, source: 'agent' as any, field: 'move_pct' } as MeasuredValue;
+      const r = checkRevision(pred, spoofed);
+      expect(r.satisfied).toBe(false);
+      expect(r.reason).toMatch(/not fact-checker-measured/);
+    });
+    it('fails closed on field mismatch (predicate vs measured value)', () => {
+      const wrongField: MeasuredValue = { value: 0, source: 'fact-checker', field: 'trend_sign' };
+      const r = checkRevision(pred, wrongField);
+      expect(r.satisfied).toBe(false);
+      expect(r.reason).toMatch(/field mismatch/);
+    });
+    it('end-to-end: measure from snapshot then gate — the whole "given" clause', () => {
+      const facts: VerifiedMarketFacts = {
+        priceChangePct24h: 44, change7dPct: 41, price: 0.0089, low24h: 0.006, high24h: 0.010,
+      };
+      const measured = measureRevisedValue(pred, facts);
+      const r = checkRevision(pred, measured);
+      expect(measured.source).toBe('fact-checker');
+      expect(r.satisfied).toBe(true);
+    });
   });
 });

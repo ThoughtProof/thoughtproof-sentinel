@@ -142,3 +142,88 @@ export function enforcementLevel(kind: string): EnforcementLevel {
     ? "predicate-gated"
     : "fresh-judgment-only";
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// VERIFIED-REVISION MEASUREMENT — enforce the load-bearing "given an
+// independently-measured revision value" condition, instead of documenting it.
+//
+// The steelman's decisive point: satisfiesPredicate() is only sound if
+// `revisedValue` is MEASURED from ground truth, not asserted by the agent. This
+// section makes that structural: the caller cannot hand the gate a raw number;
+// it must hand a MeasuredValue that carries proof of where the number came from.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** The verified market facts the checker measures against — the SAME snapshot
+ *  the agent reasoned over, but read by us, not parsed from the agent's text.
+ *  Mirrors the fields verified-trading-agent/src/structural-check.ts reads. */
+export interface VerifiedMarketFacts {
+  priceChangePct24h: number;
+  change7dPct: number;
+  price: number;
+  low24h: number;
+  high24h: number;
+}
+
+/** A revision value that is PROVABLY measured, not agent-asserted. The `source`
+ *  is a required discriminant — the gate below only accepts this wrapper, so a
+ *  bare number (which could be agent-reported) is a type error at the boundary. */
+export interface MeasuredValue {
+  value: number;
+  /** Must be "fact-checker" — the field exists to make agent-asserted values
+   *  impossible to pass without lying in the type, which is auditable. */
+  source: "fact-checker";
+  field: ObjectionPredicate["field"];
+}
+
+/**
+ * Measure the revised plan's value for a predicate's field DIRECTLY from the
+ * verified market snapshot — never from the agent's revised text. This is the
+ * function that earns the word "measured": it computes the same ground-truth
+ * quantity the hold's actualValue came from, for the revised decision's context.
+ */
+export function measureRevisedValue(
+  predicate: ObjectionPredicate,
+  facts: VerifiedMarketFacts,
+): MeasuredValue {
+  switch (predicate.field) {
+    case "trend_sign":
+      return { value: Math.sign(facts.change7dPct), source: "fact-checker", field: "trend_sign" };
+    case "move_pct": {
+      // The verified move is the market fact nearest the predicate value —
+      // mirrors structural-check.ts's nearest-of(24h, 7d) selection.
+      const candidates = [Math.abs(facts.priceChangePct24h), Math.abs(facts.change7dPct)];
+      const nearest = candidates.reduce((best, v) =>
+        Math.abs(v - predicate.value) < Math.abs(best - predicate.value) ? v : best,
+      );
+      return { value: nearest, source: "fact-checker", field: "move_pct" };
+    }
+    case "range_pct": {
+      const pos = facts.high24h > facts.low24h
+        ? ((facts.price - facts.low24h) / (facts.high24h - facts.low24h)) * 100
+        : NaN; // degenerate range → NaN → gate fails closed
+      return { value: pos, source: "fact-checker", field: "range_pct" };
+    }
+  }
+}
+
+/**
+ * The SOUND re-plan gate. Unlike satisfiesPredicate (which trusts its caller to
+ * pass a measured number), this accepts only a MeasuredValue and verifies its
+ * provenance + field alignment before delegating to the boolean check. This is
+ * the "given" clause enforced end-to-end: an agent-asserted number cannot reach
+ * the boolean without failing the type/provenance guard first.
+ */
+export function checkRevision(
+  predicate: ObjectionPredicate,
+  measured: MeasuredValue,
+): { satisfied: boolean; reason: string } {
+  if (measured.source !== "fact-checker")
+    return { satisfied: false, reason: "revision value is not fact-checker-measured (fail-closed)" };
+  if (measured.field !== predicate.field)
+    return { satisfied: false, reason: `field mismatch: predicate=${predicate.field} value=${measured.field}` };
+  const satisfied = satisfiesPredicate(predicate, measured.value);
+  return {
+    satisfied,
+    reason: `measured ${measured.field}=${measured.value} vs {op:${predicate.op}, value:${predicate.value}${predicate.tolerancePp !== undefined ? `, tol:${predicate.tolerancePp}` : ""}} => ${satisfied}`,
+  };
+}
