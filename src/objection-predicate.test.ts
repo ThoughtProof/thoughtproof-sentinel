@@ -4,6 +4,7 @@ import {
   satisfiesPredicate,
   enforcementLevel,
   type VerifiedFactFlag,
+  type ObjectionPredicate,
 } from './objection-predicate.js';
 
 describe('objection-predicate — numeric-class binding (Federico design)', () => {
@@ -56,6 +57,39 @@ describe('objection-predicate — numeric-class binding (Federico design)', () =
         const r = satisfiesPredicate(pred, v);
         expect(typeof r).toBe('boolean'); // the anti-degeneration guarantee
       }
+    });
+
+    it('fails CLOSED (false, never a third state) on NaN/Infinity/undefined/null', () => {
+      // The whole value of the approach is that malformed input can never
+      // produce UNCERTAIN — it must resolve to a strict boolean (and, being
+      // fail-closed, to `false` = "objection not satisfied").
+      const pred = predicateFromFlag({
+        kind: 'magnitude', claimedValue: 186, actualValue: 41, evidenceLine: 'x',
+      });
+      for (const bad of [NaN, Infinity, -Infinity, undefined, null]) {
+        const r = satisfiesPredicate(pred, bad as unknown as number);
+        expect(typeof r).toBe('boolean');
+        expect(r).toBe(false); // fail-closed
+      }
+    });
+
+    it('direction: Math.sign(0) → flat is distinct from up/down', () => {
+      // A verified flat market (actualValue 0) must NOT be satisfied by a
+      // revision claiming up (+1) or down (-1).
+      const pred = predicateFromFlag({
+        kind: 'direction', claimedValue: 1, actualValue: 0, evidenceLine: 'x',
+      });
+      expect(pred.value).toBe(0);
+      expect(satisfiesPredicate(pred, 0)).toBe(true);
+      expect(satisfiesPredicate(pred, 1)).toBe(false);
+      expect(satisfiesPredicate(pred, -1)).toBe(false);
+    });
+
+    it('missing tolerancePp collapses approx to exact-match (documented, strict)', () => {
+      const pred = { kind: 'magnitude', field: 'move_pct', op: 'approx',
+        value: 41, claimedValue: 186, actualValue: 41 } as ObjectionPredicate;
+      expect(satisfiesPredicate(pred, 41)).toBe(true);
+      expect(satisfiesPredicate(pred, 41.5)).toBe(false); // no tolerance → strict
     });
   });
 

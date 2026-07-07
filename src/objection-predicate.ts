@@ -101,7 +101,16 @@ export function predicateFromFlag(flag: VerifiedFactFlag): ObjectionPredicate {
  * value for that field, does the revision satisfy the objection?
  *
  * This is the whole point: it cannot degenerate to UNCERTAIN because there is
- * no judgment call left — only a comparison on structured data.
+ * no judgment call left — only a comparison on structured data. (NaN, Infinity,
+ * undefined, null all fail closed to `false` — never a third state; see tests.)
+ *
+ * ⚠️ CRITICAL INVARIANT — `revisedValue` MUST be produced by the SAME
+ * deterministic fact-checker that produced the hold-time `actualValue`
+ * (structural-check.ts / fact-check.ts), measured from the revised plan against
+ * ground-truth market data. It must NOT be a value the agent asserts about
+ * itself. An agent-asserted `revisedValue` makes this gate meaningless: the
+ * agent would simply claim whatever number passes. The gate's soundness rests
+ * entirely on `revisedValue` being independently measured, not self-reported.
  */
 export function satisfiesPredicate(
   predicate: ObjectionPredicate,
