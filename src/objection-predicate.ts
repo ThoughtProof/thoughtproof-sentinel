@@ -144,13 +144,28 @@ export function enforcementLevel(kind: string): EnforcementLevel {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
-// VERIFIED-REVISION MEASUREMENT — enforce the load-bearing "given an
-// independently-measured revision value" condition, instead of documenting it.
+// VERIFIED-REVISION MEASUREMENT — narrow the load-bearing "given an
+// independently-measured revision value" condition to a single trusted funnel.
 //
 // The steelman's decisive point: satisfiesPredicate() is only sound if
-// `revisedValue` is MEASURED from ground truth, not asserted by the agent. This
-// section makes that structural: the caller cannot hand the gate a raw number;
-// it must hand a MeasuredValue that carries proof of where the number came from.
+// `revisedValue` is MEASURED from ground truth, not asserted by the agent.
+//
+// ⚠️ HONEST SCOPE — what this does and does NOT guarantee:
+//   - measureRevisedValue() is the ONE trusted way to produce a revision value:
+//     it reads the market snapshot, never the agent's text. If the caller uses
+//     it, the value is provably measured.
+//   - MeasuredValue.source is a TypeScript discriminant. It is COMPILE-TIME
+//     guidance, not a runtime capability: the string does not exist at runtime,
+//     so a caller CAN hand-build `{value, source:"fact-checker", field}` and lie.
+//     checkRevision()'s runtime `source` check only catches values that don't
+//     even claim to be measured — it cannot distinguish a real measurement from
+//     a well-formed forgery. The guarantee is therefore: "enforced at this
+//     function boundary IF the caller routes through measureRevisedValue()",
+//     not "impossible to bypass." Closing that fully needs the measurement to
+//     happen inside the same trust boundary as the gate (see integration TODO).
+//   - NOT WIRED YET: nothing in the Sentinel verdict path or the VTA replan
+//     loop calls checkRevision() today. Until it does, this is the *mechanism*,
+//     not an *active* gate. Integration is the next step, tracked separately.
 // ───────────────────────────────────────────────────────────────────────────
 
 /** The verified market facts the checker measures against — the SAME snapshot

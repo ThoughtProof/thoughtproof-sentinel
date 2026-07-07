@@ -172,6 +172,20 @@ describe('objection-predicate — numeric-class binding (Federico design)', () =
       expect(r.satisfied).toBe(false);
       expect(r.reason).toMatch(/field mismatch/);
     });
+
+    it('HONEST LIMIT: a well-formed forgery (source:fact-checker, arbitrary value) is NOT caught', () => {
+      // This documents the boundary precisely rather than overclaiming. A caller
+      // who hand-builds a MeasuredValue that CLAIMS to be fact-checker-measured
+      // but carries a value it never measured will pass — the runtime source
+      // check cannot distinguish a real measurement from a well-formed forgery.
+      // The guarantee is "enforced IF the caller routes through
+      // measureRevisedValue()", not "impossible to forge". Closing this needs
+      // the measurement to live inside the gate's trust boundary (integration).
+      const forged: MeasuredValue = { value: 41, source: 'fact-checker', field: 'move_pct' };
+      const r = checkRevision(pred, forged);
+      expect(r.satisfied).toBe(true); // passes — this is the documented limit, not a bug
+    });
+
     it('end-to-end: measure from snapshot then gate — the whole "given" clause', () => {
       const facts: VerifiedMarketFacts = {
         priceChangePct24h: 44, change7dPct: 41, price: 0.0089, low24h: 0.006, high24h: 0.010,
