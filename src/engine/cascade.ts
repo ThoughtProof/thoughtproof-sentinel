@@ -64,6 +64,15 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
   const cascadeConfig: CascadeConfig = {
     primaryModel: stages[0],
     secondaryModel: stages[1],
+    // confirmBlocks (2026-07-08, env-gated, DEFAULT OFF): when CONFIRM_BLOCKS=1,
+    // a primary=BLOCK no longer early-exits but is confirmed by the secondary
+    // (mirrors the existing HOLD disagreement logic). Addresses verdict
+    // non-determinism where an unstable nano-solo BLOCK decided a capital block
+    // alone (79% of live BLOCKs were nano-solo). primary_block_rejected → HOLD →
+    // UNCERTAIN in trade_execution (no silent pass-through; verified: no HOLD→ALLOW
+    // promotion path in that mode). Default OFF → byte-identical to prior behaviour.
+    // See pot-cli fix/cascade-confirm-block + RCA docs/sentinel-verdict-nondeterminism-rca-2026-07-08.md
+    confirmBlocks: process.env.CONFIRM_BLOCKS === "1",
   };
 
   const cr = await runCascade(input.evalInput, evaluate, cascadeConfig);
