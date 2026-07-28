@@ -1,16 +1,13 @@
 {
   "rewrites": [
     { "source": "/openapi.json", "destination": "/api/openapi" },
-    { "source": "/.well-known/x402", "destination": "/api/.well-known/x402" },
+    { "source": "/.well-known/x402", "destination": "/api/well-known/x402" },
     { "source": "/", "destination": "/api/index" },
     { "source": "/sentinel/(.*)", "destination": "/api/sentinel/$1" }
   ],
   "functions": {
     "api/sentinel/**/*.ts": {
       "maxDuration": 30
-    },
-    "api/.well-known/**/*.ts": {
-      "maxDuration": 10
     }
   },
   "headers": [
