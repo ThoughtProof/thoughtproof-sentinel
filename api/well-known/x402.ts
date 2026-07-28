@@ -1,12 +1,9 @@
 /**
  * GET /.well-known/x402
  *
- * Machine-readable x402 catalog for discovery (XRPL AI Hub auto-listing,
- * Bazaar-style crawlers). Advertises paid resources with name + description
- * so listings don't show as "Registered Resource".
- *
- * XRPL accepts only appear when XRPL_PAY_TO is set (isXrplEnabled).
- * Base accepts always listed when x402 is enabled.
+ * Machine-readable x402 catalog for XRPL AI Hub auto-listing.
+ * Hub keys resources by URL — we advertise ONE verify resource with multiple
+ * accepts (Base + XRPL checkpoint + XRPL standard) so both price tiers show.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { TIER_CONFIGS } from '../../src/tiers.js';
@@ -26,6 +23,31 @@ function amountMicro(usd: string): string {
   return Math.round(parseFloat(usd) * 1_000_000).toString();
 }
 
+function xrplAccept(usdPrice: string, tier: string) {
+  const reqs = buildXrplRequirements({
+    usdPrice,
+    invoiceId: `catalog-${tier}`,
+    resource: RESOURCE_URL,
+  });
+  return {
+    scheme: reqs.scheme,
+    network: reqs.network,
+    amount: reqs.amount,
+    maxAmountRequired: reqs.amount,
+    asset: reqs.asset,
+    payTo: reqs.payTo,
+    resource: RESOURCE_URL,
+    maxTimeoutSeconds: reqs.maxTimeoutSeconds,
+    extra: {
+      ...reqs.extra,
+      invoiceId: undefined,
+      name: getXrplConfig().asset === 'XRP' ? 'XRP' : 'RLUSD',
+      tier,
+      note: 'Live 402 challenges mint a unique extra.invoiceId per request',
+    },
+  };
+}
+
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('Allow', 'GET, HEAD');
@@ -36,13 +58,13 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(404).json({ error: 'x402 not enabled on this deployment' });
   }
 
-  // Catalog uses checkpoint tier as the advertised default unit price
   const checkpointUsd = String(TIER_CONFIGS.checkpoint?.price_usd ?? 0.005);
   const standardUsd = String(TIER_CONFIGS.standard?.price_usd ?? 0.008);
   const microC = amountMicro(checkpointUsd);
   const microS = amountMicro(standardUsd);
 
-  const baseAccepts = [
+  const accepts: Record<string, unknown>[] = [
+    // Base USDC — checkpoint (default advertised unit)
     {
       scheme: 'exact',
       network: 'eip155:8453',
@@ -65,114 +87,125 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       maxTimeoutSeconds: 300,
       extra: { name: 'USD Coin', version: '2', tier: 'checkpoint' },
     },
+    // Base USDC — standard
+    {
+      scheme: 'exact',
+      network: 'eip155:8453',
+      amount: microS,
+      maxAmountRequired: microS,
+      asset: USDC_BASE,
+      payTo: PAYMENT_WALLET,
+      resource: RESOURCE_URL,
+      maxTimeoutSeconds: 300,
+      extra: { name: 'USD Coin', version: '2', tier: 'standard' },
+    },
   ];
 
-  const goatAccepts = isGoatEnabled()
-    ? [
-        {
-          scheme: 'exact',
-          network: GOAT_NETWORK,
-          amount: microC,
-          maxAmountRequired: microC,
-          asset: getGoatConfig().usdcAddress,
-          payTo: getGoatConfig().paymentWallet,
-          resource: RESOURCE_URL,
-          maxTimeoutSeconds: 300,
-          extra: { name: 'USD Coin', gateway: 'goat-x402', tier: 'checkpoint' },
-        },
-      ]
-    : [];
+  if (isGoatEnabled()) {
+    accepts.push({
+      scheme: 'exact',
+      network: GOAT_NETWORK,
+      amount: microC,
+      maxAmountRequired: microC,
+      asset: getGoatConfig().usdcAddress,
+      payTo: getGoatConfig().paymentWallet,
+      resource: RESOURCE_URL,
+      maxTimeoutSeconds: 300,
+      extra: { name: 'USD Coin', gateway: 'goat-x402', tier: 'checkpoint' },
+    });
+  }
 
-  const xrplAccepts = isXrplEnabled()
-    ? [
-        (() => {
-          const reqs = buildXrplRequirements({
-            usdPrice: checkpointUsd,
-            invoiceId: 'catalog', // catalog placeholder — live 402 issues real invoiceIds
-            resource: RESOURCE_URL,
-          });
-          return {
-            scheme: reqs.scheme,
-            network: reqs.network,
-            amount: reqs.amount,
-            maxAmountRequired: reqs.amount,
-            asset: reqs.asset,
-            payTo: reqs.payTo,
-            resource: RESOURCE_URL,
-            maxTimeoutSeconds: reqs.maxTimeoutSeconds,
-            extra: {
-              ...reqs.extra,
-              // catalog must not pin a single-use invoice
-              invoiceId: undefined,
-              name: getXrplConfig().asset === 'XRP' ? 'XRP' : 'RLUSD',
-              tier: 'checkpoint',
-              note: 'Live 402 challenges mint a unique extra.invoiceId per request',
-            },
-          };
-        })(),
-      ]
-    : [];
+  if (isXrplEnabled()) {
+    // Both tiers as separate XRPL accepts — hub lists price options under one resource URL
+    accepts.push(xrplAccept(checkpointUsd, 'checkpoint'));
+    accepts.push(xrplAccept(standardUsd, 'standard'));
+  }
 
   const body = {
     name: 'ThoughtProof Sentinel',
     description:
-      'Pre-execution verification for autonomous agents. Pay per check via x402; receive ALLOW / BLOCK / UNCERTAIN with structured objections.',
+      'Pre-execution verification for autonomous agents. Pay per check via x402; receive ALLOW / BLOCK / UNCERTAIN with structured objections. Checkpoint (sub-cent) and Standard tiers.',
     url: 'https://sentinel.thoughtproof.ai',
     x402Version: 2,
     resources: [
       {
-        name: 'sentinel-verify-checkpoint',
+        name: 'sentinel-verify',
         description:
-          'Lightweight checkpoint-tier decision check (ALLOW/BLOCK/UNCERTAIN). Sub-cent, loop-safe.',
+          'Decision check before agent execution: ALLOW / BLOCK / UNCERTAIN + objections. Tiers: checkpoint (~$0.005) and standard (~$0.008). Same endpoint; price follows request tier.',
         url: RESOURCE_URL,
         mimeType: 'application/json',
-        accepts: [...baseAccepts, ...goatAccepts, ...xrplAccepts],
+        accepts,
+      },
+      // Explicit tier aliases (same URL) — some crawlers prefer named resources
+      {
+        name: 'sentinel-verify-checkpoint',
+        description:
+          'Checkpoint-tier decision check. Sub-cent, loop-safe. ALLOW/BLOCK/UNCERTAIN.',
+        url: `${RESOURCE_URL}?tier=checkpoint`,
+        mimeType: 'application/json',
+        accepts: isXrplEnabled()
+          ? [
+              {
+                scheme: 'exact',
+                network: 'eip155:8453',
+                amount: microC,
+                maxAmountRequired: microC,
+                asset: USDC_BASE,
+                payTo: PAYMENT_WALLET,
+                resource: RESOURCE_URL,
+                maxTimeoutSeconds: 300,
+                extra: { name: 'USD Coin', version: '2', tier: 'checkpoint' },
+              },
+              xrplAccept(checkpointUsd, 'checkpoint'),
+            ]
+          : [
+              {
+                scheme: 'exact',
+                network: 'eip155:8453',
+                amount: microC,
+                maxAmountRequired: microC,
+                asset: USDC_BASE,
+                payTo: PAYMENT_WALLET,
+                resource: RESOURCE_URL,
+                maxTimeoutSeconds: 300,
+                extra: { name: 'USD Coin', version: '2', tier: 'checkpoint' },
+              },
+            ],
       },
       {
         name: 'sentinel-verify-standard',
         description:
-          'Standard-tier decision check with nano→swift cascade. Same verdict contract, deeper path.',
-        url: RESOURCE_URL,
+          'Standard-tier decision check with nano→swift cascade. ALLOW/BLOCK/UNCERTAIN.',
+        url: `${RESOURCE_URL}?tier=standard`,
         mimeType: 'application/json',
-        accepts: [
-          {
-            scheme: 'exact',
-            network: 'eip155:8453',
-            amount: microS,
-            maxAmountRequired: microS,
-            asset: USDC_BASE,
-            payTo: PAYMENT_WALLET,
-            resource: RESOURCE_URL,
-            maxTimeoutSeconds: 300,
-            extra: { name: 'USD Coin', version: '2', tier: 'standard' },
-          },
-          ...(isXrplEnabled()
-            ? [
-                (() => {
-                  const reqs = buildXrplRequirements({
-                    usdPrice: standardUsd,
-                    invoiceId: 'catalog-standard',
-                    resource: RESOURCE_URL,
-                  });
-                  return {
-                    scheme: reqs.scheme,
-                    network: reqs.network,
-                    amount: reqs.amount,
-                    maxAmountRequired: reqs.amount,
-                    asset: reqs.asset,
-                    payTo: reqs.payTo,
-                    resource: RESOURCE_URL,
-                    maxTimeoutSeconds: reqs.maxTimeoutSeconds,
-                    extra: {
-                      ...reqs.extra,
-                      invoiceId: undefined,
-                      tier: 'standard',
-                    },
-                  };
-                })(),
-              ]
-            : []),
-        ],
+        accepts: isXrplEnabled()
+          ? [
+              {
+                scheme: 'exact',
+                network: 'eip155:8453',
+                amount: microS,
+                maxAmountRequired: microS,
+                asset: USDC_BASE,
+                payTo: PAYMENT_WALLET,
+                resource: RESOURCE_URL,
+                maxTimeoutSeconds: 300,
+                extra: { name: 'USD Coin', version: '2', tier: 'standard' },
+              },
+              xrplAccept(standardUsd, 'standard'),
+            ]
+          : [
+              {
+                scheme: 'exact',
+                network: 'eip155:8453',
+                amount: microS,
+                maxAmountRequired: microS,
+                asset: USDC_BASE,
+                payTo: PAYMENT_WALLET,
+                resource: RESOURCE_URL,
+                maxTimeoutSeconds: 300,
+                extra: { name: 'USD Coin', version: '2', tier: 'standard' },
+              },
+            ],
       },
     ],
     networks: {
@@ -197,6 +230,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       rlusdHex: RLUSD_HEX,
       listing: 'https://xrpl-ai.org/join/service',
       docs: 'https://thoughtproof.ai',
+      website: 'https://thoughtproof.ai',
     },
   };
 

@@ -85,10 +85,15 @@ function getRedis(): Redis | null {
 
 // ── Pricing ───────────────────────────────────────────────────────────────
 
-function resolvePrice(body: unknown): { price: string; tier: SentinelTier } {
-  const b = body && typeof body === 'object' ? body as Record<string, unknown> : {};
-  const tier = (b.tier as SentinelTier) ?? 'standard';
-  const config = TIER_CONFIGS[tier] ?? TIER_CONFIGS.standard;
+function resolvePrice(
+  body: unknown,
+  query?: Record<string, string | string[] | undefined>,
+): { price: string; tier: SentinelTier } {
+  const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const qTier = query?.tier;
+  const fromQuery = Array.isArray(qTier) ? qTier[0] : qTier;
+  const tier = (b.tier as SentinelTier) ?? (fromQuery as SentinelTier) ?? 'checkpoint';
+  const config = TIER_CONFIGS[tier] ?? TIER_CONFIGS.checkpoint ?? TIER_CONFIGS.standard;
   return { price: config.price_usd.toFixed(4).replace(/\.?0+$/, ''), tier };
 }
 
@@ -279,7 +284,7 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
   // ── Flow B1: x402 Standard Payment (via Facilitator API) ──────────────
   const paymentSig = req.headers['payment-signature'] as string | undefined;
   if (paymentSig) {
-    const { price } = resolvePrice(req.body);
+    const { price } = resolvePrice(req.body, req.query as Record<string, string | string[] | undefined>);
     const amountMicro = Math.round(parseFloat(price) * 1_000_000).toString();
 
     let payload: Record<string, unknown>;
@@ -501,7 +506,7 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
 
   if (!intentId) {
     // No payment at all → return 402 challenge
-    const { price } = resolvePrice(req.body);
+    const { price } = resolvePrice(req.body, req.query as Record<string, string | string[] | undefined>);
     const amountMicro = Math.round(parseFloat(price) * 1_000_000).toString();
     const now = Date.now();
 
