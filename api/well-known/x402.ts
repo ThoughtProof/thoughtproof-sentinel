@@ -19,84 +19,11 @@ import {
   getXrplConfig,
   RLUSD_HEX,
 } from '../../src/middleware/xrpl-x402.js';
+import { buildBazaarExtensions } from '../../src/middleware/bazaar-extension.js';
 
 const PAYMENT_WALLET = process.env.PAYMENT_WALLET ?? '0xAB9f84864662f980614bD1453dB9950Ef2b82E83';
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const RESOURCE_URL = 'https://sentinel.thoughtproof.ai/sentinel/verify';
-
-/** Bazaar/AgentCash input schema (mirrors OpenAPI requestBody). */
-const BAZAAR_INPUT_SCHEMA = {
-  type: 'object',
-  required: ['claim', 'evidence', 'mode'],
-  properties: {
-    id: { type: 'string', description: 'Optional verification ID (auto-generated if omitted)' },
-    claim: {
-      type: 'string',
-      description: 'The agent decision or action to verify',
-      maxLength: 100000,
-    },
-    evidence: {
-      type: 'string',
-      description: 'Context, reasoning trace, or market data supporting the claim',
-      maxLength: 500000,
-    },
-    mode: {
-      type: 'string',
-      enum: [
-        'handoff',
-        'plan_revision',
-        'memory_write',
-        'output_synthesis',
-        'trade_execution',
-        'trade_reasoning',
-        'action_authorization',
-      ],
-      description: 'Verification mode',
-    },
-    tier: {
-      type: 'string',
-      enum: ['checkpoint', 'standard'],
-      default: 'standard',
-      description: 'Price/cascade tier',
-    },
-  },
-} as const;
-
-/** Bazaar/AgentCash output schema (mirrors OpenAPI 200 response). */
-const BAZAAR_OUTPUT_SCHEMA = {
-  type: 'object',
-  required: ['id', 'verdict', 'confidence', 'reasoning', 'objections', 'mode', 'tier', 'meta'],
-  properties: {
-    id: { type: 'string' },
-    verdict: { type: 'string', enum: ['ALLOW', 'BLOCK', 'UNCERTAIN'] },
-    confidence: { type: 'number' },
-    reasoning: { type: 'string' },
-    objections: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          step_id: { type: 'string' },
-          criterion: { type: 'string' },
-          score: { type: 'number' },
-          predicate: { type: 'string' },
-          quote: { type: ['string', 'null'] },
-          reasoning: { type: 'string' },
-        },
-      },
-    },
-    mode: { type: 'string' },
-    tier: { type: 'string' },
-    meta: {
-      type: 'object',
-      properties: {
-        duration_ms: { type: 'number' },
-        models_used: { type: 'array', items: { type: 'string' } },
-        verified_at: { type: 'string' },
-      },
-    },
-  },
-} as const;
 
 function amountMicro(usd: string): string {
   return Math.round(parseFloat(usd) * 1_000_000).toString();
@@ -128,19 +55,7 @@ function xrplAccept(usdPrice: string, tier: string) {
 }
 
 function bazaarExtensions(tierHint?: string) {
-  return {
-    bazaar: {
-      schema: {
-        properties: {
-          input: BAZAAR_INPUT_SCHEMA,
-          output: BAZAAR_OUTPUT_SCHEMA,
-        },
-      },
-      ...(tierHint ? { defaultTier: tierHint } : {}),
-      guidance:
-        'POST JSON { claim, evidence, mode, tier? }. Auth: x402 payment (preferred for agents) or X-Sentinel-Key. Returns ALLOW|BLOCK|UNCERTAIN with structured objections for replan.',
-    },
-  };
+  return buildBazaarExtensions({ tierHint });
 }
 
 export default function handler(req: VercelRequest, res: VercelResponse) {

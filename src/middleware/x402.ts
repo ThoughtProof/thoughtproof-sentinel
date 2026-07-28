@@ -36,6 +36,7 @@ import { createHash, randomBytes } from 'crypto';
 import { Redis } from '@upstash/redis';
 import { TIER_CONFIGS } from '../tiers.js';
 import type { SentinelTier, PaymentPlatform } from '../types.js';
+import { buildBazaarExtensions } from './bazaar-extension.js';
 import {
   GOAT_NETWORK,
   isGoatEnabled,
@@ -533,47 +534,7 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
     // x402 v2 challenge
     // Dual network tokens on accepts: keep both eip155:8453 (CAIP-2) and legacy
     // "base" for facilitators/clients that string-match. Catalog (well-known) is
-    // CAIP-2-only for AgentCash. Bazaar schema below is additive for discovery.
-    const bazaarSchema = {
-      properties: {
-        input: {
-          type: 'object',
-          required: ['claim', 'evidence', 'mode'],
-          properties: {
-            id: { type: 'string' },
-            claim: { type: 'string', maxLength: 100000 },
-            evidence: { type: 'string', maxLength: 500000 },
-            mode: {
-              type: 'string',
-              enum: [
-                'handoff',
-                'plan_revision',
-                'memory_write',
-                'output_synthesis',
-                'trade_execution',
-                'trade_reasoning',
-                'action_authorization',
-              ],
-            },
-            tier: { type: 'string', enum: ['checkpoint', 'standard'] },
-          },
-        },
-        output: {
-          type: 'object',
-          required: ['id', 'verdict', 'confidence', 'reasoning', 'objections', 'mode', 'tier', 'meta'],
-          properties: {
-            id: { type: 'string' },
-            verdict: { type: 'string', enum: ['ALLOW', 'BLOCK', 'UNCERTAIN'] },
-            confidence: { type: 'number' },
-            reasoning: { type: 'string' },
-            objections: { type: 'array' },
-            mode: { type: 'string' },
-            tier: { type: 'string' },
-            meta: { type: 'object' },
-          },
-        },
-      },
-    };
+    // CAIP-2-only for AgentCash. Bazaar extension is additive for discovery.
     const x402Challenge = {
       x402Version: 2,
       error: 'Payment required',
@@ -582,14 +543,8 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
         description: 'Lightweight pre-execution verification for autonomous agent loops — ALLOW/BLOCK/UNCERTAIN',
         mimeType: 'application/json',
       },
-      // AgentCash payment_required stage looks for extensions.bazaar.schema
-      extensions: {
-        bazaar: {
-          schema: bazaarSchema,
-          guidance:
-            'POST JSON { claim, evidence, mode, tier? }. Pay via x402 or send X-Sentinel-Key. Returns ALLOW|BLOCK|UNCERTAIN with structured objections.',
-        },
-      },
+      // CDP/AgentCash v2 Bazaar: info (examples) + schema validating info shape.
+      extensions: buildBazaarExtensions(),
       accepts: [
         // Option 1: USDC on Base mainnet — CAIP-2 form (current x402 spec, docs.x402.org)
         {
