@@ -28,14 +28,33 @@ const spec = {
         summary: 'Verify agent reasoning before execution',
         description:
           'Multi-model cascade verification. A fast nano model screens first; if escalation is needed, a stronger second model re-evaluates. Returns one of three verdicts — ALLOW, BLOCK, or UNCERTAIN — with structured per-step objections agents can use to re-plan. Supports x402 micropayment on Base (USDC).',
+        // Structured x-payment-info (AgentCash non-legacy). Live 402 challenges
+        // still dual-advertise network base + eip155:8453 for facilitators.
         'x-payment-info': {
+          price: {
+            mode: 'tiered',
+            currency: 'USDC',
+            network: 'eip155:8453',
+            tiers: {
+              checkpoint: { amount: '0.005000', cascade: ['serv-nano'] },
+              standard: {
+                amount: '0.008000',
+                cascade: ['serv-nano', 'serv-swift'],
+                default: true,
+              },
+            },
+          },
+          protocols: [{ x402: { networks: ['eip155:8453', 'xrpl:0'] } }],
+        },
+        // Keep legacy flat form for older crawlers (additive, not exclusive).
+        'x-payment-info-legacy': {
           pricingMode: 'tiered',
           tiers: {
             checkpoint: { price: '0.005000', cascade: ['serv-nano'] },
             standard: { price: '0.008000', cascade: ['serv-nano', 'serv-swift'], default: true },
           },
           asset: 'USDC',
-          network: 'base',
+          network: 'eip155:8453',
           protocols: ['x402'],
         },
         requestBody: {
