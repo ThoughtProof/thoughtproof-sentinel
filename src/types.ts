@@ -92,6 +92,18 @@ export interface SentinelVerifyResponse {
     duration_ms: number;
     models_used: string[];
     verified_at: string;
+    /**
+     * Present only when objection-evidence-bind gated at least one surface reason.
+     * Verdict is never changed by the bind (surface text only).
+     */
+    objection_evidence_bind?: {
+      surface_gated: boolean;
+      n_evidence_fail: number;
+      n_unverified: number;
+      n_verified: number;
+      codes: string[];
+      verdict_unchanged: true;
+    };
   };
 }
 

@@ -21,6 +21,7 @@ import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
 import { mapVerdict, canPromoteStep2Only, canPromoteAllStepsPass } from './verdict.js';
 import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
+import { bindStepObjections } from '../objection-evidence-bind.js';
 import { randomUUID } from 'crypto';
 
 /**
@@ -156,7 +157,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     criterionByStepId.set(`step_${gs.index}`, gs.acceptance_criterion ?? gs.description);
   }
 
-  const objections = steps.map((s) => {
+  const rawObjections = steps.map((s) => {
     const criterion = criterionByStepId.get(s.step_id) ?? '';
     const prose = (s.reasoning ?? '').trim();
     return {
@@ -170,6 +171,18 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         : synthesizeReasoning(String(s.predicate), criterion, s.quote),
     };
   });
+
+  // 5b. Objection evidence bind (surface gate only — verdict unchanged).
+  // Numeric specialist reasons are claims; where checkable against mandate /
+  // claim+evidence bound fields, strip or rewrite fabricated exceed/within text
+  // before client / replan / attest surfaces see them. Paris class: 583 ≤ 600
+  // must never ship as "exceeds budget".
+  const bind = bindStepObjections(rawObjections, {
+    mandate: req.mandate,
+    claim: req.claim,
+    evidence: req.evidence,
+  });
+  const objections = bind.surface_objections;
 
   const durationMs = Date.now() - startMs;
 
@@ -186,6 +199,18 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       duration_ms: durationMs,
       models_used: cascadeOutput.modelsUsed,
       verified_at: new Date().toISOString(),
+      ...(bind.surface_gated
+        ? {
+            objection_evidence_bind: {
+              surface_gated: true,
+              n_evidence_fail: bind.n_evidence_fail,
+              n_unverified: bind.n_unverified,
+              n_verified: bind.n_verified,
+              codes: bind.codes,
+              verdict_unchanged: true as const,
+            },
+          }
+        : {}),
     },
   };
 }
