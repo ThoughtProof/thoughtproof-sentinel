@@ -670,6 +670,12 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
         error: 'Payment Required',
         protocol: 'x402',
         intentId: intent.id,
+        // Mirror challenge body fields some discovery tools parse from JSON
+        // (not only the payment-required header). Additive; dual network stays.
+        x402Version: 2,
+        accepts: x402Challenge.accepts,
+        resource: x402Challenge.resource,
+        extensions: x402Challenge.extensions,
         payment: {
           amountUsdc: price,
           recipientWallet: PAYMENT_WALLET,
