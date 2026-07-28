@@ -2,6 +2,10 @@
   "rewrites": [
     { "source": "/openapi.json", "destination": "/api/openapi" },
     { "source": "/.well-known/x402", "destination": "/api/well-known/x402" },
+    {
+      "source": "/.well-known/intuition/erc8004/agents/:chainId/:tokenId/trust-assessment.json",
+      "destination": "/api/well-known/intuition/erc8004/agents/[chainId]/[tokenId]/trust-assessment?chainId=:chainId&tokenId=:tokenId"
+    },
     { "source": "/", "destination": "/api/index" },
     { "source": "/sentinel/(.*)", "destination": "/api/sentinel/$1" }
   ],
