@@ -1,0 +1,71 @@
+{
+  "$schema": "https://thoughtproof.ai/schemas/trust-assessment.v1.json",
+  "agent": {
+    "chainId": 8453,
+    "tokenId": "1380",
+    "registry": "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+    "caipId": "eip155:8453/erc721:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432/1380",
+    "canonicalAtom": "0x45078ae569def2264355f77e592028dd6f1f5d6373c204fe82bf3141ab1861fb",
+    "label": "Captain Dackie"
+  },
+  "provider": {
+    "id": "thoughtproof-decision-verification",
+    "name": "ThoughtProof Decision Verification",
+    "url": "https://thoughtproof.ai",
+    "kind": "per-action-verifier",
+    "not_a_reputation_service": true,
+    "positioning": "ThoughtProof provides grounded decision verification before execution. It does not score agents; it evaluates whether a specific proposed action is justified by the current mandate and evidence. It is the layer between identity/reputation and irreversible execution."
+  },
+  "verification": {
+    "verificationId": "intuition_demo_1785266452",
+    "verdict": "BLOCK",
+    "confidence": 0.25,
+    "verifiedAt": "2026-07-28T19:21:04.612Z",
+    "duration_ms": 11646,
+    "models_used": [
+      "serv-nano"
+    ],
+    "objection_count": 4,
+    "faithful_step_count": 1,
+    "unfaithful_step_count": 3,
+    "action_summary": {
+      "kind": "erc20_transfer",
+      "asset": "USDC",
+      "amountUsd": 500.0,
+      "recipient": "0x0000000000000000000000000000000000000dEaD",
+      "chainId": 8453,
+      "synthetic": true,
+      "broadcast": false
+    },
+    "mandate_summary": {
+      "scope": "read-only-public-data",
+      "granted_maxAmountUsd": 0,
+      "paymentAuthorizationSupplied": false
+    }
+  },
+  "advisory_context": {
+    "note": "The following upstream signals are informational only. They did not and cannot authorize the specific action verified here.",
+    "erc8004_identity": {
+      "verified": true,
+      "onchain_owner": "0xf9d1d63f362bbf1ee08ab9acb36fe74afc48d5f1"
+    },
+    "intuition_atom_resolved": true,
+    "asterpay_kya": {
+      "score": 66,
+      "tier": "trusted",
+      "riskLevel": "low",
+      "maxExposureUsd": 10000,
+      "url": "https://api.asterpay.io/.well-known/intuition/erc8004/agents/8453/1380/trust-assessment.json"
+    }
+  },
+  "important_do_not_do": {
+    "do_not_convert_this_to_agent_reputation_penalty": true,
+    "reason": "A single blocked synthetic action is NOT evidence of an untrustworthy agent. This receipt is a verifier's judgment about one specific proposal under one specific mandate. Aggregating it into a persistent negative reputation score would confuse per-action verification with cross-time reputation, which is exactly the confusion this demonstration exists to prevent."
+  },
+  "reproduction": {
+    "trace_file": "trace.json",
+    "receipt_file": "thoughtproof-receipt.json",
+    "readme_file": "README.md"
+  },
+  "generated_at": "2026-07-28T19:24:14Z"
+}
