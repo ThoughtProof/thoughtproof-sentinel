@@ -2,14 +2,16 @@
  * x402 Payment Middleware for ThoughtProof Sentinel
  *
  * Lightweight implementation — NO heavy dependencies.
- * Supports two payment networks:
- *   - Base mainnet (eip155:8453) via Circle x402 Facilitator
+ * Supports three payment networks:
+ *   - Base mainnet (eip155:8453) via Coinbase CDP Facilitator (default)
  *   - GOAT Network (eip155:2345) via GOAT x402 Merchant Gateway (opt-in, ENV-gated)
+ *   - XRPL (xrpl:0 / xrpl:1) via t54 hosted facilitator (opt-in, ENV-gated)
  *
  * Four auth flows:
  *   Flow A  (API key):  X-Sentinel-Key present → skip payment
- *   Flow B1a (Base):    PAYMENT-SIGNATURE header + Base network → Circle facilitator verify/settle
- *   Flow B1b (GOAT):    PAYMENT-SIGNATURE header + GOAT network/orderId → GOAT gateway verify/settle
+ *   Flow B1a (Base):    PAYMENT-SIGNATURE + Base network → CDP facilitator verify/settle
+ *   Flow B1b (GOAT):    PAYMENT-SIGNATURE + GOAT network → GOAT gateway verify/settle
+ *   Flow B1c (XRPL):    PAYMENT-SIGNATURE + xrpl:* network → t54 facilitator verify/settle
  *   Flow B2  (intent):  X-Payment-Intent header → Upstash Redis-backed manual flow
  *
  * Platform traffic (OpenServ, ACP) is billed post-hoc, not gated.
@@ -20,6 +22,13 @@
  *   GOAT_USDC_ADDRESS       — USDC contract address on GOAT mainnet (eip155:2345)
  *   GOAT_X402_BASE_URL      — Gateway URL (default: https://api.goatx402.com)
  *   GOAT_X402_PAYMENT_WALLET — Payment wallet on GOAT (default: PAYMENT_WALLET)
+ *
+ * XRPL ENV (required for XRPL activation):
+ *   XRPL_PAY_TO             — classic address (r…) receiving XRP/RLUSD
+ *   XRPL_FACILITATOR_URL    — default https://xrpl-facilitator-mainnet.t54.ai
+ *   XRPL_NETWORK            — default xrpl:0 (mainnet)
+ *   XRPL_ASSET              — default RLUSD hex; or "XRP"
+ *   XRPL_RLUSD_ISSUER       — default Ripple mainnet issuer
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
@@ -34,6 +43,16 @@ import {
   goatVerifyPayment,
   goatSettlePayment,
 } from './goat-x402.js';
+import {
+  isXrplEnabled,
+  isXrplNetwork,
+  newXrplInvoiceId,
+  buildXrplRequirements,
+  xrplVerifyPayment,
+  xrplSettlePayment,
+  getXrplConfig,
+} from './xrpl-x402.js';
+import { generateCdpJwt, hasCdpCredentials } from './cdp-jwt.js';
 
 // ── Config ────────────────────────────────────────────────────────────────
 
@@ -41,8 +60,16 @@ const PAYMENT_WALLET = process.env.PAYMENT_WALLET ?? '0xAB9f84864662f980614bD145
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const INTENT_TTL_MS = 15 * 60 * 1000; // 15 min
 
-// x402 Facilitator endpoint — Circle's hosted facilitator
-const FACILITATOR_URL = process.env.X402_FACILITATOR_URL ?? 'https://x402.org/facilitator';
+// x402 Facilitator endpoint.
+// Default (with CDP credentials): Coinbase CDP hosted facilitator — supports
+// Base MAINNET (x402.org dropped mainnet "exact" from its registry, 2026-07).
+// CDP ENV (both required to enable CDP mode):
+//   X402_CDP_KEY_ID     — CDP API key id (UUID)
+//   X402_CDP_KEY_SECRET — CDP API key secret (base64 Ed25519 keypair)
+const CDP_FACILITATOR_URL = 'https://api.cdp.coinbase.com/platform/v2/x402';
+const FACILITATOR_URL =
+  process.env.X402_FACILITATOR_URL ??
+  (hasCdpCredentials() ? CDP_FACILITATOR_URL : 'https://x402.org/facilitator');
 
 // ── Redis (shared with rate limiting) ─────────────────────────────────────
 
@@ -100,17 +127,76 @@ interface FacilitatorSettleResult {
 }
 
 /**
+ * Build headers + URL for a facilitator call. CDP hosts require a Bearer JWT
+ * signed with the CDP API key (EdDSA), with uri claim matching host+path.
+ */
+function facilitatorRequest(path: '/verify' | '/settle'): { url: string; headers: Record<string, string> } {
+  const url = `${FACILITATOR_URL}${path}`;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (hasCdpCredentials()) {
+    const { host, pathname } = new URL(url);
+    headers['Authorization'] =
+      `Bearer ${generateCdpJwt(process.env.X402_CDP_KEY_ID!, process.env.X402_CDP_KEY_SECRET!, 'POST', host, pathname)}`;
+  }
+  return { url, headers };
+}
+
+/**
+ * Transform a client payload (v1: { scheme, network, payload: {signature, authorization} })
+ * into the CDP v2 shape: { x402Version: 2, accepted, payload, resource }.
+ * Verified live 2026-07-26: CDP accepts this shape and runs on-chain signature checks.
+ */
+function toV2PaymentPayload(
+  payload: Record<string, unknown>,
+  paymentRequirements: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    x402Version: 2,
+    accepted: paymentRequirements,
+    payload: payload.payload ?? {},
+    resource: {
+      url: 'https://sentinel.thoughtproof.ai/sentinel/verify',
+      description: 'ThoughtProof Sentinel decision verification',
+      mimeType: 'application/json',
+    },
+  };
+}
+
+/** CDP v2 requirements: amount only (no maxAmountRequired), CAIP-2 network, no resource field. */
+function toV2Requirements(req: Record<string, unknown>): Record<string, unknown> {
+  return {
+    scheme: req.scheme,
+    network: 'eip155:8453',
+    asset: req.asset,
+    amount: req.amount,
+    payTo: req.payTo,
+    maxTimeoutSeconds: req.maxTimeoutSeconds,
+    extra: req.extra,
+  };
+}
+
+/**
  * Verify a payment payload against requirements via the x402 Facilitator.
  * This replaces BatchFacilitatorClient.verify() with a simple fetch().
+ *
+ * FIX 2026-07-26: facilitator expects { x402Version, paymentPayload, paymentRequirements } —
+ * the previous shape { payload, ... } was rejected with "missing_parameters" on every call.
+ * CDP mode additionally requires the v2 payload shape (accepted/payload/resource).
  */
 async function facilitatorVerify(
   payload: unknown,
   paymentRequirements: unknown,
 ): Promise<FacilitatorVerifyResult> {
-  const resp = await fetch(`${FACILITATOR_URL}/verify`, {
+  const cdp = hasCdpCredentials();
+  const req = paymentRequirements as Record<string, unknown>;
+  const body = cdp
+    ? { x402Version: 2, paymentPayload: toV2PaymentPayload(payload as Record<string, unknown>, toV2Requirements(req)), paymentRequirements: toV2Requirements(req) }
+    : { x402Version: 1, paymentPayload: payload, paymentRequirements };
+  const { url, headers } = facilitatorRequest('/verify');
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload, paymentRequirements }),
+    headers,
+    body: JSON.stringify(body),
   });
 
   if (!resp.ok) {
@@ -124,15 +210,23 @@ async function facilitatorVerify(
 /**
  * Settle a payment via the x402 Facilitator.
  * This replaces BatchFacilitatorClient.settle() with a simple fetch().
+ * CDP settle returns { success, transaction, network, errorReason, errorMessage } —
+ * mapped here to the internal { txHash, error } shape.
  */
 async function facilitatorSettle(
   payload: unknown,
   paymentRequirements: unknown,
 ): Promise<FacilitatorSettleResult> {
-  const resp = await fetch(`${FACILITATOR_URL}/settle`, {
+  const cdp = hasCdpCredentials();
+  const req = paymentRequirements as Record<string, unknown>;
+  const body = cdp
+    ? { x402Version: 2, paymentPayload: toV2PaymentPayload(payload as Record<string, unknown>, toV2Requirements(req)), paymentRequirements: toV2Requirements(req) }
+    : { x402Version: 1, paymentPayload: payload, paymentRequirements };
+  const { url, headers } = facilitatorRequest('/settle');
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload, paymentRequirements }),
+    headers,
+    body: JSON.stringify(body),
   });
 
   if (!resp.ok) {
@@ -140,7 +234,13 @@ async function facilitatorSettle(
     return { success: false, error: `Facilitator settle failed (${resp.status}): ${text}` };
   }
 
-  return await resp.json() as FacilitatorSettleResult;
+  const raw = await resp.json() as Record<string, unknown>;
+  return {
+    success: raw.success === true,
+    txHash: (raw.transaction ?? raw.txHash) as string | undefined,
+    network: raw.network as string | undefined,
+    error: (raw.error ?? raw.errorReason ?? raw.errorMessage) as string | undefined,
+  };
 }
 
 // ── Main Gate ─────────────────────────────────────────────────────────────
@@ -191,11 +291,17 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
     }
 
     // Detect which network the payment targets
-    // SECURITY: Network field MUST explicitly declare GOAT — orderId alone is NOT sufficient
-    // (prevents injection: attacker sending orderId in a Base-network payload to route to GOAT)
+    // SECURITY: Network field MUST explicitly declare GOAT / XRPL — payload alone is NOT enough
     const payloadNetwork = (payload.network as string) ?? '';
+    // v2 payloads nest network under accepted.network
+    const acceptedNet =
+      payload.accepted && typeof payload.accepted === 'object'
+        ? String((payload.accepted as Record<string, unknown>).network ?? '')
+        : '';
+    const effectiveNetwork = payloadNetwork || acceptedNet;
+
     const isGoatPayment =
-      (payloadNetwork === GOAT_NETWORK || payloadNetwork === `eip155:${2345}`) &&
+      (effectiveNetwork === GOAT_NETWORK || effectiveNetwork === `eip155:${2345}`) &&
       isGoatEnabled();
 
     if (isGoatPayment) {
@@ -229,12 +335,108 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
       return { allowed: true, paymentMethod: 'x402-facilitator' };
     }
 
-    // ── Base/Circle x402 flow (default) ─────────────────────────────────
+    // ── XRPL x402 flow (t54 facilitator) ────────────────────────────────
+    if (isXrplNetwork(effectiveNetwork) && isXrplEnabled()) {
+      let invoiceId = newXrplInvoiceId();
+      if (payload.payload && typeof payload.payload === 'object') {
+        const pid = (payload.payload as Record<string, unknown>).invoiceId;
+        if (typeof pid === 'string' && pid.length > 0) invoiceId = pid;
+      } else if (payload.accepted && typeof payload.accepted === 'object') {
+        const extra = (payload.accepted as Record<string, unknown>).extra;
+        if (extra && typeof extra === 'object') {
+          const iid = (extra as Record<string, unknown>).invoiceId;
+          if (typeof iid === 'string' && iid.length > 0) invoiceId = iid;
+        }
+      }
+
+      let requirements;
+      try {
+        requirements = buildXrplRequirements({
+          usdPrice: price,
+          invoiceId,
+          resource: 'https://sentinel.thoughtproof.ai/sentinel/verify',
+        });
+        // Prefer client-accepted amount/network if they match our rail
+        if (payload.accepted && typeof payload.accepted === 'object') {
+          const acc = payload.accepted as Record<string, unknown>;
+          if (isXrplNetwork(String(acc.network ?? '')) && acc.amount != null) {
+            requirements = {
+              ...requirements,
+              network: String(acc.network),
+              amount: String(acc.amount),
+              maxAmountRequired: String(acc.amount),
+              asset: String(acc.asset ?? requirements.asset),
+              payTo: String(acc.payTo ?? requirements.payTo),
+              extra: {
+                ...requirements.extra,
+                ...((acc.extra as object) ?? {}),
+                invoiceId:
+                  (acc.extra as any)?.invoiceId ?? requirements.extra.invoiceId,
+              },
+            };
+          }
+        }
+      } catch (err) {
+        res.status(502).json({ error: `XRPL payment config error: ${String(err)}` });
+        return { allowed: false };
+      }
+
+      let verification;
+      try {
+        verification = await xrplVerifyPayment(payload, requirements);
+      } catch (err) {
+        console.error('[x402] XRPL facilitator verify error:', err);
+        res.status(502).json({ error: `XRPL payment verification unavailable: ${String(err)}` });
+        return { allowed: false };
+      }
+      if (!verification.isValid) {
+        res.status(402).json({
+          error: 'XRPL payment verification failed',
+          reason: verification.invalidReason,
+        });
+        return { allowed: false };
+      }
+
+      let settlement;
+      try {
+        settlement = await xrplSettlePayment(payload, requirements);
+      } catch (err) {
+        console.error('[x402] XRPL facilitator settle error:', err);
+        res.status(502).json({ error: `XRPL settlement unavailable: ${String(err)}` });
+        return { allowed: false };
+      }
+      if (!settlement.success) {
+        res.status(402).json({
+          error: 'XRPL settlement failed',
+          details: settlement.error,
+        });
+        return { allowed: false };
+      }
+
+      const receipt = {
+        txHash: settlement.txHash,
+        network: settlement.network ?? requirements.network,
+        paidWith: 'x402-xrpl',
+        payer: settlement.payer ?? verification.payer,
+      };
+      res.setHeader('payment-response', Buffer.from(JSON.stringify(receipt)).toString('base64'));
+      return { allowed: true, paymentMethod: 'x402-facilitator' };
+    }
+
+    // ── Base/CDP x402 flow (default) ────────────────────────────────────
     // Echo back the network token the client actually used ("base" or
     // "eip155:8453") so the facilitator's network match succeeds either way.
     // Default to CAIP-2 form when the payload omits it.
+    // Reject unknown networks that aren't Base (don't silently send XRPL sigs to CDP).
+    if (effectiveNetwork && isXrplNetwork(effectiveNetwork) && !isXrplEnabled()) {
+      res.status(402).json({
+        error: 'XRPL payments not enabled on this deployment',
+        hint: 'Set XRPL_PAY_TO to enable xrpl:* accepts',
+      });
+      return { allowed: false };
+    }
     const clientNetwork =
-      payloadNetwork === 'base' ? 'base' : 'eip155:8453';
+      effectiveNetwork === 'base' ? 'base' : 'eip155:8453';
     const paymentRequirements = {
       scheme: 'exact',
       network: clientNetwork,
@@ -376,6 +578,30 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
               },
             ]
           : []),
+        // Option 3: XRPL (t54 facilitator) — RLUSD 1:1 USD or XRP drops — when configured
+        ...(isXrplEnabled()
+          ? (() => {
+              const invoiceId = newXrplInvoiceId();
+              const req = buildXrplRequirements({
+                usdPrice: price,
+                invoiceId,
+                resource: 'https://sentinel.thoughtproof.ai/sentinel/verify',
+              });
+              return [
+                {
+                  scheme: req.scheme,
+                  network: req.network,
+                  amount: req.amount,
+                  maxAmountRequired: req.amount,
+                  asset: req.asset,
+                  payTo: req.payTo,
+                  resource: req.resource,
+                  maxTimeoutSeconds: req.maxTimeoutSeconds,
+                  extra: req.extra,
+                },
+              ];
+            })()
+          : []),
       ],
     };
     const x402Header = Buffer.from(JSON.stringify(x402Challenge)).toString('base64');
@@ -400,6 +626,11 @@ export async function x402Gate(req: VercelRequest, res: VercelResponse): Promise
           `Option B (Base): Send ${price} USDC to ${PAYMENT_WALLET} on Base (eip155:8453)`,
           ...(isGoatEnabled()
             ? [`Option C (GOAT): Pay via GOAT x402 gateway (eip155:2345) — include orderId in payload`]
+            : []),
+          ...(isXrplEnabled()
+            ? [
+                `Option D (XRPL): Pay via x402 on ${getXrplConfig().network} (${getXrplConfig().asset === 'XRP' ? 'XRP' : 'RLUSD'}) to ${getXrplConfig().payTo}`,
+              ]
             : []),
           `Confirm payment: POST /sentinel/payment-intents/${intent.id}/confirm with { "txHash": "0x..." }`,
           `Retry with header X-Payment-Intent: ${intent.id}`,
