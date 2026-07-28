@@ -7,8 +7,11 @@ const spec = {
     description:
       'Pre-execution verification checkpoint for autonomous AI agents. Multi-model cascade evaluates agent reasoning before irreversible actions. Returns ALLOW, BLOCK, or UNCERTAIN with structured per-step objections and optional EAS on-chain attestation.',
     version: '0.1.0',
+    // AgentCash discovery reads info.x-guidance; keep legacy guidance too.
     guidance:
       'Use POST /sentinel/verify to check agent decisions before execution. Provide claim + evidence + mode. Auth via X-Sentinel-Key or x402 micropayment (USDC on Base). Tiers at GET /sentinel/tiers.',
+    'x-guidance':
+      'Use POST /sentinel/verify to check agent decisions before execution. Provide claim + evidence + mode. Auth via X-Sentinel-Key or x402 micropayment (USDC on Base / eip155:8453, optional XRPL RLUSD). Tiers at GET /sentinel/tiers. Unauthenticated probes should receive HTTP 402 with extensions.bazaar input/output schemas.',
     contact: {
       url: 'https://thoughtproof.ai',
       email: 'support@thoughtproof.ai',
@@ -234,7 +237,75 @@ const spec = {
           },
           '400': { description: 'Invalid request (missing required fields or invalid mode/tier)' },
           '401': { description: 'Missing or invalid X-Sentinel-Key' },
-          '402': { description: 'x402 payment required (USDC on Base)' },
+          '402': {
+            description:
+              'x402 payment required. Live challenges dual-advertise network base + eip155:8453 for facilitator compatibility; discovery catalog (/.well-known/x402) is CAIP-2-only.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string' },
+                    protocol: { type: 'string', enum: ['x402'] },
+                    intentId: { type: 'string' },
+                    x402Version: { type: 'integer', example: 2 },
+                    accepts: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          scheme: { type: 'string' },
+                          network: {
+                            type: 'string',
+                            description:
+                              'CAIP-2 (eip155:8453) and/or legacy base on live challenges; catalog is CAIP-2-only',
+                          },
+                          amount: { type: 'string' },
+                          asset: { type: 'string' },
+                          payTo: { type: 'string' },
+                        },
+                      },
+                    },
+                    resource: { type: 'object' },
+                    extensions: {
+                      type: 'object',
+                      properties: {
+                        bazaar: {
+                          type: 'object',
+                          properties: {
+                            schema: {
+                              type: 'object',
+                              properties: {
+                                properties: {
+                                  type: 'object',
+                                  properties: {
+                                    input: {
+                                      type: 'object',
+                                      description:
+                                        'Request body schema for POST /sentinel/verify (claim, evidence, mode, tier?)',
+                                    },
+                                    output: {
+                                      type: 'object',
+                                      description:
+                                        '200 response schema (id, verdict, confidence, reasoning, objections, mode, tier, meta)',
+                                    },
+                                  },
+                                  required: ['input', 'output'],
+                                },
+                              },
+                            },
+                            guidance: { type: 'string' },
+                          },
+                        },
+                      },
+                    },
+                    payment: { type: 'object' },
+                    instructions: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
           '405': { description: 'Method not allowed (POST only)' },
           '413': { description: 'Request too large (max 1MB)' },
           '429': { description: 'Rate limit exceeded (120/min authenticated, 30/min anonymous)' },
