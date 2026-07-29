@@ -1,0 +1,32 @@
+{
+  "kind": "cb4a_verify_client_agent_context_e2e",
+  "ts": "2026-07-29T20:01:26.956Z",
+  "verdict": "BLOCK",
+  "route": "sentinel",
+  "sentinelVerdict": "BLOCK",
+  "sentinelModelsUsed": [
+    "serv-nano"
+  ],
+  "agentContext_echo": {
+    "agent_id": "cb4a-std-disciplined",
+    "agent_model": "moonshot/kimi-k2.6",
+    "agent_model_provider": "moonshot",
+    "agent_runtime": "cb4a",
+    "external_request_id": "e2e-proof-2026-07-29",
+    "environment": "paper",
+    "erc8004": {
+      "chainId": 8453,
+      "tokenId": 37477
+    },
+    "tags": [
+      "agent-context-e2e",
+      "intuition-pilot"
+    ],
+    "agent_model_source": "operator_declared",
+    "agent_model_role": "action_generator",
+    "identity_source": "operator_declared",
+    "identity_verified": false
+  },
+  "sentinel_commit": "bf13540",
+  "declared_source": "operator_declared via CB4A_AGENT_* + external_request_id"
+}

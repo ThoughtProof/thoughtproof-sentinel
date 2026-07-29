@@ -85,11 +85,11 @@ Only set `CB4A_AGENT_MODEL` to the model that **actually** generates the thesis/
 
 ## Ready criteria (before 8004 chat)
 
-- [ ] Prod accepts `agent_context`
-- [ ] Prod echoes it (with source defaults)
-- [ ] Existing clients + canonical hashes unchanged
-- [ ] Real paper run carries declared agent + ERC-8004 metadata
-- [ ] Docs state: declared, not verified, not signed into verdict
+- [x] Prod accepts `agent_context`
+- [x] Prod echoes it (with source defaults)
+- [x] Existing clients + canonical hashes unchanged
+- [x] Real paper path E2E (cb4a verify-client → prod) carries declared agent + ERC-8004 metadata — see agent-context-paper-e2e-proof-2026-07-29.json
+- [x] Docs state: declared, not verified, not signed into verdict
 
 ## Privacy
 

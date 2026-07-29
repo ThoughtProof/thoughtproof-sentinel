@@ -1,0 +1,31 @@
+{
+  "http": 200,
+  "verification_id": "sent_f102fa317e7a4287",
+  "verdict": "ALLOW",
+  "confidence": 0.25,
+  "meta_models_used": [
+    "serv-nano"
+  ],
+  "meta_agent_context": {
+    "agent_id": "tp-pilot-smoke",
+    "agent_model": "xai/grok-4",
+    "agent_model_provider": "xai",
+    "agent_runtime": "smoke",
+    "external_request_id": "smoke-2026-07-29",
+    "environment": "dev",
+    "erc8004": {
+      "chainId": 8453,
+      "tokenId": 37477
+    },
+    "tags": [
+      "agent-context-smoke",
+      "intuition-pilot"
+    ],
+    "agent_model_source": "operator_declared",
+    "agent_model_role": "action_generator",
+    "identity_source": "operator_declared",
+    "identity_verified": false
+  },
+  "has_agent_context_echo": true,
+  "deploy_commit_expected": "bf13540"
+}
