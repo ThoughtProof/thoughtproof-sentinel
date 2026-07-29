@@ -85,6 +85,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         duration_ms: Date.now() - startMs,
         models_used: [],
         verified_at: new Date().toISOString(),
+        ...(req.agent_context ? { agent_context: req.agent_context } : {}),
       },
     };
   }
@@ -211,6 +212,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
             },
           }
         : {}),
+      ...(req.agent_context ? { agent_context: req.agent_context } : {}),
     },
   };
 }

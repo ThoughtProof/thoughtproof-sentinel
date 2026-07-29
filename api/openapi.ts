@@ -125,6 +125,67 @@ const spec = {
                     description:
                       'Deterministic gate rollout stage (action_authorization only). shadow: logs violations but does not change verdict. enforce: violation forces BLOCK.',
                   },
+                  agent_context: {
+                    type: 'object',
+                    description:
+                      'Optional caller-declared context about the *acting* agent (not the verifier cascade). Echoed on response.meta.agent_context. Does NOT affect the verdict and is NOT included in the canonical verdict hash/signature — unsigned operator metadata for pilot reporting.',
+                    properties: {
+                      agent_id: { type: 'string', description: 'Operator agent id' },
+                      erc8004: {
+                        type: 'object',
+                        properties: {
+                          chainId: { type: 'number' },
+                          tokenId: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                        },
+                      },
+                      identity_source: {
+                        type: 'string',
+                        enum: ['operator_declared', 'erc8004_registry', 'api_key_binding'],
+                        description: 'Defaults to operator_declared when identity fields present',
+                      },
+                      identity_verified: {
+                        type: 'boolean',
+                        description: 'true only with registry/binding source; pilot default false',
+                      },
+                      agent_model: {
+                        type: 'string',
+                        description: 'Declared acting model, e.g. xai/grok-4 (self-report)',
+                      },
+                      agent_model_provider: { type: 'string' },
+                      agent_model_source: {
+                        type: 'string',
+                        enum: ['operator_declared', 'runtime_detected', 'unknown'],
+                      },
+                      agent_model_role: {
+                        type: 'string',
+                        enum: ['action_generator', 'planner', 'tool_caller', 'other'],
+                      },
+                      agent_runtime: {
+                        type: 'string',
+                        description: 'e.g. openclaw, cb4a, custom',
+                      },
+                      skill_version: { type: 'string' },
+                      external_request_id: {
+                        type: 'string',
+                        description: 'Caller correlation id (cycle/job). Distinct from response verification id.',
+                      },
+                      request_id: {
+                        type: 'string',
+                        description: 'Deprecated alias for external_request_id',
+                        deprecated: true,
+                      },
+                      session_id: { type: 'string' },
+                      environment: {
+                        type: 'string',
+                        enum: ['paper', 'testnet', 'live', 'dev'],
+                      },
+                      tags: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        maxItems: 16,
+                      },
+                    },
+                  },
                 },
               },
               examples: {

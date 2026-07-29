@@ -67,4 +67,58 @@ describe('validateVerifyRequest', () => {
     const result = validateVerifyRequest(null);
     expect(result.valid).toBe(false);
   });
+
+  it('accepts optional agent_context and trims strings', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      agent_context: {
+        agent_id: '  tp-pilot-1  ',
+        agent_model: 'xai/grok-4',
+        agent_runtime: 'cb4a',
+        environment: 'paper',
+        erc8004: { chainId: 8453, tokenId: 37477 },
+        request_id: 'req_abc',
+        tags: ['intuition-pilot'],
+      },
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.agent_context).toEqual({
+        agent_id: 'tp-pilot-1',
+        agent_model: 'xai/grok-4',
+        agent_model_source: 'operator_declared',
+        agent_model_role: 'action_generator',
+        agent_runtime: 'cb4a',
+        environment: 'paper',
+        erc8004: { chainId: 8453, tokenId: 37477 },
+        identity_source: 'operator_declared',
+        identity_verified: false,
+        external_request_id: 'req_abc',
+        tags: ['intuition-pilot'],
+      });
+    }
+  });
+
+  it('rejects identity_verified=true with operator_declared', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      agent_context: {
+        agent_id: 'x',
+        identity_source: 'operator_declared',
+        identity_verified: true,
+      },
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects invalid agent_context.environment', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      agent_context: { environment: 'staging' },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.field === 'agent_context.environment')).toBe(true);
+    }
+  });
 });

@@ -4,6 +4,68 @@ export type SentinelTier = 'checkpoint' | 'standard' | 'swift' | 'pro';
 
 export type SentinelMode = 'handoff' | 'plan_revision' | 'memory_write' | 'output_synthesis' | 'trade_execution' | 'trade_reasoning' | 'action_authorization';
 
+/**
+ * Optional caller-declared context about the *acting* agent (not the verifier).
+ * Used for graph/pilot reporting (model switches, per-agent windows). Never
+ * required for verify; never inferred — omit rather than guess.
+ *
+ * IMPORTANT: Echoed on `meta.agent_context` only. **Not** included in
+ * `sentinel.verdict.canonical.v1` / signature hash. Treat as unsigned
+ * operator metadata unless a future receipt schema binds a context_hash.
+ *
+ * @since 2026-07-29 (Intuition pilot prep)
+ */
+export interface AgentContext {
+  /** Operator-facing agent id (not automatically equal to verified ERC-8004) */
+  agent_id?: string;
+  /** ERC-8004 identity when known — still operator-declared unless identity_verified */
+  erc8004?: {
+    chainId: number;
+    tokenId: string | number;
+  };
+  /**
+   * How identity fields were established.
+   * @default 'operator_declared' when agent_id or erc8004 present
+   */
+  identity_source?: 'operator_declared' | 'erc8004_registry' | 'api_key_binding';
+  /**
+   * Whether ThoughtProof verified identity against a registry.
+   * Pilot v0: always false unless identity_source is registry/binding and checked.
+   * @default false when identity fields present
+   */
+  identity_verified?: boolean;
+  /** Declared acting model, e.g. "xai/grok-4" — self-report unless source says otherwise */
+  agent_model?: string;
+  /** Model provider label if separate from agent_model */
+  agent_model_provider?: string;
+  /**
+   * Provenance of agent_model.
+   * @default 'operator_declared' when agent_model present
+   */
+  agent_model_source?: 'operator_declared' | 'runtime_detected' | 'unknown';
+  /**
+   * Role of the declared model when multiple models are in the loop.
+   * @default 'action_generator' when agent_model present
+   */
+  agent_model_role?: 'action_generator' | 'planner' | 'tool_caller' | 'other';
+  /** Runtime / framework, e.g. "openclaw", "cb4a", "custom" */
+  agent_runtime?: string;
+  /** Skill or prompt bundle version */
+  skill_version?: string;
+  /**
+   * External correlation id from the caller's system (cycle id, job id).
+   * Distinct from Sentinel response `id` (verification id).
+   * Alias: `request_id` accepted and normalized to this field.
+   */
+  external_request_id?: string;
+  /** @deprecated use external_request_id */
+  request_id?: string;
+  session_id?: string;
+  environment?: 'paper' | 'testnet' | 'live' | 'dev';
+  /** Free-form operator tags (short strings only, no secrets/PII) */
+  tags?: string[];
+}
+
 export interface SentinelVerifyRequest {
   /** Unique identifier (optional, auto-generated) */
   id?: string;
@@ -29,6 +91,11 @@ export interface SentinelVerifyRequest {
    * 'enforce': a gate violation hard-BLOCKs. See shadow-mode-rollout.
    */
   gateMode?: GateMode;
+  /**
+   * Optional declared context about the acting agent (model, 8004 id, …).
+   * Echoed on the response; does not affect the verdict.
+   */
+  agent_context?: AgentContext;
 }
 
 export type SentinelVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
@@ -104,6 +171,11 @@ export interface SentinelVerifyResponse {
       codes: string[];
       verdict_unchanged: true;
     };
+    /**
+     * Echo of request.agent_context when supplied. Distinct from models_used
+     * (verifier cascade). Omitted when caller sent nothing.
+     */
+    agent_context?: AgentContext;
   };
 }
 
