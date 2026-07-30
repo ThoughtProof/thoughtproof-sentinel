@@ -111,14 +111,27 @@ describe('validateVerifyRequest', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('rejects invalid agent_context.environment', () => {
+  it('rejects invalid agent_model_source', () => {
     const result = validateVerifyRequest({
       ...validBody,
-      agent_context: { environment: 'staging' },
+      agent_context: { agent_model: 'x', agent_model_source: 'guessed' },
     });
     expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.errors.some((e) => e.field === 'agent_context.environment')).toBe(true);
+  });
+
+  it('normalizes mandate maxAmountUsd/amountUsd aliases for the gate', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      mode: 'action_authorization',
+      mandate: {
+        granted: { maxAmountUsd: 0, asset: 'USDC' },
+        action: { amountUsd: 500, asset: 'USDC' },
+      },
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.mandate?.granted?.maxAmount).toBe(0);
+      expect(result.data.mandate?.action?.amount).toBe(500);
     }
   });
 });

@@ -233,9 +233,87 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       evidence: (b.evidence as string).trim(),
       mode: b.mode as SentinelMode,
       tier: (b.tier as SentinelTier | undefined) ?? 'standard',
-      mandate: b.mandate as AuthorizationMandate | undefined,
+      mandate: normalizeMandate(b.mandate),
       gateMode: b.gateMode as GateMode | undefined,
       agent_context,
     },
   };
+}
+
+/**
+ * Accept common aliases used in demos/docs (maxAmountUsd, amountUsd) so the
+ * deterministic gate can fire. Prefer canonical maxAmount/amount when both set.
+ */
+function normalizeMandate(raw: unknown): AuthorizationMandate | undefined {
+  if (raw === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  const m = raw as Record<string, unknown>;
+  const grantedIn = (m.granted && typeof m.granted === 'object' && !Array.isArray(m.granted)
+    ? (m.granted as Record<string, unknown>)
+    : undefined);
+  const actionIn = (m.action && typeof m.action === 'object' && !Array.isArray(m.action)
+    ? (m.action as Record<string, unknown>)
+    : undefined);
+
+  const num = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+
+  const granted = grantedIn
+    ? {
+        ...grantedIn,
+        maxAmount:
+          num(grantedIn.maxAmount) ??
+          num(grantedIn.maxAmountUsd) ??
+          num(grantedIn.max_amount),
+        asset: typeof grantedIn.asset === 'string' ? grantedIn.asset : undefined,
+        recipient: typeof grantedIn.recipient === 'string' ? grantedIn.recipient : undefined,
+        allowUnlimited:
+          typeof grantedIn.allowUnlimited === 'boolean' ? grantedIn.allowUnlimited : undefined,
+      }
+    : undefined;
+
+  const action = actionIn
+    ? {
+        ...actionIn,
+        amount:
+          num(actionIn.amount) ?? num(actionIn.amountUsd) ?? num(actionIn.amount_usd),
+        asset: typeof actionIn.asset === 'string' ? actionIn.asset : undefined,
+        recipient: typeof actionIn.recipient === 'string' ? actionIn.recipient : undefined,
+        allowance: actionIn.allowance as string | number | undefined,
+      }
+    : undefined;
+
+  // Strip undefined-only shells
+  const g =
+    granted &&
+    (granted.maxAmount !== undefined ||
+      granted.asset !== undefined ||
+      granted.recipient !== undefined ||
+      granted.allowUnlimited !== undefined)
+      ? {
+          ...(granted.maxAmount !== undefined ? { maxAmount: granted.maxAmount } : {}),
+          ...(granted.asset !== undefined ? { asset: granted.asset } : {}),
+          ...(granted.recipient !== undefined ? { recipient: granted.recipient } : {}),
+          ...(granted.allowUnlimited !== undefined
+            ? { allowUnlimited: granted.allowUnlimited }
+            : {}),
+        }
+      : undefined;
+  const a =
+    action &&
+    (action.amount !== undefined ||
+      action.asset !== undefined ||
+      action.recipient !== undefined ||
+      action.allowance !== undefined)
+      ? {
+          ...(action.amount !== undefined ? { amount: action.amount } : {}),
+          ...(action.asset !== undefined ? { asset: action.asset } : {}),
+          ...(action.recipient !== undefined ? { recipient: action.recipient } : {}),
+          ...(action.allowance !== undefined ? { allowance: action.allowance } : {}),
+        }
+      : undefined;
+
+  if (!g && !a) return m as AuthorizationMandate;
+  return { granted: g, action: a };
 }
