@@ -3,6 +3,7 @@
 | Doc | Topic |
 |---|---|
 | [ADR-FRESHNESS-VS-VERIFIER-LATENCY-2026-07-30.md](./ADR-FRESHNESS-VS-VERIFIER-LATENCY-2026-07-30.md) | Quote freshness ≠ verifier latency; settlement TTL; taxonomy codes |
+| [ADR-SETTLEMENT-FRESHNESS-AT-EXECUTION-EDGE-2026-07-30.md](./ADR-SETTLEMENT-FRESHNESS-AT-EXECUTION-EDGE-2026-07-30.md) | Last TTL/action-hash check at wallet/authz edge; `execution_conditions` on ALLOW |
 | [FAILURE-TAXONOMY-v0-2026-07-30.md](./FAILURE-TAXONOMY-v0-2026-07-30.md) | Reporting-only failure codes + windowed rates |
 | [ERC8004-VALIDATION-RECEIPT-v0-2026-07-30.md](./ERC8004-VALIDATION-RECEIPT-v0-2026-07-30.md) | Validation-shaped artifact schema |
 | [VERIDEX-VS-TP-BOUNDARY-2026-07-30.md](./VERIDEX-VS-TP-BOUNDARY-2026-07-30.md) | Deterministic authz vs decision validation |
