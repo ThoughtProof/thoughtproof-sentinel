@@ -1,0 +1,38 @@
+{
+  "schema": "thoughtproof.validation-keys.v1",
+  "issuer": "ThoughtProof Decision Verification",
+  "issuerUrl": "https://thoughtproof.ai",
+  "keys": [
+    {
+      "keyId": "tp-validation-ed25519-2026-07",
+      "alg": "Ed25519",
+      "status": "active",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAs3pXjznQ51i9Ya0QOdOzeOnVltxUCBtl8xQKm5NqDd0=\n-----END PUBLIC KEY-----\n",
+      "publicKeySpkiSha256": "9cdad19d77bb301fe075ec925dbd409f4f2149261af514b49d43b0a64ac3ce98",
+      "usage": "Sign ThoughtProof ERC-8004-style validation artifacts (pilot)",
+      "notBefore": "2026-07-30T00:00:00Z",
+      "notAfter": null
+    }
+  ],
+  "canonicalization": {
+    "name": "tp-json-sort-keys-recursive-utf8-v1",
+    "steps": [
+      "Parse artifact JSON",
+      "Remove top-level fields: signature, artifactHash, signed",
+      "Recursively sort all object keys (arrays keep order)",
+      "Serialize with JSON.stringify (no extra whitespace; UTF-8)",
+      "Sign those exact bytes with Ed25519 (pure, no prehash context)",
+      "artifactHash = 0x || sha256(those same bytes) as hex"
+    ]
+  },
+  "verify": {
+    "wellKnown": "https://sentinel.thoughtproof.ai/.well-known/validation-keys.json",
+    "publicKeyRefExample": "https://sentinel.thoughtproof.ai/.well-known/validation-keys.json#tp-validation-ed25519-2026-07",
+    "script": "https://raw.githubusercontent.com/ThoughtProof/thoughtproof-sentinel/main/scripts/verify-validation-artifact.mjs",
+    "local": "node scripts/verify-validation-artifact.mjs <artifact.signed.json>"
+  },
+  "notes": [
+    "Pilot key — not HSM-backed. Rotate via new keyId + status=retired on old keys.",
+    "HMAC shared-secret signing is not used for public artifacts."
+  ]
+}

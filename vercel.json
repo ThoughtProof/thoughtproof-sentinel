@@ -3,6 +3,14 @@
     { "source": "/openapi.json", "destination": "/api/openapi" },
     { "source": "/.well-known/x402", "destination": "/api/well-known/x402" },
     {
+      "source": "/.well-known/validation-keys.json",
+      "destination": "/api/well-known/validation-keys"
+    },
+    {
+      "source": "/.well-known/validation-keys",
+      "destination": "/api/well-known/validation-keys"
+    },
+    {
       "source": "/.well-known/intuition/erc8004/agents/:chainId/:tokenId/trust-assessment.json",
       "destination": "/api/well-known/intuition/erc8004/agents/[chainId]/[tokenId]/trust-assessment?chainId=:chainId&tokenId=:tokenId"
     },
