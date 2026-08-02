@@ -57,13 +57,16 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
   const evidenceVerification: EvidenceVerificationResult[] = verificationResults.map((result, index) => ({
     index,
     status: result.status,
+    severity: result.severity,
+    code: result.code,
     reason: result.reason,
     signer: result.signer,
   }));
 
-  // Check for required evidence failures
-  const failedRequired: Array<{ index: number; reason: string }> = [];
-  const uncertainRequired: Array<{ index: number; reason: string }> = [];
+  // Check for required evidence failures — classification uses the STRUCTURED
+  // severity/code from signed-evidence.ts, never string matching on reasons.
+  const failedRequired: Array<{ index: number; code: string; reason: string }> = [];
+  const uncertainRequired: Array<{ index: number; code: string; reason: string }> = [];
   let allRequiredRecomputed = true;
 
   for (let i = 0; i < request.signed_evidence.length; i++) {
@@ -72,16 +75,14 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
 
     if (evidence.verification === 'required') {
       if (result.status === 'failed') {
-        // Determine if this is a BLOCK or UNCERTAIN failure
-        const isCriticalFailure = result.reason?.includes('Invalid signature') ||
-                                  result.reason?.includes('revoked') ||
-                                  result.reason?.includes('not authorized') ||
-                                  result.reason?.includes('Unsupported signature scheme');
-          
-        if (isCriticalFailure) {
-          failedRequired.push({ index: i, reason: result.reason || 'Evidence verification failed' });
+        const code = result.code ?? 'evidence_verification_error';
+        const reason = result.reason ?? 'Evidence verification failed';
+        if (result.severity === 'block') {
+          failedRequired.push({ index: i, code, reason });
         } else {
-          uncertainRequired.push({ index: i, reason: result.reason || 'Evidence verification uncertain' });
+          // 'uncertain' or missing severity (defensive default = uncertain,
+          // never silently allow, never block on an unclassified verifier bug)
+          uncertainRequired.push({ index: i, code, reason });
         }
         allRequiredRecomputed = false;
       } else if (result.status !== 'recomputed') {
@@ -102,7 +103,7 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
       score: 0.0,
       predicate: 'unsupported',
       quote: null,
-      reasoning: `Evidence signature verification failed: ${failed.reason}`,
+      reasoning: `${failed.code}:${failed.index} — Evidence signature verification failed: ${failed.reason}`,
     });
   }
 
@@ -113,7 +114,7 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
       score: 0.3,
       predicate: 'partial',
       quote: null,
-      reasoning: `Evidence verification uncertain: ${uncertain.reason}`,
+      reasoning: `${uncertain.code}:${uncertain.index} — Evidence verification uncertain: ${uncertain.reason}`,
     });
   }
 
@@ -155,12 +156,20 @@ export function applyEvidenceEffects(
   processingResult: EvidenceProcessingResult,
   request: SentinelVerifyRequest,
 ): SentinelVerifyResponse {
-  // Compute package digest
+  const hasSignedEvidence = !!(request.signed_evidence && request.signed_evidence.length > 0);
+
+  // Compute package digest.
+  // Failure handling (C3): when signed evidence is present, an uncomputable
+  // digest means the verdict cannot be bound to the package → force UNCERTAIN.
+  // Without signed evidence the digest is optional metadata; failure is silent
+  // (digest computation on a validated request should not fail in practice).
   let packageDigest: string | undefined;
+  let digestFailed = false;
   try {
     packageDigest = computePackageDigest(request);
   } catch (error) {
     console.error('[evidence-processing] failed to compute package digest:', error);
+    digestFailed = true;
   }
 
   // Apply verdict forcing
@@ -181,10 +190,27 @@ export function applyEvidenceEffects(
     }
   }
 
+  // Digest failure with signed evidence present: downgrade ALLOW → UNCERTAIN.
+  if (digestFailed && hasSignedEvidence && finalVerdict === 'ALLOW') {
+    finalVerdict = 'UNCERTAIN';
+    finalReasoning = `Package digest could not be computed; verdict is not action-bound. Original reasoning: ${response.reasoning}`;
+    finalObjections.push({
+      step_id: 'package_digest',
+      criterion: 'Action-bound verification',
+      score: 0.3,
+      predicate: 'partial',
+      quote: null,
+      reasoning: 'package_digest_uncomputable — verdict could not be bound to the exact request package',
+    });
+  }
+
   // Add evidence objections
   finalObjections.push(...processingResult.additionalObjections);
 
-  // Build the modified response
+  // F1 meta fields are only attached when signed evidence was actually part of
+  // the request (C2): requests WITHOUT signed_evidence must produce a response
+  // shape byte-identical to pre-F1 behavior (backward compatibility), and the
+  // canonical verdict body (which third parties hash) must not gain fields.
   const modifiedResponse: SentinelVerifyResponse = {
     ...response,
     verdict: finalVerdict,
@@ -192,11 +218,11 @@ export function applyEvidenceEffects(
     objections: finalObjections,
     meta: {
       ...response.meta,
-      ...(packageDigest ? { package_digest: packageDigest } : {}),
+      ...(hasSignedEvidence && packageDigest ? { package_digest: packageDigest } : {}),
       ...(processingResult.evidenceVerification.length > 0 ? {
         evidence_verification: processingResult.evidenceVerification,
       } : {}),
-      proof_strength: processingResult.proofStrength,
+      ...(hasSignedEvidence ? { proof_strength: processingResult.proofStrength } : {}),
     },
   };
 

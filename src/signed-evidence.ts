@@ -71,12 +71,37 @@ export interface RawSignedEvent {
 export interface EvidenceVerificationResult {
   /** Verification status */
   status: 'recomputed' | 'supplied_only' | 'failed';
-  /** Human-readable reason when failed */
+  /**
+   * Failure severity (structured — do NOT string-match on `reason`).
+   * - 'block': evidence is invalid or signer is not authorized
+   *   (invalid signature, malformed/tampered raw_event, revoked/expired/
+   *    not-yet-valid key, role mismatch, unsupported scheme)
+   * - 'uncertain': the verifier cannot determine validity
+   *   (manifest referenced but not provided, key not in manifest)
+   */
+  severity?: 'block' | 'uncertain';
+  /** Stable machine-readable failure code (e.g. evidence_signature_invalid). */
+  code?: string;
+  /** Human-readable reason when failed (truncated to 500 chars) */
   reason?: string;
   /** Verified signer public key when successful */
   signer?: string;
   /** Claims that were validated */
   claims_validated?: string[];
+}
+
+/** Truncate attacker-influenced text before it enters API responses. */
+function truncateReason(text: string, max = 500): string {
+  return text.length > max ? text.slice(0, max) + '…[truncated]' : text;
+}
+
+/** Structured failure helper — severity and code travel with the result. */
+function failure(
+  severity: 'block' | 'uncertain',
+  code: string,
+  reason: string,
+): EvidenceVerificationResult {
+  return { status: 'failed', severity, code, reason: truncateReason(reason) };
 }
 
 /**
@@ -96,10 +121,9 @@ export function verifySignedEvidence(
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown verification error';
       console.error(`[signed-evidence] verification failed for item ${index}:`, message);
-      return {
-        status: 'failed',
-        reason: message,
-      };
+      // Unexpected internal error: verifier cannot determine validity → UNCERTAIN,
+      // never BLOCK-on-verifier-bug, never ALLOW.
+      return failure('uncertain', 'evidence_verification_error', message);
     }
   });
 }
@@ -113,10 +137,8 @@ function verifySignedEvidenceItem(
 ): EvidenceVerificationResult {
   // Only ed25519 is supported in v0
   if (item.signature_scheme !== 'ed25519') {
-    return {
-      status: 'failed',
-      reason: `Unsupported signature scheme: ${item.signature_scheme}`,
-    };
+    return failure('block', 'unsupported_signature_scheme',
+      `Unsupported signature scheme: ${item.signature_scheme}`);
   }
 
   // Parse the raw event
@@ -125,17 +147,13 @@ function verifySignedEvidenceItem(
     const eventBytes = Buffer.from(item.raw_event, 'base64');
     rawEvent = JSON.parse(eventBytes.toString('utf8'));
   } catch (error) {
-    return {
-      status: 'failed',
-      reason: 'Invalid raw_event: not valid base64 JSON',
-    };
+    return failure('block', 'evidence_malformed',
+      'Invalid raw_event: not valid base64 JSON');
   }
 
   if (!rawEvent.payload || typeof rawEvent.signature !== 'string') {
-    return {
-      status: 'failed',
-      reason: 'Invalid raw_event structure: missing payload or signature',
-    };
+    return failure('block', 'evidence_malformed',
+      'Invalid raw_event structure: missing payload or signature');
   }
 
   // Verify the signature over the canonicalized payload
@@ -147,29 +165,23 @@ function verifySignedEvidenceItem(
   );
 
   if (!signatureValid) {
-    return {
-      status: 'failed',
-      reason: 'Invalid signature over canonical payload',
-    };
+    return failure('block', 'evidence_signature_invalid',
+      'Invalid signature over canonical payload');
   }
 
   // Check signer authorization if manifest is provided
   if (keyManifest) {
     const authResult = checkSignerAuthorization(item.signer_pubkey, item.claims, keyManifest);
     if (!authResult.authorized) {
-      return {
-        status: 'failed',
-        reason: authResult.reason,
-      };
+      return failure(authResult.severity, authResult.code, authResult.reason ?? 'Signer not authorized');
     }
   }
 
-  // If manifest was referenced but not provided, this is a configuration issue
+  // If manifest was referenced but not provided, the verifier cannot
+  // determine whether the signer is authorized → UNCERTAIN, not BLOCK.
   if (item.key_manifest_ref && !keyManifest) {
-    return {
-      status: 'failed',
-      reason: 'Key manifest referenced but not provided for verification',
-    };
+    return failure('uncertain', 'key_manifest_unverifiable',
+      'Key manifest referenced but not provided for verification');
   }
 
   return {
@@ -233,42 +245,41 @@ function verifyEd25519Signature(
 
 /**
  * Check if a signer is authorized for the given claims per the key manifest.
+ *
+ * Authorization failures classify as:
+ * - 'block' (signer_not_authorized): key known but revoked/expired/not-yet-valid/role-mismatch
+ * - 'uncertain' (key_manifest_unverifiable): key not present in the manifest at all
  */
 function checkSignerAuthorization(
   signerPubkey: string,
   claims: string[],
   manifest: KeyManifest,
-): { authorized: boolean; reason?: string } {
+): { authorized: boolean; severity: 'block' | 'uncertain'; code: string; reason?: string } {
   const key = manifest.keys.find((k) => k.pubkey.toLowerCase() === signerPubkey.toLowerCase());
-  
+
+  const deny = (severity: 'block' | 'uncertain', code: string, reason: string) =>
+    ({ authorized: false, severity, code, reason });
+
   if (!key) {
-    return {
-      authorized: false,
-      reason: 'Signer public key not found in manifest',
-    };
+    return deny('uncertain', 'key_manifest_unverifiable',
+      'Signer public key not found in manifest');
   }
 
   if (key.status !== 'active') {
-    return {
-      authorized: false,
-      reason: `Signer key status is ${key.status}, not active`,
-    };
+    return deny('block', 'signer_not_authorized',
+      `Signer key status is ${key.status}, not active`);
   }
 
   // Check time bounds if specified
   const now = new Date();
   if (key.not_before && now < new Date(key.not_before)) {
-    return {
-      authorized: false,
-      reason: 'Signer key not yet valid (not_before)',
-    };
+    return deny('block', 'signer_not_authorized',
+      'Signer key not yet valid (not_before)');
   }
 
   if (key.not_after && now > new Date(key.not_after)) {
-    return {
-      authorized: false,
-      reason: 'Signer key expired (not_after)',
-    };
+    return deny('block', 'signer_not_authorized',
+      'Signer key expired (not_after)');
   }
 
   // Check role-based authorization if roles are specified
@@ -279,12 +290,10 @@ function checkSignerAuthorization(
     });
 
     if (!hasRequiredRole) {
-      return {
-        authorized: false,
-        reason: `Signer key roles ${key.roles.join(',')} do not authorize claims ${claims.join(',')}`,
-      };
+      return deny('block', 'signer_not_authorized',
+        `Signer key roles ${key.roles.join(',')} do not authorize claims ${claims.join(',')}`);
     }
   }
 
-  return { authorized: true };
+  return { authorized: true, severity: 'block', code: '' };
 }

@@ -68,10 +68,13 @@ describe('evidence-processing', () => {
 
       const result = processSignedEvidence(request);
 
+      // Malformed evidence = invalid evidence → BLOCK (fail-closed, steelman C1 fix).
       expect(result.shouldForceVerdict).toBe(true);
-      expect(result.forcedVerdict).toBe('UNCERTAIN'); // Non-critical failure
+      expect(result.forcedVerdict).toBe('BLOCK');
       expect(result.evidenceVerification).toHaveLength(1);
       expect(result.evidenceVerification[0].status).toBe('failed');
+      expect(result.evidenceVerification[0].severity).toBe('block');
+      expect(result.evidenceVerification[0].code).toBe('evidence_malformed');
       expect(result.proofStrength).toBe('supplied_evidence');
     });
 
@@ -96,8 +99,8 @@ describe('evidence-processing', () => {
 
       expect(result.additionalObjections).toHaveLength(1);
       expect(result.additionalObjections[0].step_id).toBe('evidence_0');
-      expect(result.additionalObjections[0].predicate).toBe('partial');
-      expect(result.additionalObjections[0].reasoning).toContain('Evidence verification uncertain');
+      expect(result.additionalObjections[0].predicate).toBe('unsupported');
+      expect(result.additionalObjections[0].reasoning).toContain('evidence_malformed');
     });
 
     it('should handle optional evidence without forcing verdict', () => {
@@ -160,8 +163,10 @@ describe('evidence-processing', () => {
 
       expect(result.verdict).toBe('ALLOW');
       expect(result.reasoning).toBe('Original reasoning');
-      expect(result.meta.proof_strength).toBe('supplied_evidence');
-      expect(result.meta.package_digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+      // C2 backward compat: NO F1 meta fields when the request has no signed_evidence
+      expect(result.meta.proof_strength).toBeUndefined();
+      expect(result.meta.package_digest).toBeUndefined();
+      expect(result.meta.evidence_verification).toBeUndefined();
     });
 
     it('should force BLOCK verdict on critical evidence failure', () => {

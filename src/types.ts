@@ -104,6 +104,15 @@ export interface SentinelVerifyRequest {
   /**
    * Optional key manifest for verifying signed evidence signers (F1).
    * v0: inline object only, no network fetching.
+   *
+   * TRUST MODEL LIMITATION (v0): the caller supplies the manifest inline, so the
+   * manifest is only as trustworthy as the caller's own request integrity. It
+   * proves "the evidence signature matches a key the CALLER declared authorized"
+   * — it does NOT prove the signer is authorized by any independent authority.
+   * A production deployment should pin manifests server-side (by operator/account)
+   * or fetch them via `key_manifest_ref` from a content-addressed, versioned
+   * source with its own rotation/revocation signature. Treat v0 manifest checks
+   * as structure/consistency validation, not third-party authorization proof.
    */
   key_manifest?: KeyManifest;
 }
@@ -123,7 +132,18 @@ export interface SignedEventEvidence {
   key_manifest_ref?: string;
   /** Claims made by this evidence item */
   claims: string[];
-  /** Whether verification failure should force verdict change */
+  /**
+   * Whether verification failure should force a verdict change.
+   * 'required' → failures force BLOCK/UNCERTAIN; 'optional' → informational only.
+   *
+   * NOTE (caller-declared strictness): this field is supplied by the caller, so a
+   * caller can mark all evidence 'optional' and no forcing occurs. This is
+   * intentional policy delegation: the evidence layer REPORTS verification
+   * results either way (meta.evidence_verification + proof_strength), and
+   * forcing only downgrades — it never upgrades a verdict. Deployments that need
+   * a strictness floor should enforce it server-side by operator/policy, not by
+   * trusting this field.
+   */
   verification: 'required' | 'optional';
 }
 
@@ -151,7 +171,15 @@ export interface EvidenceVerificationResult {
   index: number;
   /** Verification status */
   status: 'recomputed' | 'supplied_only' | 'failed';
-  /** Human-readable reason when failed */
+  /**
+   * Failure severity (structured; do NOT string-match on `reason`):
+   * - 'block': evidence invalid or signer not authorized
+   * - 'uncertain': verifier cannot determine validity
+   */
+  severity?: 'block' | 'uncertain';
+  /** Stable machine-readable failure code (e.g. evidence_signature_invalid, signer_not_authorized, key_manifest_unverifiable) */
+  code?: string;
+  /** Human-readable reason when failed (truncated to 500 chars) */
   reason?: string;
   /** Verified signer public key when successful */
   signer?: string;
