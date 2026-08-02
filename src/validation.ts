@@ -1,4 +1,4 @@
-import type { AgentContext, SentinelVerifyRequest, SentinelMode, SentinelTier } from './types.js';
+import type { AgentContext, SentinelVerifyRequest, SentinelMode, SentinelTier, SignedEventEvidence, KeyManifest } from './types.js';
 import type { AuthorizationMandate, GateMode } from './engine/authorization-gate.js';
 import { TIER_CONFIGS } from './tiers.js';
 
@@ -211,6 +211,10 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
     errors.push({ field: 'mandate', message: 'Must be an object with optional { granted, action }' });
   }
 
+  // Validate signed evidence (F1)
+  const signedEvidence = validateSignedEvidence(b.signed_evidence, errors);
+  const keyManifest = validateKeyManifest(b.key_manifest, errors);
+
   const agent_context = parseAgentContext(b.agent_context, errors);
 
   // Size limits
@@ -236,6 +240,8 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       mandate: normalizeMandate(b.mandate),
       gateMode: b.gateMode as GateMode | undefined,
       agent_context,
+      signed_evidence: signedEvidence,
+      key_manifest: keyManifest,
     },
   };
 }
@@ -316,4 +322,223 @@ function normalizeMandate(raw: unknown): AuthorizationMandate | undefined {
 
   if (!g && !a) return m as AuthorizationMandate;
   return { granted: g, action: a };
+}
+
+/**
+ * Validate signed evidence array (F1).
+ */
+function validateSignedEvidence(
+  raw: unknown,
+  errors: ValidationError[],
+): SignedEventEvidence[] | undefined {
+  if (raw === undefined) return undefined;
+
+  if (!Array.isArray(raw)) {
+    errors.push({ field: 'signed_evidence', message: 'Must be an array of signed event objects' });
+    return undefined;
+  }
+
+  if (raw.length > 50) {
+    errors.push({ field: 'signed_evidence', message: 'At most 50 evidence items allowed' });
+    return undefined;
+  }
+
+  const evidence: SignedEventEvidence[] = [];
+
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      errors.push({ field: `signed_evidence[${i}]`, message: 'Must be an object' });
+      continue;
+    }
+
+    const e = item as Record<string, unknown>;
+
+    if (e.type !== 'signed_event') {
+      errors.push({ field: `signed_evidence[${i}].type`, message: 'Must be "signed_event"' });
+      continue;
+    }
+
+    if (typeof e.raw_event !== 'string' || e.raw_event.length === 0) {
+      errors.push({ field: `signed_evidence[${i}].raw_event`, message: 'Must be a non-empty base64 string' });
+      continue;
+    }
+
+    if (e.signature_scheme !== 'ed25519') {
+      errors.push({ 
+        field: `signed_evidence[${i}].signature_scheme`, 
+        message: 'Must be "ed25519" (only supported scheme in v0)' 
+      });
+      continue;
+    }
+
+    if (typeof e.signer_pubkey !== 'string' || !/^[0-9a-f]+$/i.test(e.signer_pubkey)) {
+      errors.push({ 
+        field: `signed_evidence[${i}].signer_pubkey`, 
+        message: 'Must be a hex-encoded public key' 
+      });
+      continue;
+    }
+
+    if (e.signer_pubkey.length !== 64) {
+      errors.push({ 
+        field: `signed_evidence[${i}].signer_pubkey`, 
+        message: 'Ed25519 public key must be 32 bytes (64 hex chars)' 
+      });
+      continue;
+    }
+
+    if (!Array.isArray(e.claims) || e.claims.length === 0) {
+      errors.push({ field: `signed_evidence[${i}].claims`, message: 'Must be a non-empty array of claim strings' });
+      continue;
+    }
+
+    const claims: string[] = [];
+    for (let j = 0; j < e.claims.length; j++) {
+      const claim = e.claims[j];
+      if (typeof claim !== 'string' || claim.trim().length === 0) {
+        errors.push({ 
+          field: `signed_evidence[${i}].claims[${j}]`, 
+          message: 'Each claim must be a non-empty string' 
+        });
+      } else {
+        claims.push(claim.trim());
+      }
+    }
+
+    if (e.verification !== 'required' && e.verification !== 'optional') {
+      errors.push({ 
+        field: `signed_evidence[${i}].verification`, 
+        message: 'Must be "required" or "optional"' 
+      });
+      continue;
+    }
+
+    if (e.key_manifest_ref !== undefined && typeof e.key_manifest_ref !== 'string') {
+      errors.push({ 
+        field: `signed_evidence[${i}].key_manifest_ref`, 
+        message: 'Must be a string when provided' 
+      });
+      continue;
+    }
+
+    evidence.push({
+      type: 'signed_event',
+      raw_event: e.raw_event,
+      signature_scheme: 'ed25519',
+      signer_pubkey: e.signer_pubkey.toLowerCase(),
+      claims,
+      verification: e.verification as 'required' | 'optional',
+      ...(e.key_manifest_ref ? { key_manifest_ref: e.key_manifest_ref as string } : {}),
+    });
+  }
+
+  return evidence.length > 0 ? evidence : undefined;
+}
+
+/**
+ * Validate key manifest (F1).
+ */
+function validateKeyManifest(
+  raw: unknown,
+  errors: ValidationError[],
+): KeyManifest | undefined {
+  if (raw === undefined) return undefined;
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push({ field: 'key_manifest', message: 'Must be an object' });
+    return undefined;
+  }
+
+  const m = raw as Record<string, unknown>;
+
+  if (typeof m.version !== 'string' || m.version.trim().length === 0) {
+    errors.push({ field: 'key_manifest.version', message: 'Must be a non-empty string' });
+  }
+
+  if (!Array.isArray(m.keys)) {
+    errors.push({ field: 'key_manifest.keys', message: 'Must be an array of key objects' });
+    return undefined;
+  }
+
+  if (m.keys.length > 100) {
+    errors.push({ field: 'key_manifest.keys', message: 'At most 100 keys allowed' });
+    return undefined;
+  }
+
+  const keys = [];
+
+  for (let i = 0; i < m.keys.length; i++) {
+    const key = m.keys[i];
+    if (!key || typeof key !== 'object' || Array.isArray(key)) {
+      errors.push({ field: `key_manifest.keys[${i}]`, message: 'Must be an object' });
+      continue;
+    }
+
+    const k = key as Record<string, unknown>;
+
+    if (typeof k.pubkey !== 'string' || !/^[0-9a-f]+$/i.test(k.pubkey) || k.pubkey.length !== 64) {
+      errors.push({ 
+        field: `key_manifest.keys[${i}].pubkey`, 
+        message: 'Must be a 64-char hex-encoded ed25519 public key' 
+      });
+      continue;
+    }
+
+    if (!['active', 'revoked', 'rotated'].includes(k.status as string)) {
+      errors.push({ 
+        field: `key_manifest.keys[${i}].status`, 
+        message: 'Must be "active", "revoked", or "rotated"' 
+      });
+      continue;
+    }
+
+    const keyEntry: any = {
+      pubkey: k.pubkey.toLowerCase(),
+      status: k.status,
+    };
+
+    if (k.not_before !== undefined) {
+      if (typeof k.not_before !== 'string') {
+        errors.push({ field: `key_manifest.keys[${i}].not_before`, message: 'Must be an ISO date string' });
+        continue;
+      }
+      keyEntry.not_before = k.not_before;
+    }
+
+    if (k.not_after !== undefined) {
+      if (typeof k.not_after !== 'string') {
+        errors.push({ field: `key_manifest.keys[${i}].not_after`, message: 'Must be an ISO date string' });
+        continue;
+      }
+      keyEntry.not_after = k.not_after;
+    }
+
+    if (k.roles !== undefined) {
+      if (!Array.isArray(k.roles)) {
+        errors.push({ field: `key_manifest.keys[${i}].roles`, message: 'Must be an array of role strings' });
+        continue;
+      }
+      const roles: string[] = [];
+      for (let j = 0; j < k.roles.length; j++) {
+        const role = k.roles[j];
+        if (typeof role !== 'string' || role.trim().length === 0) {
+          errors.push({ 
+            field: `key_manifest.keys[${i}].roles[${j}]`, 
+            message: 'Each role must be a non-empty string' 
+          });
+        } else {
+          roles.push(role.trim());
+        }
+      }
+      if (roles.length > 0) keyEntry.roles = roles;
+    }
+
+    keys.push(keyEntry);
+  }
+
+  return {
+    version: (m.version as string).trim(),
+    keys,
+  };
 }

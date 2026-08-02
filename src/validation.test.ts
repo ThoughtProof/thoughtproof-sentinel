@@ -134,4 +134,53 @@ describe('validateVerifyRequest', () => {
       expect(result.data.mandate?.action?.amount).toBe(500);
     }
   });
+
+  it('accepts valid signed_evidence with key_manifest', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      signed_evidence: [{
+        type: 'signed_event',
+        raw_event: Buffer.from('{"payload":"x","signature":"y"}').toString('base64'),
+        signature_scheme: 'ed25519',
+        signer_pubkey: 'a'.repeat(64),
+        claims: ['owner_signoff'],
+        verification: 'required',
+      }],
+      key_manifest: {
+        version: '1',
+        keys: [{ pubkey: 'a'.repeat(64), status: 'active' }],
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects signed_evidence with wrong type', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      signed_evidence: [{
+        type: 'unsigned_note',
+        raw_event: 'eA==',
+        signature_scheme: 'ed25519',
+        signer_pubkey: 'a'.repeat(64),
+        claims: [],
+        verification: 'optional',
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects signed_evidence with unsupported scheme', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      signed_evidence: [{
+        type: 'signed_event',
+        raw_event: 'eA==',
+        signature_scheme: 'rsa-pss',
+        signer_pubkey: 'a'.repeat(64),
+        claims: [],
+        verification: 'optional',
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
 });

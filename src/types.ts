@@ -96,6 +96,93 @@ export interface SentinelVerifyRequest {
    * Echoed on the response; does not affect the verdict.
    */
   agent_context?: AgentContext;
+  /**
+   * Optional cryptographic evidence items for action-bound verification (F1).
+   * When present, enables recomputable package digests and evidence verification.
+   */
+  signed_evidence?: SignedEventEvidence[];
+  /**
+   * Optional key manifest for verifying signed evidence signers (F1).
+   * v0: inline object only, no network fetching.
+   *
+   * TRUST MODEL LIMITATION (v0): the caller supplies the manifest inline, so the
+   * manifest is only as trustworthy as the caller's own request integrity. It
+   * proves "the evidence signature matches a key the CALLER declared authorized"
+   * — it does NOT prove the signer is authorized by any independent authority.
+   * A production deployment should pin manifests server-side (by operator/account)
+   * or fetch them via `key_manifest_ref` from a content-addressed, versioned
+   * source with its own rotation/revocation signature. Treat v0 manifest checks
+   * as structure/consistency validation, not third-party authorization proof.
+   */
+  key_manifest?: KeyManifest;
+}
+
+/**
+ * Evidence item type for cryptographically signed events (F1).
+ */
+export interface SignedEventEvidence {
+  type: 'signed_event';
+  /** Base64-encoded exact bytes of the signed event */
+  raw_event: string;
+  /** Signature scheme - v0 supports ed25519 only */
+  signature_scheme: 'ed25519';
+  /** Hex-encoded signer public key */
+  signer_pubkey: string;
+  /** Optional reference to key manifest (v0: not network-fetched) */
+  key_manifest_ref?: string;
+  /** Claims made by this evidence item */
+  claims: string[];
+  /**
+   * Whether verification failure should force a verdict change.
+   * 'required' → failures force BLOCK/UNCERTAIN; 'optional' → informational only.
+   *
+   * NOTE (caller-declared strictness): this field is supplied by the caller, so a
+   * caller can mark all evidence 'optional' and no forcing occurs. This is
+   * intentional policy delegation: the evidence layer REPORTS verification
+   * results either way (meta.evidence_verification + proof_strength), and
+   * forcing only downgrades — it never upgrades a verdict. Deployments that need
+   * a strictness floor should enforce it server-side by operator/policy, not by
+   * trusting this field.
+   */
+  verification: 'required' | 'optional';
+}
+
+/**
+ * Key manifest for verifying signer authorization (F1).
+ */
+export interface KeyManifest {
+  version: string;
+  keys: KeyManifestEntry[];
+}
+
+export interface KeyManifestEntry {
+  pubkey: string;
+  status: 'active' | 'revoked' | 'rotated';
+  not_before?: string;
+  not_after?: string;
+  roles?: string[];
+}
+
+/**
+ * Result of verifying a single evidence item (F1).
+ */
+export interface EvidenceVerificationResult {
+  /** Evidence item index */
+  index: number;
+  /** Verification status */
+  status: 'recomputed' | 'supplied_only' | 'failed';
+  /**
+   * Failure severity (structured; do NOT string-match on `reason`):
+   * - 'block': evidence invalid or signer not authorized
+   * - 'uncertain': verifier cannot determine validity
+   */
+  severity?: 'block' | 'uncertain';
+  /** Stable machine-readable failure code (e.g. evidence_signature_invalid, signer_not_authorized, key_manifest_unverifiable) */
+  code?: string;
+  /** Human-readable reason when failed (truncated to 500 chars) */
+  reason?: string;
+  /** Verified signer public key when successful */
+  signer?: string;
 }
 
 export type SentinelVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
@@ -176,6 +263,25 @@ export interface SentinelVerifyResponse {
      * (verifier cascade). Omitted when caller sent nothing.
      */
     agent_context?: AgentContext;
+    /**
+     * SHA256 hash of JCS-canonicalized entire validated request (F1).
+     * Present when request is computable for package digest binding.
+     */
+    package_digest?: string;
+    /**
+     * Per-evidence verification results (F1). Present when signed_evidence
+     * items were provided in the request.
+     */
+    evidence_verification?: EvidenceVerificationResult[];
+    /**
+     * Proof strength indicator (F1). Indicates whether all required evidence
+     * was cryptographically recomputed by the verifier, or the verifier could
+     * not independently recompute it (missing manifest, unknown signer,
+     * unsupported scheme, etc.). Verdicts are never upgraded on unverified
+     * evidence; unverified evidence only downgrades ALLOW -> UNCERTAIN when
+     * a package_digest is present but couldn't be computed.
+     */
+    proof_strength?: 'recomputed' | 'unverified';
   };
 }
 
