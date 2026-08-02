@@ -8,7 +8,7 @@ import type { SentinelVerifyRequest, SentinelVerifyResponse } from './types.js';
 
 describe('evidence-processing', () => {
   describe('processSignedEvidence', () => {
-    it('should return supplied_evidence when no signed evidence', () => {
+    it('should return unverified when no signed evidence', () => {
       const request: SentinelVerifyRequest = {
         claim: 'Test claim',
         evidence: 'Test evidence',
@@ -19,7 +19,7 @@ describe('evidence-processing', () => {
 
       expect(result.shouldForceVerdict).toBe(false);
       expect(result.evidenceVerification).toHaveLength(0);
-      expect(result.proofStrength).toBe('supplied_evidence');
+      expect(result.proofStrength).toBe('unverified');
       expect(result.additionalObjections).toHaveLength(0);
     });
 
@@ -46,7 +46,7 @@ describe('evidence-processing', () => {
       expect(result.forcedVerdict).toBe('BLOCK');
       expect(result.evidenceVerification).toHaveLength(1);
       expect(result.evidenceVerification[0].status).toBe('failed');
-      expect(result.proofStrength).toBe('supplied_evidence');
+      expect(result.proofStrength).toBe('unverified');
     });
 
     it('should handle invalid base64 in raw_event', () => {
@@ -75,7 +75,7 @@ describe('evidence-processing', () => {
       expect(result.evidenceVerification[0].status).toBe('failed');
       expect(result.evidenceVerification[0].severity).toBe('block');
       expect(result.evidenceVerification[0].code).toBe('evidence_malformed');
-      expect(result.proofStrength).toBe('supplied_evidence');
+      expect(result.proofStrength).toBe('unverified');
     });
 
     it('should add evidence objections for failures', () => {
@@ -125,7 +125,7 @@ describe('evidence-processing', () => {
       expect(result.shouldForceVerdict).toBe(false);
       expect(result.evidenceVerification).toHaveLength(1);
       expect(result.evidenceVerification[0].status).toBe('failed');
-      expect(result.proofStrength).toBe('supplied_evidence');
+      expect(result.proofStrength).toBe('unverified');
     });
   });
 
@@ -150,7 +150,7 @@ describe('evidence-processing', () => {
         shouldForceVerdict: false,
         additionalObjections: [],
         evidenceVerification: [],
-        proofStrength: 'supplied_evidence' as const,
+        proofStrength: 'unverified' as const,
       };
 
       const request: SentinelVerifyRequest = {
@@ -205,7 +205,7 @@ describe('evidence-processing', () => {
             reason: 'Invalid signature',
           },
         ],
-        proofStrength: 'supplied_evidence' as const,
+        proofStrength: 'unverified' as const,
       };
 
       const request: SentinelVerifyRequest = {
@@ -244,7 +244,7 @@ describe('evidence-processing', () => {
         forcedVerdict: 'UNCERTAIN' as const,
         additionalObjections: [],
         evidenceVerification: [],
-        proofStrength: 'supplied_evidence' as const,
+        proofStrength: 'unverified' as const,
       };
 
       const request: SentinelVerifyRequest = {
@@ -280,7 +280,7 @@ describe('evidence-processing', () => {
         forcedVerdict: 'UNCERTAIN' as const, // Trying to downgrade to UNCERTAIN
         additionalObjections: [],
         evidenceVerification: [],
-        proofStrength: 'supplied_evidence' as const,
+        proofStrength: 'unverified' as const,
       };
 
       const request: SentinelVerifyRequest = {

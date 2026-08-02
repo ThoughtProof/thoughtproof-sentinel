@@ -180,8 +180,8 @@ async function main() {
     
     if (hasEvidence && proofStrength === 'recomputed') {
       console.log('✅ Receipt contains recomputed cryptographic evidence');
-    } else if (hasEvidence && proofStrength === 'supplied_evidence') {
-      console.log('⚠️  Receipt contains supplied evidence (not cryptographically recomputed)');
+    } else if (hasEvidence && proofStrength === 'unverified') {
+      console.log('⚠️  Receipt contains unverified evidence (verifier could not independently recompute)');
     } else {
       console.log('ℹ️  Receipt contains no cryptographic evidence (standard verification)');
     }

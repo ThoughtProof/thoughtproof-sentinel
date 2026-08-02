@@ -30,7 +30,7 @@ export interface EvidenceProcessingResult {
   /** Per-evidence verification results for response metadata */
   evidenceVerification: EvidenceVerificationResult[];
   /** Proof strength indicator */
-  proofStrength: 'recomputed' | 'supplied_evidence';
+  proofStrength: 'recomputed' | 'unverified';
 }
 
 /**
@@ -46,7 +46,7 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
       shouldForceVerdict: false,
       additionalObjections: [],
       evidenceVerification: [],
-      proofStrength: 'supplied_evidence',
+      proofStrength: 'unverified',
     };
   }
 
@@ -132,7 +132,7 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
   }
 
   // Determine proof strength
-  const proofStrength: 'recomputed' | 'supplied_evidence' = allRequiredRecomputed ? 'recomputed' : 'supplied_evidence';
+  const proofStrength: 'recomputed' | 'unverified' = allRequiredRecomputed ? 'recomputed' : 'unverified';
 
   return {
     shouldForceVerdict,

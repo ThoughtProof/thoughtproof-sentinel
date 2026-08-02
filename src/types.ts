@@ -275,9 +275,13 @@ export interface SentinelVerifyResponse {
     evidence_verification?: EvidenceVerificationResult[];
     /**
      * Proof strength indicator (F1). Indicates whether all required evidence
-     * was cryptographically recomputed or only supplied as claims.
+     * was cryptographically recomputed by the verifier, or the verifier could
+     * not independently recompute it (missing manifest, unknown signer,
+     * unsupported scheme, etc.). Verdicts are never upgraded on unverified
+     * evidence; unverified evidence only downgrades ALLOW -> UNCERTAIN when
+     * a package_digest is present but couldn't be computed.
      */
-    proof_strength?: 'recomputed' | 'supplied_evidence';
+    proof_strength?: 'recomputed' | 'unverified';
   };
 }
 
