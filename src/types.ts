@@ -96,6 +96,65 @@ export interface SentinelVerifyRequest {
    * Echoed on the response; does not affect the verdict.
    */
   agent_context?: AgentContext;
+  /**
+   * Optional cryptographic evidence items for action-bound verification (F1).
+   * When present, enables recomputable package digests and evidence verification.
+   */
+  signed_evidence?: SignedEventEvidence[];
+  /**
+   * Optional key manifest for verifying signed evidence signers (F1).
+   * v0: inline object only, no network fetching.
+   */
+  key_manifest?: KeyManifest;
+}
+
+/**
+ * Evidence item type for cryptographically signed events (F1).
+ */
+export interface SignedEventEvidence {
+  type: 'signed_event';
+  /** Base64-encoded exact bytes of the signed event */
+  raw_event: string;
+  /** Signature scheme - v0 supports ed25519 only */
+  signature_scheme: 'ed25519';
+  /** Hex-encoded signer public key */
+  signer_pubkey: string;
+  /** Optional reference to key manifest (v0: not network-fetched) */
+  key_manifest_ref?: string;
+  /** Claims made by this evidence item */
+  claims: string[];
+  /** Whether verification failure should force verdict change */
+  verification: 'required' | 'optional';
+}
+
+/**
+ * Key manifest for verifying signer authorization (F1).
+ */
+export interface KeyManifest {
+  version: string;
+  keys: KeyManifestEntry[];
+}
+
+export interface KeyManifestEntry {
+  pubkey: string;
+  status: 'active' | 'revoked' | 'rotated';
+  not_before?: string;
+  not_after?: string;
+  roles?: string[];
+}
+
+/**
+ * Result of verifying a single evidence item (F1).
+ */
+export interface EvidenceVerificationResult {
+  /** Evidence item index */
+  index: number;
+  /** Verification status */
+  status: 'recomputed' | 'supplied_only' | 'failed';
+  /** Human-readable reason when failed */
+  reason?: string;
+  /** Verified signer public key when successful */
+  signer?: string;
 }
 
 export type SentinelVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
@@ -176,6 +235,21 @@ export interface SentinelVerifyResponse {
      * (verifier cascade). Omitted when caller sent nothing.
      */
     agent_context?: AgentContext;
+    /**
+     * SHA256 hash of JCS-canonicalized entire validated request (F1).
+     * Present when request is computable for package digest binding.
+     */
+    package_digest?: string;
+    /**
+     * Per-evidence verification results (F1). Present when signed_evidence
+     * items were provided in the request.
+     */
+    evidence_verification?: EvidenceVerificationResult[];
+    /**
+     * Proof strength indicator (F1). Indicates whether all required evidence
+     * was cryptographically recomputed or only supplied as claims.
+     */
+    proof_strength?: 'recomputed' | 'supplied_evidence';
   };
 }
 

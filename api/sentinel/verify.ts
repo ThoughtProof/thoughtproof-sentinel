@@ -5,6 +5,7 @@ import { buildAttestationData, issueAttestation } from '../../src/eas/attest.js'
 import { buildBillingEvent, recordBillingEvent } from '../../src/billing.js';
 import { validateApiKey, checkRateLimit, checkGlobalRateLimit } from '../../src/auth.js';
 import { x402Gate } from '../../src/middleware/x402.js';
+import { processSignedEvidence, applyEvidenceEffects } from '../../src/evidence-processing.js';
 import type { PaymentPlatform } from '../../src/types.js';
 
 const VERSION = '0.1.0';
@@ -89,19 +90,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // --- Engine call — pure verification ---
     const response = await verify(result.data);
 
+    // --- Evidence Processing (F1) ---
+    const evidenceResult = processSignedEvidence(result.data);
+    const processedResponse = applyEvidenceEffects(response, evidenceResult, result.data);
+
     // --- Response Validation ---
-    if (!response.verdict || !['ALLOW', 'BLOCK', 'UNCERTAIN'].includes(response.verdict)) {
-      console.error(`[sentinel/verify:${requestId}] invalid engine response: verdict=${response.verdict}`);
+    if (!processedResponse.verdict || !['ALLOW', 'BLOCK', 'UNCERTAIN'].includes(processedResponse.verdict)) {
+      console.error(`[sentinel/verify:${requestId}] invalid processed response: verdict=${processedResponse.verdict}`);
       return res.status(502).json({ error: 'Engine returned invalid response', code: 'ENGINE_ERROR' });
     }
 
     // --- EAS attestation (opt-in via X-Sentinel-Attest header) ---
-    const attestationData = buildAttestationData(result.data, response);
+    const attestationData = buildAttestationData(result.data, processedResponse);
     const wantsAttestation = req.headers['x-sentinel-attest'] === 'true';
     const attestationEnabled = !!process.env.ATTESTER_PRIVATE_KEY;
     let attestationResult: { uid: string; txHash: string } | null = null;
 
-    if (wantsAttestation && attestationEnabled && response.verdict === 'ALLOW') {
+    if (wantsAttestation && attestationEnabled && processedResponse.verdict === 'ALLOW') {
       try {
         const recipient = (req.headers['x-sentinel-attest-recipient'] as string) ?? undefined;
         const result = await issueAttestation(attestationData, { recipient });
@@ -114,14 +119,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // --- Billing event (logged + Stripe meter if configured) ---
-    const billingEvent = buildBillingEvent(response, { platform, agent_id: agentId });
+    const billingEvent = buildBillingEvent(processedResponse, { platform, agent_id: agentId });
     await recordBillingEvent(billingEvent);
 
-    console.log(`[sentinel/verify:${requestId}] verdict=${response.verdict} confidence=${response.confidence} tier=${response.tier} mode=${response.mode} duration=${response.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}`);
+    console.log(`[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}${processedResponse.meta.proof_strength ? ` proof=${processedResponse.meta.proof_strength}` : ''}`);
 
     // Return enriched response with attestation + billing metadata
     return res.status(200).json({
-      ...response,
+      ...processedResponse,
       attestation: {
         prepared: true,
         issued: !!attestationResult,

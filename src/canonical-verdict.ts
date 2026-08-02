@@ -55,6 +55,10 @@ export interface CanonicalSentinelVerdictBody {
     primary: string;
     secondary?: string;
   };
+  /** SHA256 hash of the bounded package (F1, omitted when absent). */
+  packageDigest?: string;
+  /** Proof strength (F1, omitted when absent). */
+  proofStrength?: string;
   /** Deterministic-gate result (action_authorization only; omitted otherwise). */
   gate?: {
     mode: string;
@@ -102,6 +106,14 @@ export function buildCanonicalSentinelVerdict(
     evaluatedAt,
     models,
   };
+
+  // package digest and proof strength are optional (F1) — only present when computed
+  if (response.meta.package_digest) {
+    body.packageDigest = response.meta.package_digest;
+  }
+  if (response.meta.proof_strength) {
+    body.proofStrength = response.meta.proof_strength;
+  }
 
   // gate is optional — only present for action_authorization with a mandate.
   // Omit entirely (not null) when absent, for JCS determinism.
