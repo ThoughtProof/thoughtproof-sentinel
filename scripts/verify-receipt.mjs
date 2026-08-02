@@ -127,6 +127,15 @@ function verifyDigestMatch(receipt, request) {
     console.log(`Computed digest: ${computedDigest}`);
     console.log(`${match ? '✅' : '❌'} Package digest ${match ? 'matches' : 'does not match'}`);
     
+    if (!match) {
+      console.log('');
+      console.log('Hint: as of F3, the /verify endpoint rejects unknown fields');
+      console.log('with HTTP 400 rather than silently dropping them. If this receipt');
+      console.log('was produced by a pre-F3 server, an unknown field in the original');
+      console.log('request may have been silently stripped before digest computation.');
+      console.log('Check the request shape against the OpenAPI spec.');
+    }
+    
     return match;
   } catch (error) {
     console.log(`❌ Failed to compute package digest: ${error.message}`);

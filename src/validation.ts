@@ -19,6 +19,29 @@ const VALID_MODEL_ROLES = ['action_generator', 'planner', 'tool_caller', 'other'
 const MAX_AGENT_CONTEXT_STRING = 256;
 const MAX_AGENT_CONTEXT_TAGS = 16;
 
+/**
+ * Strict field whitelists (F3).
+ *
+ * The /verify request body is action-bound: its `package_digest` is a
+ * cryptographic commitment to the exact validated request. Silently dropping
+ * unknown fields would let a caller believe extra fields are bound when they
+ * are not — an interop trap and a subtle integrity gap. Instead we reject the
+ * request with 400 and name the offending field(s).
+ *
+ * Scope of this whitelist: the top-level body and each `signed_evidence[i]`
+ * item, i.e. the layers whose bytes flow directly into `computePackageDigest`.
+ * Deeper nested objects (`agent_context`, `key_manifest`, `mandate`) already
+ * validate their own fields explicitly and reconstruct clean output objects.
+ */
+const ALLOWED_BODY_FIELDS = new Set([
+  'id', 'claim', 'evidence', 'mode', 'tier', 'mandate', 'gateMode',
+  'agent_context', 'signed_evidence', 'key_manifest',
+]);
+const ALLOWED_SIGNED_EVIDENCE_ITEM_FIELDS = new Set([
+  'type', 'raw_event', 'signature_scheme', 'signer_pubkey',
+  'claims', 'verification', 'key_manifest_ref',
+]);
+
 function parseAgentContext(
   raw: unknown,
   errors: ValidationError[],
@@ -189,6 +212,15 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
 
   const b = body as Record<string, unknown>;
 
+  // F3: strict body whitelist. Unknown top-level fields would be silently
+  // stripped by the validator and thus not committed to the package_digest,
+  // which would break the action-bound guarantee. Reject them explicitly.
+  for (const key of Object.keys(b)) {
+    if (!ALLOWED_BODY_FIELDS.has(key)) {
+      errors.push({ field: key, message: `Unknown field "${key}" — not allowed at request body top level. Allowed: ${[...ALLOWED_BODY_FIELDS].sort().join(', ')}` });
+    }
+  }
+
   if (!b.claim || typeof b.claim !== 'string' || b.claim.trim().length === 0) {
     errors.push({ field: 'claim', message: 'Required non-empty string' });
   }
@@ -353,6 +385,18 @@ function validateSignedEvidence(
     }
 
     const e = item as Record<string, unknown>;
+
+    // F3: strict per-item whitelist. See top-of-file comment on
+    // ALLOWED_SIGNED_EVIDENCE_ITEM_FIELDS — unknown fields here would be
+    // silently stripped and thus not enter the package_digest.
+    for (const key of Object.keys(e)) {
+      if (!ALLOWED_SIGNED_EVIDENCE_ITEM_FIELDS.has(key)) {
+        errors.push({
+          field: `signed_evidence[${i}].${key}`,
+          message: `Unknown field "${key}" — not allowed on a signed_evidence item. Allowed: ${[...ALLOWED_SIGNED_EVIDENCE_ITEM_FIELDS].sort().join(', ')}`,
+        });
+      }
+    }
 
     if (e.type !== 'signed_event') {
       errors.push({ field: `signed_evidence[${i}].type`, message: 'Must be "signed_event"' });
