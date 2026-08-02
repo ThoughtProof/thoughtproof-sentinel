@@ -183,4 +183,106 @@ describe('validateVerifyRequest', () => {
     });
     expect(result.valid).toBe(false);
   });
+
+  // ------------------------------------------------------------
+  // F3: strict-mode whitelists (unknown fields rejected)
+  // ------------------------------------------------------------
+  describe('F3 strict whitelist', () => {
+    const goodEvidenceItem = {
+      type: 'signed_event',
+      raw_event: 'eyJmb28iOiJiYXIifQ==', // {"foo":"bar"}
+      signature_scheme: 'ed25519',
+      signer_pubkey: 'a'.repeat(64),
+      claims: ['test_claim'],
+      verification: 'required' as const,
+    };
+
+    it('rejects unknown top-level body field with named error', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        extra_field: 'silently-would-be-dropped',
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        const err = result.errors.find((e) => e.field === 'extra_field');
+        expect(err).toBeDefined();
+        expect(err!.message).toContain('Unknown field');
+        expect(err!.message).toContain('extra_field');
+      }
+    });
+
+    it('rejects multiple unknown top-level fields at once', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        typo_moda: 'x',
+        another_typo: 'y',
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        const fields = result.errors.map((e) => e.field);
+        expect(fields).toContain('typo_moda');
+        expect(fields).toContain('another_typo');
+      }
+    });
+
+    it('rejects unknown field on signed_evidence[i] with indexed error', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        signed_evidence: [{
+          ...goodEvidenceItem,
+          key_manifest: { version: 'v1', keys: [] }, // wrong location — belongs at top level
+        }],
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        const err = result.errors.find((e) => e.field === 'signed_evidence[0].key_manifest');
+        expect(err).toBeDefined();
+        expect(err!.message).toContain('Unknown field');
+      }
+    });
+
+    it('accepts all known signed_evidence fields (positive control)', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        signed_evidence: [{
+          ...goodEvidenceItem,
+          key_manifest_ref: 'ref://some/manifest',
+        }],
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('accepts all known top-level fields (positive control)', () => {
+      const result = validateVerifyRequest({
+        id: 'req_123',
+        claim: 'x',
+        evidence: 'y',
+        mode: 'handoff',
+        tier: 'standard',
+        gateMode: 'shadow',
+        mandate: { granted: { maxAmountUsd: 100 }, action: { amountUsd: 50 } },
+        agent_context: { agent_id: 'agent_x' },
+        signed_evidence: [goodEvidenceItem],
+        key_manifest: {
+          version: 'v1',
+          keys: [{ pubkey: 'a'.repeat(64), status: 'active' }],
+        },
+      });
+      expect(result.valid).toBe(true);
+    });
+
+    it('binds unknown fields into package_digest concern via clear message', () => {
+      // Documentary test: the error text must mention *why* strict mode exists,
+      // so integrators see the security rationale in the 400 response.
+      const result = validateVerifyRequest({ ...validBody, meta_hint: 'x' });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        const err = result.errors.find((e) => e.field === 'meta_hint');
+        // Message includes the allowed set so the caller can self-correct without docs.
+        expect(err!.message).toContain('Allowed:');
+        expect(err!.message).toContain('claim');
+        expect(err!.message).toContain('evidence');
+      }
+    });
+  });
 });

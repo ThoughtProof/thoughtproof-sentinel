@@ -37,7 +37,7 @@ presented claims ("evidence-verifying, not evidence-consuming").
 | The evidence bytes carry a valid ed25519 signature over the JCS-canonical payload | Signature recomputation at verify time |
 | The verdict is bound to the exact request package (not a paraphrase, not "current room state") | `package_digest` = sha256 over JCS-canonical request, emitted in `meta` |
 | A declared signer key is listed as `active` in the *supplied* manifest, within time bounds, with matching roles | Manifest consistency check |
-| A third party can recompute all of the above offline | `scripts/verify-receipt.mjs` (zero-dependency) |
+| A third party can recompute all of the above offline from the accepted request | `scripts/verify-receipt.mjs` (zero-dependency); requests with unknown fields are rejected at ingest (§2.5) |
 
 ### 2.2 What F1 does **not** prove (v0)
 
@@ -91,6 +91,28 @@ which case no verdict forcing occurs. This is **intentional policy delegation**:
 - Forcing **only downgrades**; it can never turn BLOCK/UNCERTAIN into ALLOW.
 - Deployments that need a strictness floor must enforce it server-side by
   operator/policy, not by trusting the request field.
+
+### 2.5 Strict request-shape validation (F3)
+
+`package_digest` binds the verdict to the **validated** request bytes. If the
+validator silently dropped unknown fields, a caller could attach data (e.g.
+custom metadata, provenance hints) and believe those bytes were committed to
+the digest — they would not be. That is an interop trap and a subtle integrity
+gap.
+
+As of F3, the top-level `/verify` request body and each `signed_evidence[i]`
+item are validated against a **strict whitelist**. Any unknown field causes a
+400 response naming the offending field and listing the allowed set, so
+integrators can self-correct without consulting docs.
+
+Scope: the two layers whose bytes flow directly into `computePackageDigest`.
+Deeper nested objects (`agent_context`, `key_manifest`, `mandate`) already
+reconstruct clean output objects during validation, so unknown fields there
+never reach the digest.
+
+**Implication for section 2.1 row 4 ("third party can recompute offline").**
+The claim now holds unconditionally for any request the server accepted:
+rejected requests never produce a receipt at all.
 
 ---
 
