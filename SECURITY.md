@@ -34,10 +34,10 @@ presented claims ("evidence-verifying, not evidence-consuming").
 
 | Statement | Guaranteed by |
 |---|---|
-| The evidence bytes carry a valid ed25519 signature over the JCS-canonical payload | Signature recomputation at verify time |
+| The evidence bytes carry a valid ed25519 signature over the JCS-canonical payload | Signature recomputation at verify time, **server-side only** (§2.6) |
 | The verdict is bound to the exact request package (not a paraphrase, not "current room state") | `package_digest` = sha256 over JCS-canonical request, emitted in `meta` |
 | A declared signer key is listed as `active` in the *supplied* manifest, within time bounds, with matching roles | Manifest consistency check |
-| A third party can recompute all of the above offline from the accepted request | `scripts/verify-receipt.mjs` (zero-dependency); requests with unknown fields are rejected at ingest (§2.5) |
+| A third party can recompute the `package_digest` offline from the accepted request | `scripts/verify-receipt.mjs` (zero-dependency); requests with unknown fields are rejected at ingest (§2.5). **The portable script does not currently re-verify ed25519 signatures offline — see §2.6.** |
 
 ### 2.2 What F1 does **not** prove (v0)
 
@@ -111,8 +111,58 @@ reconstruct clean output objects during validation, so unknown fields there
 never reach the digest.
 
 **Implication for section 2.1 row 4 ("third party can recompute offline").**
-The claim now holds unconditionally for any request the server accepted:
-rejected requests never produce a receipt at all.
+The `package_digest` recompute claim holds unconditionally for any request the
+server accepted: rejected requests never produce a receipt at all. The
+signature-verification part of that row is bounded separately in §2.6.
+
+### 2.6 Trust boundary in `scripts/verify-receipt.mjs` (portable verifier)
+
+**What the portable script does today.** It reads a `(request, response)`
+pair and independently recomputes `package_digest` over the request using
+JCS + sha256, then compares against the value the server emitted in
+`meta.package_digest`. That check is fully offline and depends on nothing
+the server said.
+
+**What it does *not* do today.** For each `signed_evidence[i]`, the script
+displays the server-emitted `evidence_verification[i].status` (`recomputed`,
+`unverified`, `signature_invalid`) as-is. It does **not** re-derive ed25519
+over the JCS-canonical `raw_event` offline.
+
+**Attack this admits.** A forged `(request, response)` pair where the
+response claims `evidence_verification[i].status = "recomputed"` while the
+corresponding `signed_evidence[i].raw_event` was never actually signed by
+the declared `signer_pubkey` would print “package digest matches” and show
+the forged status without contradiction. The portable script alone is not
+sufficient to defend against a server that lies about signature results.
+
+**Why this is the shape today.**
+
+- Server-side signature verification lives in `src/signed-evidence.ts` and
+  runs on every request; the server's own outputs are trustworthy relative
+  to the server.
+- The portable script's role in v0 is to give a third party a
+  zero-dependency way to confirm that a receipt binds to the exact request
+  bytes they saw. That is a real property (§2.5 makes it unconditional for
+  accepted requests) but it is a *narrower* property than “recompute all of
+  §2.1 offline.”
+
+**Same class as the inline-manifest caveat (§2.2).** Both are cases where
+a v0 check depends on the party being checked. Inline-manifest: server
+trusts the caller for authorization ground truth. Portable script: third
+party trusts the server for signature-verification ground truth. Both are
+named here so integrators can reason about them explicitly.
+
+**Not-in-scope, next pass.**
+
+- Offline ed25519 re-verification in the portable script, with the
+  verifying key material carried in a form the script can trust (e.g.
+  passed as an explicit CLI arg, or resolved through a registry binding
+  once one exists). The current codebase has no place to put an
+  “authoritative pubkey” for a portable third party to consume, which is
+  why v0 defers this rather than half-doing it.
+- Signed responses: once the server signs its own output, the portable
+  script can chain into that signature and stop relying on the server's
+  bare word. Tracked as a separate F-item.
 
 ---
 
