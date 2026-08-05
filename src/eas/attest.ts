@@ -30,12 +30,9 @@ const EAS_ABI = [
   'event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schemaUID)',
 ];
 
-// keccak256("Attested(address,address,bytes32,bytes32)")
-// Verified on-chain: this is the topic0 the EAS contract actually emits on Base
-// (cast keccak "Attested(address,address,bytes32,bytes32)"). The previous value
-// (…c5b2b76c2) was wrong, so the Attested event was never matched and issueAttestation
-// threw "Attested event not found" AFTER the attestation had already been mined —
-// burning gas and returning no UID on every successful attestation.
+// keccak256("Attested(address,address,bytes32,bytes32)") — this is an EAS event topic
+// (EVM ABI encoding uses keccak), verified on-chain on Base. This value is
+// unrelated to hashToBytes32 below.
 export const ATTESTED_EVENT_TOPIC = '0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75685141b35';
 
 const SCHEMA_TYPES = [
@@ -53,8 +50,15 @@ const SCHEMA_TYPES = [
 ];
 
 /**
- * Hash a string to bytes32 using keccak256 (Node.js crypto — no ethers needed).
+ * Hash a string to bytes32 using **SHA-256** (Node.js crypto — no ethers needed).
+ *
+ * NOTE: despite the function name (`hashToBytes32`), this computes **SHA-256**,
+ * NOT keccak256. The name is a historical artifact from when the on-chain
+ * schema was designed with EVM ABI in mind. All existing EAS attestations
+ * (schema 0x3945d7be… on Base) carry SHA-256 values in `claimHash`/`evidenceHash`.
+ *
  * Used for claimHash and evidenceHash — on-chain fingerprint of inputs.
+ * If you need keccak256 (EVM-native), do NOT call this function.
  */
 export function hashToBytes32(input: string): string {
   const hash = createHash('sha256').update(input).digest('hex');
