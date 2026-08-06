@@ -6,6 +6,12 @@ import { buildBillingEvent, recordBillingEvent } from '../../src/billing.js';
 import { validateApiKey, checkRateLimit, checkGlobalRateLimit } from '../../src/auth.js';
 import { x402Gate } from '../../src/middleware/x402.js';
 import { processSignedEvidence, applyEvidenceEffects } from '../../src/evidence-processing.js';
+import { cacheVerifyResponse } from '../../src/verdict-cache.js';
+import {
+  issueSignFromVerifyResponse,
+  isSignIssuanceConfigured,
+  type IssuedSignAttestation,
+} from '../../src/issue-sign.js';
 import type { PaymentPlatform } from '../../src/types.js';
 
 const VERSION = '0.1.0';
@@ -19,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // --- Standard Headers ---
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Sentinel-Key, X-Sentinel-Platform, X-Sentinel-Agent-Id, X-Sentinel-Attest, X-Sentinel-Attest-Recipient');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Sentinel-Key, X-Sentinel-Platform, X-Sentinel-Agent-Id, X-Sentinel-Attest, X-Sentinel-Attest-Recipient, X-Sentinel-Issue');
     res.setHeader('X-Sentinel-Version', VERSION);
     res.setHeader('X-Request-Id', requestId);
 
@@ -100,8 +106,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({ error: 'Engine returned invalid response', code: 'ENGINE_ERROR' });
     }
 
-    // --- EAS attestation (opt-in via X-Sentinel-Attest header) ---
+    // --- Attestation fingerprints (always prepared) ---
     const attestationData = buildAttestationData(result.data, processedResponse);
+
+    // Cache for POST /sentinel/attest (Upstash; no-op if unset)
+    await cacheVerifyResponse(processedResponse);
+
+    // --- L1 off-chain sign (opt-in: X-Sentinel-Issue: sign) — any verdict ---
+    const issueHeader = String(req.headers['x-sentinel-issue'] ?? '').toLowerCase();
+    const wantsSign = issueHeader === 'sign' || issueHeader === 'jws-ed25519';
+    let signAttestation: IssuedSignAttestation | null = null;
+    if (wantsSign) {
+      if (!isSignIssuanceConfigured()) {
+        console.error(`[sentinel/verify:${requestId}] X-Sentinel-Issue=sign but signing key not configured`);
+      } else {
+        try {
+          signAttestation = issueSignFromVerifyResponse(processedResponse, {
+            claim_hash: attestationData.claimHash,
+            evidence_hash: attestationData.evidenceHash,
+            schema_uid: '0x3945d7be65761ff1a83a4d6e16a7d3adbe6ced982a7e139854b5bfe4c0748d2b',
+          });
+          console.log(
+            `[sentinel/verify:${requestId}] L1 sign issued verificationId=${processedResponse.id} hash=${signAttestation.canonicalHash.slice(0, 18)}…`,
+          );
+        } catch (signError) {
+          // Sign failure must NOT block the verification response
+          console.error(
+            `[sentinel/verify:${requestId}] L1 sign failed:`,
+            signError instanceof Error ? signError.message : signError,
+          );
+        }
+      }
+    }
+
+    // --- EAS on-chain (opt-in via X-Sentinel-Attest header) — ALLOW only (unchanged) ---
     const wantsAttestation = req.headers['x-sentinel-attest'] === 'true';
     const attestationEnabled = !!process.env.ATTESTER_PRIVATE_KEY;
     let attestationResult: { uid: string; txHash: string } | null = null;
@@ -111,10 +149,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const recipient = (req.headers['x-sentinel-attest-recipient'] as string) ?? undefined;
         const result = await issueAttestation(attestationData, { recipient });
         attestationResult = { uid: result.uid, txHash: result.txHash };
-        console.log(`[sentinel/verify:${requestId}] attestation issued: uid=${result.uid} tx=${result.txHash}`);
+        console.log(`[sentinel/verify:${requestId}] EAS issued: uid=${result.uid} tx=${result.txHash}`);
       } catch (attestError) {
         // Attestation failure should NOT block the verification response
-        console.error(`[sentinel/verify:${requestId}] attestation failed:`, attestError instanceof Error ? attestError.message : attestError);
+        console.error(`[sentinel/verify:${requestId}] EAS failed:`, attestError instanceof Error ? attestError.message : attestError);
       }
     }
 
@@ -122,22 +160,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const billingEvent = buildBillingEvent(processedResponse, { platform, agent_id: agentId });
     await recordBillingEvent(billingEvent);
 
-    console.log(`[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}${processedResponse.meta.proof_strength ? ` proof=${processedResponse.meta.proof_strength}` : ''}`);
+    console.log(`[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}${processedResponse.meta.proof_strength ? ` proof=${processedResponse.meta.proof_strength}` : ''}${signAttestation ? ' issue=sign' : ''}${attestationResult ? ' issue=eas' : ''}`);
+
+    // Prefer L1 signed attestation shape when issued; else prepared (+ optional EAS fields)
+    const attestationPayload = signAttestation
+      ? {
+          ...signAttestation,
+          // Keep EAS fields if both were requested
+          ...(attestationResult && {
+            eas_uid: attestationResult.uid,
+            eas_tx_hash: attestationResult.txHash,
+          }),
+        }
+      : {
+          prepared: true,
+          issued: !!attestationResult,
+          schema_uid: '0x3945d7be65761ff1a83a4d6e16a7d3adbe6ced982a7e139854b5bfe4c0748d2b',
+          claim_hash: attestationData.claimHash,
+          evidence_hash: attestationData.evidenceHash,
+          ...(attestationResult && {
+            uid: attestationResult.uid,
+            tx_hash: attestationResult.txHash,
+          }),
+        };
 
     // Return enriched response with attestation + billing metadata
     return res.status(200).json({
       ...processedResponse,
-      attestation: {
-        prepared: true,
-        issued: !!attestationResult,
-        schema_uid: '0x3945d7be65761ff1a83a4d6e16a7d3adbe6ced982a7e139854b5bfe4c0748d2b',
-        claim_hash: attestationData.claimHash,
-        evidence_hash: attestationData.evidenceHash,
-        ...(attestationResult && {
-          uid: attestationResult.uid,
-          tx_hash: attestationResult.txHash,
-        }),
-      },
+      attestation: attestationPayload,
       billing: {
         price_usd: billingEvent.price_usd,
         settled: paymentResult.paymentMethod === 'x402-facilitator' || paymentResult.paymentMethod === 'intent',

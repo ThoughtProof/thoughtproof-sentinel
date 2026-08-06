@@ -23,6 +23,11 @@ describe('Sentinel tiers', () => {
     expect(cp.price_usd).toBe(0.005);
     expect(cp.cascade).toEqual(['serv-nano']);
     expect(cp.false_allows).toBe(0);
+    expect(cp.false_allows_n).toBeGreaterThan(0);
+    expect(cp.accuracy_n).toBeGreaterThan(0);
+    expect(cp.accuracy_suite.length).toBeGreaterThan(0);
+    expect(cp.latency_typical.toLowerCase()).toMatch(/s/);
+    expect(cp.latency_typical).not.toMatch(/^0\.\d+s$/);
   });
 
   it('standard runs the Nano→Swift cascade at $0.008 and is the default', () => {
@@ -31,6 +36,18 @@ describe('Sentinel tiers', () => {
     expect(std.cascade).toEqual(['serv-nano', 'serv-swift']);
     expect(std.default).toBe(true);
     expect(std.false_allows).toBe(0);
+    expect(std.false_allows_n).toBeGreaterThan(0);
+    expect(std.accuracy_n).toBeGreaterThan(0);
+    expect(std.latency_typical).toMatch(/5|45|second/i);
+  });
+
+  it('Gate-0: every public tier publishes denominators (no bare FA/accuracy)', () => {
+    for (const t of listTiers()) {
+      expect(t.accuracy_n, t.tier).toBeGreaterThan(0);
+      expect(t.false_allows_n, t.tier).toBeGreaterThan(0);
+      expect(t.accuracy_suite, t.tier).toBeTruthy();
+      expect(t.latency_typical, t.tier).not.toMatch(/^\d+(\.\d+)?s$/);
+    }
   });
 
   it('swift is a hidden alias of standard (same cascade)', () => {

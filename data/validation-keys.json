@@ -9,30 +9,68 @@
       "status": "active",
       "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAs3pXjznQ51i9Ya0QOdOzeOnVltxUCBtl8xQKm5NqDd0=\n-----END PUBLIC KEY-----\n",
       "publicKeySpkiSha256": "9cdad19d77bb301fe075ec925dbd409f4f2149261af514b49d43b0a64ac3ce98",
-      "usage": "Sign ThoughtProof ERC-8004-style validation artifacts (pilot)",
+      "usage": "Sign ThoughtProof validation artifacts and Sentinel L1 verdict attestations (pilot)",
       "notBefore": "2026-07-30T00:00:00Z",
       "notAfter": null
     }
   ],
   "canonicalization": {
-    "name": "tp-json-sort-keys-recursive-utf8-v1",
-    "steps": [
-      "Parse artifact JSON",
-      "Remove top-level fields: signature, artifactHash, signed",
-      "Recursively sort all object keys (arrays keep order)",
-      "Serialize with JSON.stringify (no extra whitespace; UTF-8)",
-      "Sign those exact bytes with Ed25519 (pure, no prehash context)",
-      "artifactHash = 0x || sha256(those same bytes) as hex"
-    ]
+    "defaultForThirdPartyVerify": "use_issued_canonicalJson_bytes",
+    "note": "Always prefer verifying Ed25519 over the exact UTF-8 bytes in attestation.canonicalJson (or equivalent issued field). Profile names below describe how those bytes were produced — do not re-canonicalize from a pretty-printed object unless you implement the named profile bit-exactly.",
+    "profiles": {
+      "rfc8785-canonicalize-utf8-v1": {
+        "appliesTo": [
+          "sentinel.verdict.canonical.v1",
+          "X-Sentinel-Issue: sign",
+          "POST /sentinel/attest level=sign"
+        ],
+        "name": "rfc8785-canonicalize-utf8-v1",
+        "implementation": "npm package `canonicalize` (JCS / RFC 8785 style)",
+        "steps": [
+          "Build object matching sentinel.verdict.canonical.v1 (see canonical-verdict.ts)",
+          "Serialize with canonicalize(body) → UTF-8 string (no pretty print)",
+          "Sign those exact bytes with Ed25519 (pure, no prehash context)",
+          "canonicalHash = 0x || sha256(those same bytes) as hex",
+          "Third party: verify signature over attestation.canonicalJson as issued"
+        ]
+      },
+      "tp-json-sort-keys-recursive-utf8-v1": {
+        "appliesTo": [
+          "ERC-8004-style validation artifacts (boundary packs)",
+          "scripts/sign_validation_artifact.mjs",
+          "scripts/verify-validation-artifact.mjs"
+        ],
+        "name": "tp-json-sort-keys-recursive-utf8-v1",
+        "implementation": "recursive key sort + JSON.stringify (no extra whitespace)",
+        "steps": [
+          "Parse artifact JSON",
+          "Remove top-level fields: signature, artifactHash, signed",
+          "Recursively sort all object keys (arrays keep order)",
+          "Serialize with JSON.stringify (no extra whitespace; UTF-8)",
+          "Sign those exact bytes with Ed25519 (pure, no prehash context)",
+          "artifactHash = 0x || sha256(those same bytes) as hex"
+        ]
+      }
+    }
   },
   "verify": {
     "wellKnown": "https://sentinel.thoughtproof.ai/.well-known/validation-keys.json",
     "publicKeyRefExample": "https://sentinel.thoughtproof.ai/.well-known/validation-keys.json#tp-validation-ed25519-2026-07",
-    "script": "https://raw.githubusercontent.com/ThoughtProof/thoughtproof-sentinel/main/scripts/verify-validation-artifact.mjs",
-    "local": "node scripts/verify-validation-artifact.mjs <artifact.signed.json>"
+    "sentinelL1": {
+      "header": "X-Sentinel-Issue: sign",
+      "endpoint": "POST /sentinel/attest",
+      "signature.canonicalization": "rfc8785-canonicalize-utf8-v1",
+      "script": "scripts/verify-l1-attestation.mjs"
+    },
+    "validationArtifact": {
+      "signature.canonicalization": "tp-json-sort-keys-recursive-utf8-v1",
+      "script": "scripts/verify-validation-artifact.mjs"
+    }
   },
   "notes": [
     "Pilot key — not HSM-backed. Rotate via new keyId + status=retired on old keys.",
-    "HMAC shared-secret signing is not used for public artifacts."
+    "HMAC shared-secret signing is not used for public artifacts.",
+    "Two canonicalization profiles exist on purpose (L1 verdict vs older validation artifacts). Do not mix names.",
+    "Stephen/third-party path for L1: GET well-known → Ed25519 verify(signature, attestation.canonicalJson)."
   ]
 }
