@@ -19,7 +19,7 @@
   ],
   "functions": {
     "api/sentinel/**/*.ts": {
-      "maxDuration": 30
+      "maxDuration": 60
     },
     "api/well-known/**/*.ts": {
       "includeFiles": "data/**"

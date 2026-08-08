@@ -22,6 +22,13 @@ import { runSentinelCascade } from './cascade.js';
 import { mapVerdict, canPromoteStep2Only, resolveActionAuthPromotion } from './verdict.js';
 import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import { bindStepObjections } from '../objection-evidence-bind.js';
+import {
+  ENGINE_BUDGET_MS,
+  ENGINE_BUDGET_REASON,
+  buildBudgetTrace,
+  isEngineBudgetExhaustedError,
+  startEngineBudget,
+} from './budget.js';
 import { randomUUID } from 'crypto';
 
 /**
@@ -99,12 +106,82 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     mode: req.mode,
   });
 
-  // 2. Run through cascade (or solo for checkpoint)
-  const cascadeOutput = await runSentinelCascade({
-    evalInput: modeOutput.evalInput,
-    evalMode: modeOutput.evalMode,
-    tier,
-  });
+  // 2. Run through cascade (or solo for checkpoint) under engine budget.
+  //    Reliability Option 3: cascade wall 45s; Vercel maxDuration 60s leaves
+  //    15s reserve for mapping/trace/response. On budget end: preserve BLOCK,
+  //    else REVIEW; never ALLOW; abort in-flight; no late overwrite.
+  const budget = startEngineBudget({ startedAt: startMs, budgetMs: ENGINE_BUDGET_MS });
+  let cascadeOutput;
+  try {
+    cascadeOutput = await runSentinelCascade({
+      evalInput: modeOutput.evalInput,
+      evalMode: modeOutput.evalMode,
+      tier,
+      signal: budget.controller.signal,
+      budgetStartedAt: budget.startedAt,
+      budgetMs: budget.budgetMs,
+    });
+  } catch (err) {
+    budget.clear();
+    if (isEngineBudgetExhaustedError(err)) {
+      const publicVerdict =
+        err.knownInternalVerdict === 'BLOCK' ? 'BLOCK' : 'UNCERTAIN';
+      const trace = buildBudgetTrace({
+        stage: err.stage,
+        elapsedMs: err.elapsedMs,
+        knownInternalVerdict: err.knownInternalVerdict,
+        lateResultIgnored: true,
+        budgetMs: err.budgetMs,
+      });
+      const releaseId =
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        process.env.GIT_COMMIT ||
+        process.env.RELEASE_ID ||
+        undefined;
+      return {
+        id,
+        verdict: publicVerdict,
+        confidence: 0,
+        reasoning:
+          `Engine budget exhausted before cascade completed (stage=${err.stage}, ` +
+          `elapsed_ms=${err.elapsedMs}, budget_ms=${err.budgetMs}). ` +
+          (publicVerdict === 'BLOCK'
+            ? 'Preserving already-known BLOCK.'
+            : 'Fail-closed to REVIEW; never ALLOW after timeout.'),
+        objections: [],
+        mode: req.mode,
+        tier,
+        gate: gateField,
+        meta: {
+          duration_ms: Date.now() - startMs,
+          models_used: err.modelsUsed,
+          verified_at: new Date().toISOString(),
+          engine_budget: trace,
+          ...(req.mode === 'action_authorization'
+            ? {
+                promotion: {
+                  cascade_reason: ENGINE_BUDGET_REASON,
+                  internal_verdict: err.knownInternalVerdict ?? 'HOLD',
+                  mapped_verdict: publicVerdict,
+                  public_verdict: publicVerdict,
+                  promoted: false,
+                  reason: ENGINE_BUDGET_REASON,
+                  steps_all_pass: false,
+                  machine_condition_proof_present: false,
+                  machine_condition_proof_accepted: false,
+                  release_id: releaseId,
+                  policy:
+                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s',
+                },
+              }
+            : {}),
+          ...(req.agent_context ? { agent_context: req.agent_context } : {}),
+        },
+      };
+    }
+    throw err;
+  }
+  budget.clear();
 
   // 3. Map verdict (mode-aware: trade_execution & trade_reasoning are conservative)
   const internalVerdict = cascadeOutput.result.verdict;

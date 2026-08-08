@@ -302,6 +302,22 @@ export interface SentinelVerifyResponse {
       /** Policy id for this promotion layer revision. */
       policy?: string;
     };
+    /**
+     * Reliability Option 3 — engine budget / timeout trace.
+     * Present when cascade hit ENGINE_BUDGET_MS (45s) before Vercel wall (60s).
+     */
+    engine_budget?: {
+      reason: 'engine_budget_exhausted';
+      degradedMode: true;
+      stage: string;
+      elapsed_ms: number;
+      budget_ms: number;
+      reserve_ms: number;
+      vercel_max_duration_s: number;
+      known_internal_verdict: string | null;
+      public_verdict: 'BLOCK' | 'UNCERTAIN';
+      late_result_ignored: boolean;
+    };
   };
 }
 
