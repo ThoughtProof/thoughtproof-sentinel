@@ -138,6 +138,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       mode: req.mode,
       internalVerdict,
       cascadeReason: cascadeOutput.cascadeReason ?? null,
+      // P0: plumb degradedMode so error-fallback cannot public-ALLOW even if
+      // an older pot-cli returns ALLOW with primary_error_fallback.
+      degradedMode: cascadeOutput.degradedMode === true,
       mappedVerdict: verdict,
       steps: steps3b.map((s) => ({
         step_id: s.step_id,
@@ -165,7 +168,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         process.env.GIT_COMMIT ||
         process.env.RELEASE_ID ||
         undefined,
-      policy: 'adr-0019-cascade-promotion-2026-08-08',
+      policy: 'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed',
     };
   }
 
