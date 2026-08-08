@@ -282,6 +282,26 @@ export interface SentinelVerifyResponse {
      * a package_digest is present but couldn't be computed.
      */
     proof_strength?: 'recomputed' | 'unverified';
+    /**
+     * ADR-0019 promotion-layer trace (action_authorization). Keeps cascade
+     * reason, internal verdict, and public verdict separable. Optional so
+     * other modes stay unchanged.
+     */
+    promotion?: {
+      cascade_reason: string | null;
+      internal_verdict: string;
+      mapped_verdict: SentinelVerdict;
+      public_verdict: SentinelVerdict;
+      promoted: boolean;
+      reason: string;
+      steps_all_pass: boolean;
+      machine_condition_proof_present: boolean;
+      machine_condition_proof_accepted: boolean;
+      /** Git commit SHA (short or full) baked at build/runtime for deploy provenance. */
+      release_id?: string;
+      /** Policy id for this promotion layer revision. */
+      policy?: string;
+    };
   };
 }
 

@@ -19,7 +19,7 @@ import type {
 
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
-import { mapVerdict, canPromoteStep2Only, canPromoteAllStepsPass } from './verdict.js';
+import { mapVerdict, canPromoteStep2Only, resolveActionAuthPromotion } from './verdict.js';
 import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import { bindStepObjections } from '../objection-evidence-bind.js';
 import { randomUUID } from 'crypto';
@@ -107,7 +107,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   });
 
   // 3. Map verdict (mode-aware: trade_execution & trade_reasoning are conservative)
-  let verdict = mapVerdict(cascadeOutput.result.verdict, req.mode);
+  const internalVerdict = cascadeOutput.result.verdict;
+  let verdict = mapVerdict(internalVerdict, req.mode);
+  let promotionMeta: SentinelVerifyResponse['meta']['promotion'] | undefined;
 
   // 3b. trade_reasoning step_2-only promotion (ADR-0018). If the conservative
   //     remap produced UNCERTAIN but the two FACTUAL steps (thresholds,
@@ -126,20 +128,45 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     verdict = 'ALLOW';
   }
 
-  // 3c. action_authorization all-steps-pass promotion (ADR-0019). Every gold
-  //     step is a hard authority check; a drain/over-scope case always fails at
-  //     least one. So if the conservative remap produced UNCERTAIN but ALL steps
-  //     clear the SUPPORTED bar, the action is fully authorized — the UNCERTAIN
-  //     is cascade prose-caution (CONDITIONAL_ALLOW), not a real concern. Safe
-  //     by construction: a drain case can never have all steps pass.
-  if (
-    req.mode === 'action_authorization' &&
-    verdict === 'UNCERTAIN' &&
-    canPromoteAllStepsPass(
-      steps3b.map((s) => ({ step_id: s.step_id, score: s.score, predicate: String(s.predicate) })),
-    )
-  ) {
-    verdict = 'ALLOW';
+  // 3c. action_authorization promotion (ADR-0019 + 2026-08-08 addendum).
+  //     Sentinel promotion layer only — cascade already emits HOLD for
+  //     primary_block_rejected. Do NOT promote that to ALLOW. Bare
+  //     agreement_conditional_allow stays REVIEW without machine proof.
+  //     agreement_allow unchanged. Exception intentionally fail-closed.
+  if (req.mode === 'action_authorization') {
+    const decision = resolveActionAuthPromotion({
+      mode: req.mode,
+      internalVerdict,
+      cascadeReason: cascadeOutput.cascadeReason ?? null,
+      mappedVerdict: verdict,
+      steps: steps3b.map((s) => ({
+        step_id: s.step_id,
+        score: s.score,
+        predicate: String(s.predicate),
+      })),
+      // No structured proof contract yet — never pass LLM text here.
+      machineConditionProof: null,
+    });
+    verdict = decision.publicVerdict;
+    promotionMeta = {
+      cascade_reason: decision.trace.cascade_reason,
+      internal_verdict: decision.trace.internal_verdict,
+      mapped_verdict: decision.trace.mapped_verdict,
+      public_verdict: decision.trace.public_verdict,
+      promoted: decision.promoted,
+      reason: decision.reason,
+      steps_all_pass: decision.trace.steps_all_pass,
+      machine_condition_proof_present: decision.trace.machine_condition_proof_present,
+      machine_condition_proof_accepted: decision.trace.machine_condition_proof_accepted,
+      // Deploy provenance: Vercel sets VERCEL_GIT_COMMIT_SHA; local/dev may set
+      // GIT_COMMIT / RELEASE_ID. Policy id is stable for this ADR addendum.
+      release_id:
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        process.env.GIT_COMMIT ||
+        process.env.RELEASE_ID ||
+        undefined,
+      policy: 'adr-0019-cascade-promotion-2026-08-08',
+    };
   }
 
   // 4. Calculate confidence from step scores
@@ -212,6 +239,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
             },
           }
         : {}),
+      ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(req.agent_context ? { agent_context: req.agent_context } : {}),
     },
   };
