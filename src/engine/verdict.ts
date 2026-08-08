@@ -100,6 +100,7 @@ export type ActionAuthPromotionReason =
   | 'already_allow'
   | 'already_block'
   | 'primary_block_disagreement'
+  | 'primary_error_fail_closed'
   | 'conditional_allow_no_machine_proof'
   | 'steps_not_all_pass'
   | 'promoted_all_steps_pass'
@@ -111,6 +112,12 @@ export interface ActionAuthPromotionInput {
   internalVerdict: string;
   /** Cascade reason tag (e.g. primary_block_rejected, agreement_conditional_allow). */
   cascadeReason?: string | null;
+  /**
+   * pot-cli cascade degradedMode. When true (or when cascadeReason is a primary/
+   * secondary error fallback), public ALLOW is forbidden — defense-in-depth vs
+   * older pot-cli that fail-opened ERR/ALLOW as ALLOW.
+   */
+  degradedMode?: boolean | null;
   /** Public verdict after mapVerdict, before promotion. */
   mappedVerdict: SentinelVerdict;
   steps: StepLite[];
@@ -156,6 +163,20 @@ const PRIMARY_BLOCK_DISAGREEMENT_REASONS = new Set([
   // Defensive aliases if naming drifts.
   'primary_block_override',
   'primary_block_disagreement',
+]);
+
+/**
+ * Cascade reasons that encode evaluator degradation (primary and/or secondary
+ * error paths). Exact set only — no free-string matching.
+ *
+ * P0 2026-08-08: pot-cli <0.8.9 fail-opened primary ERR + secondary ALLOW as
+ * public ALLOW with reason primary_error_fallback. pot-cli 0.8.9 clamps to
+ * HOLD+degradedMode; Sentinel still enforces REVIEW here so a stale pot-cli
+ * pin cannot re-open the path.
+ */
+const ERROR_FALLBACK_REASONS = new Set([
+  'primary_error_fallback',
+  'secondary_error_fallback',
 ]);
 
 /**
@@ -210,6 +231,21 @@ export function resolveActionAuthPromotion(
   // Exact reason-set only — no free-string / substring prefixes in a safety gate.
   if (cascadeReason != null && PRIMARY_BLOCK_DISAGREEMENT_REASONS.has(cascadeReason)) {
     return finish('UNCERTAIN', false, 'primary_block_disagreement');
+  }
+
+  // P0 safety: primary/secondary error fallback must never public-ALLOW.
+  // Covers: cascadeReason ∈ ERROR_FALLBACK_REASONS OR degradedMode===true.
+  // Even if mappedVerdict is ALLOW (stale pot-cli fail-open) or internal is
+  // ALLOW/CONDITIONAL_ALLOW, clamp to UNCERTAIN (product REVIEW).
+  // Restrictive BLOCK from cascade still stands (do not soften BLOCK→REVIEW).
+  const errorFallback =
+    (cascadeReason != null && ERROR_FALLBACK_REASONS.has(cascadeReason)) ||
+    input.degradedMode === true;
+  if (errorFallback) {
+    if (input.mappedVerdict === 'BLOCK' || input.internalVerdict === 'BLOCK') {
+      return finish('BLOCK', false, 'already_block');
+    }
+    return finish('UNCERTAIN', false, 'primary_error_fail_closed');
   }
 
   // CONDITIONAL_ALLOW must be gated BEFORE any mapped-ALLOW passthrough.

@@ -31,6 +31,8 @@ export interface CascadeOutput {
   result: ItemResult;
   modelsUsed: string[];
   cascadeReason?: string;
+  /** pot-cli cascade degradedMode (primary/secondary error paths). */
+  degradedMode?: boolean;
 }
 
 /**
@@ -97,5 +99,6 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     result,
     modelsUsed,
     cascadeReason: cr.reason,
+    degradedMode: cr.degradedMode === true,
   };
 }

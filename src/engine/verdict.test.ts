@@ -141,6 +141,71 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).not.toBe('primary_block_disagreement');
     expect(d.reason).toBe('no_promote_path');
   });
+
+  // ── P0 2026-08-08: primary_error_fallback must never public-ALLOW ──
+  it('ERR/ALLOW primary_error_fallback → REVIEW (stale pot-cli fail-open clamp)', () => {
+    // Prod S-IM-003 path: reason=primary_error_fallback, secondary ALLOW, mapped ALLOW.
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'primary_error_fallback',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.promoted).toBe(false);
+    expect(d.reason).toBe('primary_error_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('ERR/CONDITIONAL_ALLOW primary_error_fallback → REVIEW', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'CONDITIONAL_ALLOW',
+      cascadeReason: 'primary_error_fallback',
+      mappedVerdict: 'ALLOW', // mis-map of CONDITIONAL_ALLOW
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.reason).toBe('primary_error_fail_closed');
+  });
+
+  it('degradedMode=true alone clamps ALLOW → REVIEW', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow', // would otherwise passthrough
+      degradedMode: true,
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.reason).toBe('primary_error_fail_closed');
+  });
+
+  it('primary_error_fallback + BLOCK stays BLOCK (no soften)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'primary_error_fallback',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('already_block');
+  });
+
+  it('secondary_error_fallback also fail-closed', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'secondary_error_fallback',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.reason).toBe('primary_error_fail_closed');
+  });
 });
 
 // ── mapVerdict: trade_reasoning is conservative like trade_execution ──
