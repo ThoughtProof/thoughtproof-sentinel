@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { mapVerdict, canPromoteStep2Only, canPromoteAllStepsPass, type StepLite } from './verdict.js';
+import {
+  mapVerdict,
+  canPromoteStep2Only,
+  canPromoteAllStepsPass,
+  resolveActionAuthPromotion,
+  acceptsMachineConditionProof,
+  type StepLite,
+} from './verdict.js';
 
 // ── mapVerdict: action_authorization is conservative ──
 describe('mapVerdict — action_authorization conservatism', () => {
@@ -52,6 +59,87 @@ describe('canPromoteAllStepsPass', () => {
     expect(
       canPromoteAllStepsPass([passing('step_0'), passing('step_1'), passing('step_2'), atBar]),
     ).toBe(true);
+  });
+});
+
+// ── resolveActionAuthPromotion: 2026-08-08 addendum ──
+describe('resolveActionAuthPromotion addendum', () => {
+  const allPass: StepLite[] = [
+    { step_id: 'step_0', score: 0.9, predicate: 'faithful' },
+    { step_id: 'step_1', score: 0.9, predicate: 'faithful' },
+    { step_id: 'step_2', score: 0.9, predicate: 'faithful' },
+    { step_id: 'step_3', score: 0.9, predicate: 'faithful' },
+  ];
+
+  it('does not promote primary_block_rejected even when all steps pass', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'HOLD',
+      cascadeReason: 'primary_block_rejected',
+      mappedVerdict: 'UNCERTAIN',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.promoted).toBe(false);
+  });
+
+  it('does not promote agreement_conditional_allow without machine proof', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'CONDITIONAL_ALLOW',
+      cascadeReason: 'agreement_conditional_allow',
+      mappedVerdict: 'UNCERTAIN',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.reason).toBe('conditional_allow_no_machine_proof');
+  });
+
+  it('leaves agreement_allow as ALLOW', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+  });
+
+  it('acceptsMachineConditionProof is fail-closed', () => {
+    expect(acceptsMachineConditionProof({ kind: 'x', fulfilled: true })).toBe(false);
+  });
+
+  it('internal CONDITIONAL_ALLOW cannot escape via mapped ALLOW passthrough', () => {
+    // Ordering invariant: CONDITIONAL_ALLOW is gated before already_allow.
+    // Even if mapVerdict were wrong and emitted ALLOW, public must stay REVIEW.
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'CONDITIONAL_ALLOW',
+      cascadeReason: 'agreement_conditional_allow',
+      mappedVerdict: 'ALLOW', // deliberate mis-map
+      steps: allPass,
+      machineConditionProof: null,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.promoted).toBe(false);
+    expect(d.reason).toBe('conditional_allow_no_machine_proof');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('does not use free-string primary_block substring matching', () => {
+    // Unknown reason with primary_block in the name is NOT in the exact set.
+    // Without set membership, HOLD stays UNCERTAIN via no_promote_path — not substring.
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'HOLD',
+      cascadeReason: 'something_primary_block_ish',
+      mappedVerdict: 'UNCERTAIN',
+      steps: allPass,
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.reason).not.toBe('primary_block_disagreement');
+    expect(d.reason).toBe('no_promote_path');
   });
 });
 
