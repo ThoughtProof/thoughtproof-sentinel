@@ -33,15 +33,15 @@ function baseEligible() {
         condition_id: 'beta_required',
         required: true,
         proof_requirement: 'machine',
-        evidence_bindings: [],
+        evidence_bindings: [] as ReturnType<typeof binding>[],
       },
     ],
   };
 }
 
 describe('ADR-0020 Q1 judge', () => {
-  it('exports frozen version id', () => {
-    expect(Q1_JUDGE_VERSION).toBe('adr0020.q1.judge.v0');
+  it('exports version id', () => {
+    expect(Q1_JUDGE_VERSION).toBe('adr0020.q1.judge.v0.1');
   });
 
   it('maps UNCERTAIN → REVIEW for eligibility class', () => {
@@ -58,8 +58,17 @@ describe('ADR-0020 Q1 judge', () => {
   it('treats public UNCERTAIN as REVIEW', () => {
     const input = baseEligible();
     input.sentinel_verdict = 'UNCERTAIN';
-    const d = evaluateQ1Eligibility(input);
-    expect(d.eligible).toBe(true);
+    expect(evaluateQ1Eligibility(input).eligible).toBe(true);
+  });
+
+  it('rejects caller canonical override (ALLOW + canonical REVIEW)', () => {
+    const d = evaluateQ1Eligibility({
+      ...baseEligible(),
+      sentinel_verdict: 'ALLOW',
+      canonical_verdict: 'REVIEW',
+    });
+    expect(d.eligible).toBe(false);
+    expect(d.triggerCode).toBe('invalid_input');
   });
 
   it('ignores case_id (redaction invariant)', () => {
@@ -93,6 +102,28 @@ describe('ADR-0020 Q1 judge', () => {
     expect(evaluateQ1Eligibility(input).triggerCode).toBe('insufficient_required_conditions');
   });
 
+  it('duplicate condition_id → invalid_input (not multi-conjunct)', () => {
+    const input = baseEligible();
+    input.required_conditions = [
+      {
+        condition_id: 'same_id',
+        required: true,
+        proof_requirement: 'machine',
+        evidence_bindings: [],
+      },
+      {
+        condition_id: 'same_id',
+        required: true,
+        proof_requirement: 'machine',
+        evidence_bindings: [],
+      },
+    ];
+    expect(evaluateQ1Eligibility(input)).toEqual({
+      eligible: false,
+      triggerCode: 'invalid_input',
+    });
+  });
+
   it('optional missing does not create multi-conjunct alone', () => {
     const input = {
       sentinel_verdict: 'REVIEW',
@@ -116,17 +147,10 @@ describe('ADR-0020 Q1 judge', () => {
   });
 
   it('stale/wrong-bind/contradicted do not count as valid', () => {
-    const input = baseEligible() as ReturnType<typeof baseEligible> & {
-      required_conditions: Array<
-        ReturnType<typeof baseEligible>['required_conditions'][number] & {
-          valid_bound_evidence_count?: number;
-        }
-      >;
-    };
+    const input = baseEligible();
     input.required_conditions[1].evidence_bindings = [
       binding('evidence:stale', 'beta_required', { freshness: 'stale' }),
     ];
-    input.required_conditions[1].valid_bound_evidence_count = 99;
     expect(evaluateQ1Eligibility(input).eligible).toBe(true);
 
     input.required_conditions[1].evidence_bindings = [
@@ -137,6 +161,52 @@ describe('ADR-0020 Q1 judge', () => {
     input.required_conditions[1].evidence_bindings = [
       binding('evidence:cx', 'beta_required', { contradicted: true }),
     ];
+    expect(evaluateQ1Eligibility(input).eligible).toBe(true);
+  });
+
+  it('poisoned precomputed count without bindings does NOT prove bound', () => {
+    // Even if a caller smuggles a count field on the object, judge ignores it.
+    const input = {
+      sentinel_verdict: 'REVIEW',
+      reason_code: 'conditional_allow_no_machine_proof',
+      required_conditions: [
+        {
+          condition_id: 'alpha_required',
+          required: true,
+          proof_requirement: 'machine',
+          evidence_bindings: [binding('evidence:alpha_ok', 'alpha_required')],
+        },
+        {
+          condition_id: 'beta_required',
+          required: true,
+          proof_requirement: 'machine',
+          // no bindings array — count must be 0, not trusted precompute
+          valid_bound_evidence_count: 99,
+        },
+      ],
+    };
+    const d = evaluateQ1Eligibility(input);
+    expect(d.eligible).toBe(true);
+    expect(d.triggerCode).toBe('multi_conjunct_missing_machine_proof');
+  });
+
+  it('missing bindings array counts as unproven (not invalid)', () => {
+    const input = {
+      sentinel_verdict: 'REVIEW',
+      reason_code: 'conditional_allow_no_machine_proof',
+      required_conditions: [
+        {
+          condition_id: 'a',
+          required: true,
+          proof_requirement: 'machine',
+        },
+        {
+          condition_id: 'b',
+          required: true,
+          proof_requirement: 'machine',
+        },
+      ],
+    };
     expect(evaluateQ1Eligibility(input).eligible).toBe(true);
   });
 

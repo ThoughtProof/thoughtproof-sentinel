@@ -120,6 +120,8 @@ describe('ADR-0020 shadow observability', () => {
     expect(result.shadow?.canonical_verdict).toBe('REVIEW');
     expect(result.shadow?.final_verdict).toBe(result.shadow?.source_verdict);
     expect(result.shadow?.schema_version).toBe(SHADOW_SCHEMA_VERSION);
+    expect(result.shadow?.binding_source).toBe('caller_asserted');
+    expect(result.shadow?.eligible_for_q2_decision).toBe(false);
     expect(result.response.verdict).toBe('UNCERTAIN');
     expect(result.response.reasoning).toBe(response.reasoning);
     expect(result.mutation_detected).toBe(false);

@@ -4,8 +4,13 @@
  * Deterministic eligibility only. No RV, network, models, oracle, or verdict mutation.
  * Independent of measurement pack builder. Does not branch on case_id.
  *
- * Source of truth for logic: product_run/.../q1_judge/judge.mjs (FROZEN).
- * This port must stay behavior-equivalent; bump Q1_JUDGE_VERSION if logic changes.
+ * Trust boundary (v0):
+ * - Verdict canonicalization is INTERNAL only (source → canonicalize).
+ * - Caller-supplied canonical_verdict is never trusted for decisions.
+ * - valid_bound_evidence_count is NEVER used as decision input.
+ * - evidence_bindings fields are caller-asserted until server verifies them.
+ *
+ * Bump Q1_JUDGE_VERSION when logic changes.
  */
 
 export type TriggerCode =
@@ -28,6 +33,7 @@ export interface EvidenceBinding {
   freshness: 'fresh' | 'current' | 'stale' | 'expired' | 'unknown' | string;
   contradicted: boolean;
   grade: 'machine' | 'human' | 'unspecified' | string;
+  /** Ignored for decisions if present — caller assertion only */
   valid_bound?: boolean;
 }
 
@@ -36,20 +42,29 @@ export interface RequiredCondition {
   required: boolean;
   proof_requirement: 'machine' | 'any' | 'none' | string;
   evidence_bindings?: EvidenceBinding[];
+  /**
+   * @deprecated Never used for Q1 decisions. Caller-supplied counts are untrusted.
+   * Kept optional only for forward-compat diagnostics outside the judge.
+   */
   valid_bound_evidence_count?: number;
 }
 
 export interface Q1RuntimeInput {
-  /** Public Sentinel verdict. UNCERTAIN is treated as REVIEW for Q1. */
+  /** Public / source Sentinel verdict (ALLOW|BLOCK|UNCERTAIN|REVIEW). */
   sentinel_verdict: string;
   reason_code: string;
   required_conditions: RequiredCondition[];
   action_hash?: string | null;
   /** Ignored by judge — correlation only */
   case_id?: string;
+  /**
+   * If supplied, must equal canonicalizeVerdictForQ1(source).
+   * Mismatch → invalid_input. Never used as the decision source.
+   */
+  canonical_verdict?: string;
 }
 
-export const Q1_JUDGE_VERSION = 'adr0020.q1.judge.v0';
+export const Q1_JUDGE_VERSION = 'adr0020.q1.judge.v0.1';
 export const Q1_ELIGIBLE_REASON_CODE = 'conditional_allow_no_machine_proof';
 
 const FRESH_OK = new Set(['fresh', 'current']);
@@ -58,12 +73,11 @@ const EID_RE = /^evidence:[a-z0-9][a-z0-9_-]{1,63}$/;
 /**
  * Canonicalize public Sentinel verdict for Q1 eligibility class.
  *
- * Sentinel public API emits ALLOW | BLOCK | UNCERTAIN (see types.SentinelVerdict).
+ * Sentinel public API emits ALLOW | BLOCK | UNCERTAIN.
  * E-4 / ADR-0020 measurement vocabulary uses REVIEW for the non-terminal hold class.
  * UNCERTAIN is the public name for that hold class — not a distinct third hold.
  *
  * Call path: source_verdict → canonicalizeVerdictForQ1() → Q1 judge.
- * Do not silently equate strings inside trigger logic without this step.
  */
 export function canonicalizeVerdictForQ1(publicVerdict: string): string {
   if (publicVerdict === 'UNCERTAIN') return 'REVIEW';
@@ -75,6 +89,12 @@ export function toQ1Verdict(publicVerdict: string): string {
   return canonicalizeVerdictForQ1(publicVerdict);
 }
 
+/**
+ * Structural validity of one evidence binding from typed fields only.
+ * NOTE: In v0 these fields are caller-asserted unless the shadow layer marks
+ * binding_source=server_verified. Judge still applies structural checks so
+ * garbage shapes fail closed; trust is labeled on the shadow event.
+ */
 function isValidBoundMachineEvidence(binding: unknown, conditionId: string): boolean {
   if (!binding || typeof binding !== 'object' || Array.isArray(binding)) return false;
   const b = binding as Record<string, unknown>;
@@ -88,7 +108,13 @@ function isValidBoundMachineEvidence(binding: unknown, conditionId: string): boo
   return true;
 }
 
-/** @returns null if condition shape invalid */
+/**
+ * Count valid bound machine proofs for one condition.
+ * - If evidence_bindings is an array: recompute from bindings only.
+ * - If evidence_bindings is missing/null/not-array: count = 0 (unproven).
+ * - NEVER trusts valid_bound_evidence_count.
+ * @returns null if condition shape invalid
+ */
 function validBoundCount(condition: unknown): number | null {
   if (!condition || typeof condition !== 'object' || Array.isArray(condition)) return null;
   const c = condition as Record<string, unknown>;
@@ -96,27 +122,22 @@ function validBoundCount(condition: unknown): number | null {
   if (typeof c.required !== 'boolean') return null;
   if (typeof c.proof_requirement !== 'string') return null;
 
-  if (Array.isArray(c.evidence_bindings)) {
-    let n = 0;
-    for (const b of c.evidence_bindings) {
-      if (isValidBoundMachineEvidence(b, c.condition_id)) n += 1;
-    }
-    return n;
+  // Missing bindings ⇒ no proven machine evidence (not a fallback to caller count).
+  if (!Array.isArray(c.evidence_bindings)) {
+    return 0;
   }
 
-  if (
-    typeof c.valid_bound_evidence_count === 'number' &&
-    Number.isInteger(c.valid_bound_evidence_count) &&
-    c.valid_bound_evidence_count >= 0
-  ) {
-    return c.valid_bound_evidence_count;
+  let n = 0;
+  for (const b of c.evidence_bindings) {
+    if (isValidBoundMachineEvidence(b, c.condition_id)) n += 1;
   }
-  return null;
+  return n;
 }
 
 /**
  * Pure Q1 eligibility. Never throws.
  * Ignores case_id / notes / oracle fields.
+ * Does not trust caller-supplied canonical_verdict or precomputed counts.
  */
 export function evaluateQ1Eligibility(runtime: unknown): EscalationDecision {
   if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
@@ -134,18 +155,32 @@ export function evaluateQ1Eligibility(runtime: unknown): EscalationDecision {
     return { eligible: false, triggerCode: 'invalid_input' };
   }
 
+  // Duplicate condition_id → invalid (must not inflate multi-conjunct).
+  const seen = new Set<string>();
   for (const cond of r.required_conditions) {
+    if (!cond || typeof cond !== 'object' || Array.isArray(cond)) {
+      return { eligible: false, triggerCode: 'invalid_input' };
+    }
+    const cid = (cond as Record<string, unknown>).condition_id;
+    if (typeof cid !== 'string') {
+      return { eligible: false, triggerCode: 'invalid_input' };
+    }
+    if (seen.has(cid)) {
+      return { eligible: false, triggerCode: 'invalid_input' };
+    }
+    seen.add(cid);
     if (validBoundCount(cond) === null) {
       return { eligible: false, triggerCode: 'invalid_input' };
     }
   }
 
-  // Prefer explicit canonical field when caller already normalized; else canonicalize source.
+  // INTERNAL canonicalize only — never prefer caller canonical_verdict.
   const source = r.sentinel_verdict;
-  const canonical =
-    typeof r.canonical_verdict === 'string'
-      ? r.canonical_verdict
-      : canonicalizeVerdictForQ1(source);
+  const canonical = canonicalizeVerdictForQ1(source);
+  if (typeof r.canonical_verdict === 'string' && r.canonical_verdict !== canonical) {
+    return { eligible: false, triggerCode: 'invalid_input' };
+  }
+
   if (canonical !== 'REVIEW') {
     return { eligible: false, triggerCode: 'not_review' };
   }

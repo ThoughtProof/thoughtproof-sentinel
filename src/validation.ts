@@ -234,6 +234,7 @@ function parseRequiredConditions(
   }
 
   const out: RequiredCondition[] = [];
+  const seenConditionIds = new Set<string>();
   for (let i = 0; i < raw.length; i++) {
     const item = raw[i];
     const base = `required_conditions[${i}]`;
@@ -247,7 +248,7 @@ function parseRequiredConditions(
       'required',
       'proof_requirement',
       'evidence_bindings',
-      'valid_bound_evidence_count',
+      // valid_bound_evidence_count intentionally NOT accepted (untrusted caller count)
     ]);
     for (const key of Object.keys(c)) {
       if (!allowed.has(key)) {
@@ -262,6 +263,14 @@ function parseRequiredConditions(
       });
       continue;
     }
+    if (seenConditionIds.has(c.condition_id)) {
+      errors.push({
+        field: `${base}.condition_id`,
+        message: `duplicate condition_id "${c.condition_id}"`,
+      });
+      continue;
+    }
+    seenConditionIds.add(c.condition_id);
     if (typeof c.required !== 'boolean') {
       errors.push({ field: `${base}.required`, message: 'Must be a boolean' });
       continue;
@@ -362,31 +371,13 @@ function parseRequiredConditions(
       }
     }
 
-    let valid_bound_evidence_count: number | undefined;
-    if (c.valid_bound_evidence_count !== undefined) {
-      if (
-        typeof c.valid_bound_evidence_count !== 'number' ||
-        !Number.isInteger(c.valid_bound_evidence_count) ||
-        c.valid_bound_evidence_count < 0
-      ) {
-        errors.push({
-          field: `${base}.valid_bound_evidence_count`,
-          message: 'Must be a non-negative integer',
-        });
-        continue;
-      }
-      valid_bound_evidence_count = c.valid_bound_evidence_count;
-    }
-
+    // valid_bound_evidence_count is rejected via allowed-set (untrusted caller count).
     const cond: RequiredCondition = {
       condition_id: c.condition_id,
       required: c.required,
       proof_requirement: c.proof_requirement as RequiredCondition['proof_requirement'],
     };
     if (evidence_bindings !== undefined) cond.evidence_bindings = evidence_bindings;
-    if (valid_bound_evidence_count !== undefined) {
-      cond.valid_bound_evidence_count = valid_bound_evidence_count;
-    }
     out.push(cond);
   }
 

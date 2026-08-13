@@ -54,6 +54,13 @@ export interface ShadowEvent {
   judge_latency_ms?: number;
   shadow_latency_ms?: number;
   has_structured_conditions: boolean;
+  /**
+   * Trust provenance of structured binding fields.
+   * v0: caller_asserted — Q1 may measure structure, but must NOT drive Q2 decisions.
+   */
+  binding_source: 'caller_asserted' | 'server_verified';
+  /** Always false while binding_source is caller_asserted. */
+  eligible_for_q2_decision: boolean;
 }
 
 export interface ShadowPassResult {
@@ -125,12 +132,13 @@ export function buildRuntimeInput(
     response.meta?.package_digest ||
     null;
   const source_verdict = response.verdict;
+  // INTERNAL only — never take caller-supplied canonical as source of truth.
   const canonical_verdict = canonicalizeVerdictForQ1(source_verdict);
   return {
-    // Judge consumes canonical hold class; source preserved on the shadow event.
-    sentinel_verdict: canonical_verdict,
-    canonical_verdict,
+    // Judge re-canonicalizes from source; do not pre-rewrite the source field.
+    sentinel_verdict: source_verdict,
     source_verdict,
+    canonical_verdict,
     reason_code: extractReasonCode(response),
     required_conditions: conditions,
     action_hash,
@@ -204,6 +212,8 @@ export function runShadowObservability(args: {
         judge_latency_ms: (args.now ?? Date.now)() - j0,
         shadow_latency_ms: (args.now ?? Date.now)() - t0,
         has_structured_conditions: hasStructured,
+        binding_source: 'caller_asserted',
+        eligible_for_q2_decision: false,
       };
       try {
         emit(errEvent);
@@ -252,6 +262,9 @@ export function runShadowObservability(args: {
       judge_latency_ms,
       shadow_latency_ms: (args.now ?? Date.now)() - t0,
       has_structured_conditions: hasStructured,
+      // v0: bindings are caller-asserted; never drive Q2 from this signal alone
+      binding_source: 'caller_asserted',
+      eligible_for_q2_decision: false,
     };
 
     try {
