@@ -2,8 +2,9 @@
  * ADR-0020 Shadow Observability (observe-only)
  *
  * Feature flag default OFF (SHADOW_ADR0020 only — no aliases).
- * Never mutates Sentinel response. Never calls RV. Never external network.
+ * Never mutates Sentinel response. Never calls RV.
  * Fail-open for shadow errors: production gate already decided.
+ * Default emit: console line + optional Upstash sink (fail-open, bounded).
  *
  * Placement: after final Sentinel verdict, before response serialization.
  *
@@ -192,10 +193,46 @@ export function buildRuntimeInput(
   };
 }
 
-/** Structured log sink — Vercel/runtime logs only. No external network. */
-export function emitShadowEvent(event: ShadowEvent): void {
-  // Single-line JSON for log drains. No raw mandate/evidence fields exist on ShadowEvent.
-  console.log(JSON.stringify({ type: 'adr0020.shadow', ...event }));
+/**
+ * Default emit path:
+ * 1) console JSON line (best-effort UI/log drain)
+ * 2) Upstash structured sink (fail-open, bounded timeout) when configured
+ *
+ * Never throws. Does not await Redis on the hot path beyond fire-and-forget;
+ * use emitShadowEventAsync when a test/gate needs completion.
+ */
+export function emitShadowEvent(event: ShadowEvent, env: NodeJS.ProcessEnv = process.env): void {
+  // Single-line JSON. No raw mandate/evidence fields exist on ShadowEvent.
+  try {
+    console.log(JSON.stringify({ type: 'adr0020.shadow', ...event }));
+  } catch {
+    /* ignore logger failures */
+  }
+  // Dynamic import avoided — sink is light and already a dep via auth rate-limit.
+  // Fire-and-forget; sink is fail-open internally.
+  void import('./shadow-sink.js')
+    .then(({ persistShadowEvent }) => persistShadowEvent(event, env))
+    .catch(() => {
+      /* ignore */
+    });
+}
+
+/** Awaitable emit for tests/gates. Still fail-open (resolves even on sink error). */
+export async function emitShadowEventAsync(
+  event: ShadowEvent,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  try {
+    console.log(JSON.stringify({ type: 'adr0020.shadow', ...event }));
+  } catch {
+    /* ignore */
+  }
+  try {
+    const { persistShadowEvent } = await import('./shadow-sink.js');
+    await persistShadowEvent(event, env);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**

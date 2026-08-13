@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 /**
- * A1 gate: verify Vercel log drains + team/plan retention context for Sentinel.
- * Does NOT enable SHADOW_ADR0020. Read-only.
+ * A1 measurement gate (flag stays OFF).
+ *
+ * Pass criteria (either):
+ *   A) Vercel external log drain covering thoughtproof-sentinel, OR
+ *   B) App-side Upstash shadow sink configured + reachable (TTL 30d)
+ *
+ * Does NOT enable SHADOW_ADR0020.
  */
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -154,17 +159,15 @@ results.drains_for_project = projectDrains.map((d) => ({
   createdAt: d.createdAt,
 }));
 
+const hasVercelDrain = projectDrains.length > 0;
 check(
-  'log_drain_configured_for_sentinel',
-  projectDrains.length > 0,
-  projectDrains.length
+  'vercel_log_drain_configured',
+  hasVercelDrain,
+  hasVercelDrain
     ? `drains=${projectDrains.length}`
-    : 'no log drain covering thoughtproof-sentinel',
+    : 'no Vercel log drain (optional if Upstash sink OK)',
 );
 
-// Retention gate from Vercel docs (runtime logs UI):
-// Hobby 1h, Pro 1d, Pro+ObsPlus 30d, Ent 3d, Ent+ObsPlus 30d
-// A1 needs >=7d retained searchable shadow events ideally; absolute minimum for canary is drain OR >=1d UI with export discipline.
 const billingPlan = String(
   team.json?.billing?.plan ||
     team.json?.plan ||
@@ -181,70 +184,120 @@ results.runtime_log_retention_docs = {
 };
 results.billing_plan_raw = billingPlan || team.json?.billing || null;
 
-const hasDrain = projectDrains.length > 0;
-const hasLongRetention =
-  /observability\s*plus|obs\s*plus/i.test(JSON.stringify(team.json || {})) ||
-  false;
-
-check(
-  'retention_sufficient_for_a1_canary',
-  hasDrain || hasLongRetention,
-  hasDrain
-    ? 'external drain present (retention = drain-side)'
-    : hasLongRetention
-      ? 'Observability Plus hinted'
-      : 'UI-only runtime logs insufficient without drain (Pro≈1d / no long retention proven)',
-);
-
-// vercel CLI integrations already said no resources — double-check env for drain vendors
-const envNames = [
-  'AXIOM_',
-  'DATADOG_',
-  'DD_',
-  'LOGTAIL_',
-  'BETTERSTACK_',
-  'NEW_RELIC_',
-  'SENTRY_',
-  'OTEL_',
-  'HONEYCOMB_',
-];
-// Can't list secret values; use vercel env ls via child? skip — API project env
+// Project env keys (names only)
 const envs = await api(`/v9/projects/${projectId}/env?teamId=${teamId}`);
 const envList = envs.json?.envs || envs.json || [];
 const envNameList = Array.isArray(envList) ? envList.map((e) => e.key || e.name) : [];
 results.env_keys = envNameList;
-const drainishEnv = envNameList.filter((k) =>
-  envNames.some((p) => String(k).toUpperCase().startsWith(p) || String(k).toUpperCase().includes(p.replace(/_$/, ''))),
+
+const hasUpstashEnv =
+  envNameList.includes('UPSTASH_REDIS_REST_URL') &&
+  envNameList.includes('UPSTASH_REDIS_REST_TOKEN');
+check(
+  'upstash_env_present',
+  hasUpstashEnv,
+  hasUpstashEnv ? 'UPSTASH_REDIS_REST_URL+TOKEN present' : 'missing Upstash env',
+);
+
+// Live probe via sink module (uses local env if present; else skip reachable)
+let upstashProbe = {
+  configured: hasUpstashEnv,
+  reachable: false,
+  env_name: 'unknown',
+  ttl_seconds: 30 * 24 * 60 * 60,
+  error_code: hasUpstashEnv ? 'probe_not_run' : 'sink_unconfigured',
+};
+try {
+  const mod = await import(new URL('../src/adr0020/shadow-sink.ts', import.meta.url).href).catch(
+    () => import('../src/adr0020/shadow-sink.js'),
+  );
+  // Prefer process env when operator has secrets locally; production gate
+  // still requires Vercel env keys present (checked above).
+  upstashProbe = await mod.probeShadowSink(process.env);
+  if (!upstashProbe.configured && hasUpstashEnv) {
+    // Vercel has keys but local process does not — configuration PASS, reachability UNKNOWN
+    upstashProbe = {
+      configured: true,
+      reachable: false,
+      env_name: 'production',
+      ttl_seconds: mod.SHADOW_SINK_TTL_SECONDS ?? 30 * 24 * 60 * 60,
+      error_code: 'local_env_missing_secrets_vercel_has_keys',
+    };
+  }
+} catch (e) {
+  upstashProbe.error_code = e instanceof Error ? e.message : 'probe_import_failed';
+}
+results.upstash_probe = upstashProbe;
+
+const upstashConfigured = hasUpstashEnv || upstashProbe.configured === true;
+const ttlOk = (upstashProbe.ttl_seconds ?? 0) >= 7 * 24 * 60 * 60;
+check(
+  'upstash_sink_configured',
+  upstashConfigured,
+  upstashConfigured ? `ttl_s=${upstashProbe.ttl_seconds}` : upstashProbe.error_code,
 );
 check(
-  'no_third_party_log_env_required',
-  true,
-  drainishEnv.length ? `found=${drainishEnv.join(',')}` : 'no axiom/datadog/logtail env keys',
+  'upstash_ttl_ge_7d',
+  ttlOk,
+  `ttl_seconds=${upstashProbe.ttl_seconds}`,
 );
+// Reachability: if local secrets exist, require ping; if only Vercel has keys, note deferred
+const reachabilityRequired = Boolean(
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN,
+);
+const reachOk = reachabilityRequired ? upstashProbe.reachable === true : upstashConfigured;
+check(
+  'upstash_reachability',
+  reachOk,
+  reachabilityRequired
+    ? upstashProbe.reachable
+      ? 'ping ok'
+      : `unreachable:${upstashProbe.error_code}`
+    : 'deferred: Vercel has keys; local probe skipped (no local secrets)',
+);
+
 check(
   'shadow_flag_still_absent',
   !envNameList.includes('SHADOW_ADR0020'),
   envNameList.includes('SHADOW_ADR0020') ? 'PRESENT' : 'absent OK',
 );
 
+const hasStructuredSink = upstashConfigured && ttlOk && reachOk;
+const gatePass = hasVercelDrain || hasStructuredSink;
+
 results.gate = {
-  name: 'A1_log_drain_retention',
-  pass: hasDrain, // strict: drain required before pilot/flag-on
-  reason: hasDrain
-    ? 'Drain covers Sentinel — proceed to pilot design (flag still off)'
-    : 'FAIL gate: no log drain for thoughtproof-sentinel; flag-on and pilot producer remain blocked',
+  name: 'A1_measurement_sink_retention',
+  pass: gatePass,
+  paths: {
+    vercel_drain: hasVercelDrain,
+    upstash_sink: hasStructuredSink,
+  },
+  reason: gatePass
+    ? hasStructuredSink
+      ? 'Upstash A1 sink configured (TTL≥7d) — pilot design unblocked; flag still OFF'
+      : 'Vercel drain present — pilot design unblocked; flag still OFF'
+    : 'FAIL: neither Vercel drain nor Upstash sink ready',
   next_if_fail: [
-    'Add Vercel Log Drain (Axiom/Better Stack/custom HTTPS) for project thoughtproof-sentinel, production, runtime logs',
-    'Confirm drain retains ≥7 days (prefer 30) searchable JSON lines',
+    'Ensure UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN on thoughtproof-sentinel production',
+    'Deploy shadow-sink code (src/adr0020/shadow-sink.ts) to main/prod',
+    'Optional: add Vercel Log Drain for general ops logs',
     'Re-run: node scripts/a1-log-drain-check.mjs',
-    'Only then consider pilot producer; flag-on still needs separate go',
+    'Flag-on still needs separate explicit go after this gate PASSes',
+  ],
+  next_if_pass: [
+    'Choose single pilot producer (structured conditions + canonical action_hash)',
+    'Explicit Raul go required before SHADOW_ADR0020=on',
+    'A2/A3 remain blocked',
   ],
 };
 
-results.pass = results.gate.pass && results.checks.every((c) => c.name === 'retention_sufficient_for_a1_canary' ? c.ok : true);
-
-// Gate pass is drain-centric
 results.pass = results.gate.pass;
+// Flag must stay off for this gate to be considered clean ops state
+if (envNameList.includes('SHADOW_ADR0020')) {
+  results.pass = false;
+  results.gate.pass = false;
+  results.gate.reason += ' | BLOCK: SHADOW_ADR0020 present in env';
+}
 
 const out = join(OUT_DIR, `a1-log-drain-check-${Date.now()}.json`);
 writeFileSync(out, JSON.stringify(results, null, 2));

@@ -20,23 +20,23 @@ This doc is the operational path **after** A1 code merge. Completing it does **n
 | Free-text `action_hash` | **400** (`Must be 0x followed by exactly 64 hex characters`) |
 | Structured conditions + canonical hash | 200, body still shadow-free |
 | Smoke artifact | `reports/a1-flag-off-smoke-*.json` · script `scripts/a1-flag-off-smoke.mjs` |
-| **Log drain (A1 gate)** | **FAIL** — no drain covering `thoughtproof-sentinel` |
-| Vercel integrations | **0** resources |
-| Third-party log env (Axiom/Datadog/…) | **none** |
-| Team billing plan | **hobby** (API) |
-| Runtime log retention without drain | UI-only: Hobby ≈ **1 hour** (Vercel docs); **not enough for A1** |
-| Drain check script | `scripts/a1-log-drain-check.mjs` · report `reports/a1-log-drain-check-*.json` |
+| Vercel log drain | optional — currently **0** (Hobby; not required if Upstash path used) |
+| **A1 structured sink** | **Upstash** (`src/adr0020/shadow-sink.ts`) · TTL **30d** · fail-open · env-separated keys |
+| Upstash prod env | `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` (already used by rate-limit) |
+| Team billing plan | **hobby** (API) — UI runtime logs ~1h; **not** relied on for A1 |
+| Gate script | `scripts/a1-log-drain-check.mjs` (accepts Vercel drain **or** Upstash sink) |
 
-### Gate verdict (authoritative)
+### Gate verdict model
 
 ```
-A1_log_drain_retention = FAIL
-→ pilot producer  BLOCKED
-→ SHADOW_ADR0020=on  BLOCKED
-→ A2/A3  still blocked
+A1_measurement_sink_retention = PASS iff
+  (vercel_drain) OR (upstash configured ∧ TTL≥7d ∧ reachability OK)
+→ pilot producer design  unblocked on PASS
+→ SHADOW_ADR0020=on      still needs separate explicit go
+→ A2/A3                  blocked
 ```
 
-Unblock only after: external log drain on this project (prod runtime logs) with **≥7d** searchable retention (prefer 30d), then re-run `node scripts/a1-log-drain-check.mjs` → PASS.
+**Chosen path (2026-08-13):** Option 2 — app-side Upstash sink. No Vercel plan upgrade required.
 
 ---
 
@@ -82,40 +82,35 @@ Shadow emits one JSON line via `console.log`:
 
 ---
 
-## 3. Vercel log queries (skeleton)
+## 3. Upstash query model (primary)
 
-Vercel Runtime Logs / Log Drain. Adapt to your drain (Axiom/Datadog/etc.).
+Key prefix: `sentinel:a1:{env}` where `env` ∈ `production|preview|development|test|unknown`.
 
-### 3.1 All shadow events (last 24h)
+| Key | Type | Purpose |
+|---|---|---|
+| `…:evt:{event_id}` | STRING JSON · TTL 30d | full safe shadow event |
+| `…:idx:ts` | ZSET score=ts · capped | recent event ids |
+| `…:c:total` | counter · TTL refresh | emit volume |
+| `…:c:eligible` | counter | `would_escalate=true` |
+| `…:c:ok` / `…:c:error` | counters | reliability |
 
-```text
-"type":"adr0020.shadow"
-```
-
-### 3.2 Eligible count
-
-```text
-"type":"adr0020.shadow" "would_escalate":true
-```
-
-### 3.3 Errors / disabled
-
-```text
-"type":"adr0020.shadow" ("shadow_status":"error" OR "shadow_status":"disabled")
-```
-
-### 3.4 Rate definitions (compute offline from counts)
+### Rates
 
 ```
-eligible_all     = count(would_escalate=true) / count(sentinel verify requests)
-eligible_review  = count(would_escalate=true ∧ source_verdict=UNCERTAIN|canonical=REVIEW)
-                   / count(source_verdict in {UNCERTAIN} on shadow events)
-                   # better: join to full verify volume if available
-invalid_input    = count(trigger_code=invalid_input) / count(shadow ok+error)
-mutation_live    = must remain 0 (no body field; watch error_code=mutation_blocked)
+eligible_all    ≈ GET c:eligible / GET c:total     # among shadowed requests only
+eligible_review = scan/filter events where canonical_verdict=REVIEW ∧ would_escalate
+invalid_input   = filter trigger_code=invalid_input
+mutation_live   = watch error_code=mutation_blocked (must stay 0)
 ```
 
-**Forbidden claim:** pack offline 10/25 = 40% prod prevalence.
+Console line `type=adr0020.shadow` remains best-effort (Hobby UI ~1h). **Do not** use pack 10/25 as prod prevalence.
+
+### Sink properties
+
+- fail-open (`persistShadowEvent` never throws to verify path)
+- bounded write timeout 200ms
+- no claim/evidence/mandate/PII fields in payload
+- writes only when shadow emit runs (i.e. flag on later) — flag-off remains true no-op
 
 ---
 
@@ -202,11 +197,11 @@ Serverless: new env applies on next deployment / cold instance. Prefer explicit 
 
 ### Next (before flag-on)
 
-- [x] Confirm where prod runtime logs are retained (Vercel UI only vs drain) → **UI only, no drain**
-- [ ] **GATE:** Add log drain for `thoughtproof-sentinel` prod runtime logs (≥7d, prefer 30d)
+- [x] Confirm Vercel UI-only logs insufficient (Hobby ~1h)
+- [x] Choose Option 2: Upstash structured sink (TTL 30d)
+- [ ] Land sink code on `main` + prod deploy (flag still off)
 - [ ] Re-run `node scripts/a1-log-drain-check.mjs` until PASS
-- [ ] Choose single pilot producer + wire `required_conditions` + `action_hash` (**after** drain PASS)
-- [ ] Dashboard or saved queries for rates in §3 (on drain side)
+- [ ] Choose single pilot producer + wire `required_conditions` + `action_hash` (**after** gate PASS)
 - [ ] Explicit **go** from Raul for canary flag-on
 
 ### Explicitly later
