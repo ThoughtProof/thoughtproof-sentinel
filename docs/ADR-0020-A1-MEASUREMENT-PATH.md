@@ -1,8 +1,9 @@
 # ADR-0020 A1 Measurement Path (flag-off → canary → rates)
 
-**Status:** ACTIVE prep · 2026-08-13  
-**Code pin:** `ebb8fe6` on `main` · prod alias `sentinel.thoughtproof.ai`  
-**Flag:** `SHADOW_ADR0020` **unset/off** (no activation yet)
+**Status:** A1 CANARY LIVE · 2026-08-13  
+**Code pin:** `main` @ pilot+sink · prod alias `sentinel.thoughtproof.ai`  
+**Flag:** `SHADOW_ADR0020=on` (production canary)  
+**Canary runbook:** `docs/ADR-0020-A1-CANARY.md`
 
 This doc is the operational path **after** A1 code merge. Completing it does **not** authorize A2/A3.
 
@@ -202,7 +203,8 @@ Serverless: new env applies on next deployment / cold instance. Prefer explicit 
 - [x] Land sink code on `main` + prod deploy (flag still off) — `c6d12c1`
 - [x] Re-run `node scripts/a1-log-drain-check.mjs` until PASS (Upstash path)
 - [x] Single pilot producer wired: `src/adr0020/pilot-producer.ts` + `scripts/a1-pilot-producer.mjs`
-- [ ] Explicit **go** from Raul for canary flag-on
+- [x] Explicit **go** + canary activation 2026-08-13 (flag on, pilot-only live 5, sink writing)
+- [ ] 24–48h rates review → then decide continue/kill / later A2 go
 
 ### Pilot producer (exactly one)
 
