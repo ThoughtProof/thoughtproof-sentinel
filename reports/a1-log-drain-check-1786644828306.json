@@ -1,0 +1,167 @@
+{
+  "ts": "2026-08-13T18:13:45.717Z",
+  "projectId": "prj_lioxIvWW56BR1Sy4Zbzb95gdQG4x",
+  "teamId": "team_gjwNxGgXhI6y1k0nqwTwa0C8",
+  "tokenFrom": "/Users/rauljager/Library/Application Support/com.vercel.cli/auth.json",
+  "checks": [
+    {
+      "name": "team_api_ok",
+      "ok": true,
+      "detail": "status=200 slug=rauls-projects-820227a7"
+    },
+    {
+      "name": "project_api_ok",
+      "ok": true,
+      "detail": "name=thoughtproof-sentinel"
+    },
+    {
+      "name": "no_silent_integrations_assumed",
+      "ok": true,
+      "detail": "count=0"
+    },
+    {
+      "name": "log_drain_configured_for_sentinel",
+      "ok": false,
+      "detail": "no log drain covering thoughtproof-sentinel"
+    },
+    {
+      "name": "retention_sufficient_for_a1_canary",
+      "ok": false,
+      "detail": "UI-only runtime logs insufficient without drain (Pro≈1d / no long retention proven)"
+    },
+    {
+      "name": "no_third_party_log_env_required",
+      "ok": true,
+      "detail": "no axiom/datadog/logtail env keys"
+    },
+    {
+      "name": "shadow_flag_still_absent",
+      "ok": true,
+      "detail": "absent OK"
+    }
+  ],
+  "team_status": 200,
+  "team_summary": {
+    "name": "Raul's projects",
+    "slug": "rauls-projects-820227a7",
+    "billing": {
+      "address": null,
+      "cancelation": null,
+      "email": "d5w5d2zsm2@privaterelay.appleid.com",
+      "language": null,
+      "name": "Raul's projects",
+      "platform": "stripe",
+      "period": null,
+      "plan": "hobby",
+      "tax": null,
+      "currency": "usd",
+      "trial": null,
+      "invoiceItems": null,
+      "status": "active",
+      "planIteration": "legacy",
+      "billingVersion": 2,
+      "plusMigrationEnabled": true
+    },
+    "planHint": "pro?"
+  },
+  "project_status": 200,
+  "project_interesting": {
+    "speedInsights": {
+      "id": "6Tkwfkalz8RhTLXzWoKaT0fXLu1",
+      "hasData": false
+    },
+    "deploymentExpiration": {
+      "expirationDays": 30,
+      "expirationDaysProduction": 30,
+      "expirationDaysCanceled": 30,
+      "expirationDaysErrored": 30,
+      "deploymentsToKeep": 10
+    },
+    "webAnalytics": {
+      "id": "5SDNovGbFniqsGiic0kjVPGkS"
+    }
+  },
+  "deploymentExpiration": {
+    "expirationDays": 30,
+    "expirationDaysProduction": 30,
+    "expirationDaysCanceled": 30,
+    "expirationDaysErrored": 30,
+    "deploymentsToKeep": 10
+  },
+  "integrations_status": 400,
+  "integrations": [],
+  "drain_queries": [
+    {
+      "path": "/v1/log-drains?teamId=team_gjwNxGgXhI6y1k0nqwTwa0C8",
+      "status": 200,
+      "count": 0,
+      "sample": null,
+      "error": null
+    },
+    {
+      "path": "/v2/log-drains?teamId=team_gjwNxGgXhI6y1k0nqwTwa0C8",
+      "status": 200,
+      "count": 0,
+      "sample": null,
+      "error": null
+    },
+    {
+      "path": "/v1/integrations/log-drains?teamId=team_gjwNxGgXhI6y1k0nqwTwa0C8",
+      "status": 200,
+      "count": 0,
+      "sample": null,
+      "error": null
+    },
+    {
+      "path": "/v2/integrations/log-drains?teamId=team_gjwNxGgXhI6y1k0nqwTwa0C8",
+      "status": 200,
+      "count": 0,
+      "sample": null,
+      "error": null
+    },
+    {
+      "path": "/v1/drains?teamId=team_gjwNxGgXhI6y1k0nqwTwa0C8",
+      "status": 200,
+      "count": 0,
+      "sample": null,
+      "error": null
+    }
+  ],
+  "drains_raw_count": 0,
+  "drains_for_project": [],
+  "runtime_log_retention_docs": {
+    "hobby": "1 hour",
+    "pro": "1 day",
+    "pro_observability_plus": "30 days",
+    "enterprise": "3 days",
+    "enterprise_observability_plus": "30 days",
+    "source": "https://vercel.com/docs/logs/runtime"
+  },
+  "billing_plan_raw": "hobby",
+  "env_keys": [
+    "VALIDATION_ED25519_PRIVATE_KEY_PEM",
+    "XRPL_FACILITATOR_URL",
+    "XRPL_NETWORK",
+    "XRPL_PAY_TO",
+    "X402_CDP_KEY_SECRET",
+    "X402_CDP_KEY_ID",
+    "ATTESTER_PRIVATE_KEY",
+    "SERV_BASE_URL",
+    "SENTINEL_X402_ENABLED",
+    "UPSTASH_REDIS_REST_TOKEN",
+    "UPSTASH_REDIS_REST_URL",
+    "SERV_API_KEY"
+  ],
+  "gate": {
+    "name": "A1_log_drain_retention",
+    "pass": false,
+    "reason": "FAIL gate: no log drain for thoughtproof-sentinel; flag-on and pilot producer remain blocked",
+    "next_if_fail": [
+      "Add Vercel Log Drain (Axiom/Better Stack/custom HTTPS) for project thoughtproof-sentinel, production, runtime logs",
+      "Confirm drain retains ≥7 days (prefer 30) searchable JSON lines",
+      "Re-run: node scripts/a1-log-drain-check.mjs",
+      "Only then consider pilot producer; flag-on still needs separate go"
+    ]
+  },
+  "pass": false
+}

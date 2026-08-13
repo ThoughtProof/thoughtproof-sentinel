@@ -20,6 +20,23 @@ This doc is the operational path **after** A1 code merge. Completing it does **n
 | Free-text `action_hash` | **400** (`Must be 0x followed by exactly 64 hex characters`) |
 | Structured conditions + canonical hash | 200, body still shadow-free |
 | Smoke artifact | `reports/a1-flag-off-smoke-*.json` · script `scripts/a1-flag-off-smoke.mjs` |
+| **Log drain (A1 gate)** | **FAIL** — no drain covering `thoughtproof-sentinel` |
+| Vercel integrations | **0** resources |
+| Third-party log env (Axiom/Datadog/…) | **none** |
+| Team billing plan | **hobby** (API) |
+| Runtime log retention without drain | UI-only: Hobby ≈ **1 hour** (Vercel docs); **not enough for A1** |
+| Drain check script | `scripts/a1-log-drain-check.mjs` · report `reports/a1-log-drain-check-*.json` |
+
+### Gate verdict (authoritative)
+
+```
+A1_log_drain_retention = FAIL
+→ pilot producer  BLOCKED
+→ SHADOW_ADR0020=on  BLOCKED
+→ A2/A3  still blocked
+```
+
+Unblock only after: external log drain on this project (prod runtime logs) with **≥7d** searchable retention (prefer 30d), then re-run `node scripts/a1-log-drain-check.mjs` → PASS.
 
 ---
 
@@ -185,10 +202,11 @@ Serverless: new env applies on next deployment / cold instance. Prefer explicit 
 
 ### Next (before flag-on)
 
-- [ ] Confirm where prod runtime logs are retained (Vercel UI only vs drain)
-- [ ] If UI-only: add drain or export path with ≥7d retention for `adr0020.shadow`
-- [ ] Choose single pilot producer + wire `required_conditions` + `action_hash`
-- [ ] Dashboard or saved queries for rates in §3
+- [x] Confirm where prod runtime logs are retained (Vercel UI only vs drain) → **UI only, no drain**
+- [ ] **GATE:** Add log drain for `thoughtproof-sentinel` prod runtime logs (≥7d, prefer 30d)
+- [ ] Re-run `node scripts/a1-log-drain-check.mjs` until PASS
+- [ ] Choose single pilot producer + wire `required_conditions` + `action_hash` (**after** drain PASS)
+- [ ] Dashboard or saved queries for rates in §3 (on drain side)
 - [ ] Explicit **go** from Raul for canary flag-on
 
 ### Explicitly later
