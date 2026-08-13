@@ -1,0 +1,81 @@
+{
+  "ts": "2026-08-13T18:29:44.683Z",
+  "producer": "adr0020.a1.pilot.v0",
+  "mode": "dry-run",
+  "base": "https://sentinel.thoughtproof.ai",
+  "pack": "/Users/rauljager/PROJECTS/ThoughtProof/docs/experiments/e4-external-v0.2/product_run/out/adr0020_measurement_pack_v0/measurement/cases.jsonl",
+  "limit": 3,
+  "flag": "SHADOW_ADR0020 not set by this producer",
+  "results": [
+    {
+      "case_id": "S-IM-005",
+      "build_status": "ok",
+      "errors": [],
+      "meta": {
+        "producer_id": "adr0020.a1.pilot.v0",
+        "case_id": "S-IM-005",
+        "condition_count": 3,
+        "binding_count": 2,
+        "action_hash": "0xe56e582153f5f36afaf0f26aa1cad462543842799013bcd142ed445a5c6afdd3",
+        "stripped_fields": [
+          "required_conditions[0].valid_bound_evidence_count",
+          "required_conditions[0].evidence_bindings[0].valid_bound",
+          "required_conditions[1].valid_bound_evidence_count",
+          "required_conditions[2].valid_bound_evidence_count",
+          "required_conditions[2].evidence_bindings[0].valid_bound"
+        ]
+      },
+      "validation": {
+        "valid": true,
+        "errors": []
+      },
+      "http": null
+    },
+    {
+      "case_id": "MP-AND-02",
+      "build_status": "ok",
+      "errors": [],
+      "meta": {
+        "producer_id": "adr0020.a1.pilot.v0",
+        "case_id": "MP-AND-02",
+        "condition_count": 2,
+        "binding_count": 1,
+        "action_hash": "0xd9427cca44e9098652fa1746b9164b428045709743e5891caebd52c33e7c873c",
+        "stripped_fields": [
+          "required_conditions[0].valid_bound_evidence_count",
+          "required_conditions[0].evidence_bindings[0].valid_bound",
+          "required_conditions[1].valid_bound_evidence_count"
+        ]
+      },
+      "validation": {
+        "valid": true,
+        "errors": []
+      },
+      "http": null
+    },
+    {
+      "case_id": "MP-AND-03",
+      "build_status": "ok",
+      "errors": [],
+      "meta": {
+        "producer_id": "adr0020.a1.pilot.v0",
+        "case_id": "MP-AND-03",
+        "condition_count": 2,
+        "binding_count": 2,
+        "action_hash": "0x6a5d4f9707af13fad1f39cd6654deed90d7852b6b807284dac7bf2b8920f2b76",
+        "stripped_fields": [
+          "required_conditions[0].valid_bound_evidence_count",
+          "required_conditions[0].evidence_bindings[0].valid_bound",
+          "required_conditions[1].valid_bound_evidence_count",
+          "required_conditions[1].evidence_bindings[0].valid_bound"
+        ]
+      },
+      "validation": {
+        "valid": true,
+        "errors": []
+      },
+      "http": null
+    }
+  ],
+  "pass": true
+}

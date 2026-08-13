@@ -199,10 +199,24 @@ Serverless: new env applies on next deployment / cold instance. Prefer explicit 
 
 - [x] Confirm Vercel UI-only logs insufficient (Hobby ~1h)
 - [x] Choose Option 2: Upstash structured sink (TTL 30d)
-- [ ] Land sink code on `main` + prod deploy (flag still off)
-- [ ] Re-run `node scripts/a1-log-drain-check.mjs` until PASS
-- [ ] Choose single pilot producer + wire `required_conditions` + `action_hash` (**after** gate PASS)
+- [x] Land sink code on `main` + prod deploy (flag still off) — `c6d12c1`
+- [x] Re-run `node scripts/a1-log-drain-check.mjs` until PASS (Upstash path)
+- [x] Single pilot producer wired: `src/adr0020/pilot-producer.ts` + `scripts/a1-pilot-producer.mjs`
 - [ ] Explicit **go** from Raul for canary flag-on
+
+### Pilot producer (exactly one)
+
+| Item | Value |
+|---|---|
+| ID | `adr0020.a1.pilot.v0` |
+| Module | `src/adr0020/pilot-producer.ts` |
+| CLI | `scripts/a1-pilot-producer.mjs` (`--live` optional; default dry-run) |
+| Source | measurement pack `cases.jsonl` (structure only) |
+| Bounds | ≤8 conditions, ≤4 bindings each |
+| Strips | `valid_bound_evidence_count`, `valid_bound`, unknown/PII fields |
+| Hash | canonical `0x`+64 hex (or structure-derived) |
+| Tags | `caller_asserted`, `a1-pilot`, `flag_off_safe` |
+| Does not | set flag, change verdict/cascade/policy, send raw evidence |
 
 ### Explicitly later
 
