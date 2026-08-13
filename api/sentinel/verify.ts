@@ -7,6 +7,7 @@ import { validateApiKey, checkRateLimit, checkGlobalRateLimit } from '../../src/
 import { x402Gate } from '../../src/middleware/x402.js';
 import { processSignedEvidence, applyEvidenceEffects } from '../../src/evidence-processing.js';
 import type { PaymentPlatform } from '../../src/types.js';
+import { runShadowObservability } from '../../src/adr0020/shadow.js';
 
 const VERSION = '0.1.0';
 const VALID_PLATFORMS: PaymentPlatform[] = ['openserv', 'acp', 'direct'];
@@ -124,8 +125,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log(`[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}${processedResponse.meta.proof_strength ? ` proof=${processedResponse.meta.proof_strength}` : ''}`);
 
-    // Return enriched response with attestation + billing metadata
-    return res.status(200).json({
+    // --- Final response snapshot (sole return value) ---
+    const finalResponse = {
       ...processedResponse,
       attestation: {
         prepared: true,
@@ -144,7 +145,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         platform: billingEvent.platform,
         ...(paymentResult.paymentMethod && { payment_method: paymentResult.paymentMethod }),
       },
-    });
+    };
+
+    // --- ADR-0020 shadow observability (flag default OFF; never mutates response) ---
+    // Hook ONLY after final verdict/snapshot. Fail-open: errors never reach caller.
+    try {
+      runShadowObservability({
+        response: processedResponse,
+        request: result.data,
+        requestId,
+      });
+    } catch {
+      // intentional swallow — shadow must not affect Sentinel path
+    }
+
+    return res.status(200).json(finalResponse);
   } catch (error) {
     console.error(`[sentinel/verify:${requestId}] error:`, error);
     const message = error instanceof Error ? error.message : 'Internal server error';

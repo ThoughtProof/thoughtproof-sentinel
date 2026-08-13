@@ -115,6 +115,39 @@ export interface SentinelVerifyRequest {
    * as structure/consistency validation, not third-party authorization proof.
    */
   key_manifest?: KeyManifest;
+  /**
+   * Optional structured required conditions for ADR-0020 Q1 shadow measurement.
+   * Does NOT affect the Sentinel verdict. When SHADOW_ADR0020=on, consumed only
+   * by the observe-only shadow path after the final verdict.
+   * Prefer generic condition_ids — never case-suite magic strings.
+   * @see docs/ADR-0020-sentinel-to-rv-escalation.md
+   */
+  required_conditions?: RequiredCondition[];
+  /**
+   * Optional action/payload hash for shadow event correlation. If omitted,
+   * shadow uses meta.package_digest when available.
+   */
+  action_hash?: string;
+}
+
+/** ADR-0020 structured condition (measurement / shadow input). */
+export interface RequiredCondition {
+  condition_id: string;
+  required: boolean;
+  proof_requirement: 'machine' | 'any' | 'none';
+  evidence_bindings?: EvidenceBinding[];
+  /** Precomputed count; shadow judge recomputes from bindings when present. */
+  valid_bound_evidence_count?: number;
+}
+
+export interface EvidenceBinding {
+  evidence_id: string;
+  bound_condition_id: string;
+  syntactically_valid: boolean;
+  freshness: 'fresh' | 'current' | 'stale' | 'expired' | 'unknown';
+  contradicted: boolean;
+  grade: 'machine' | 'human' | 'unspecified';
+  valid_bound?: boolean;
 }
 
 /**
