@@ -1,1 +1,25 @@
-{"ok":false,"error":"missing_upstash_env"}
+{
+  "ok": true,
+  "env": "production",
+  "ts": "2026-08-13T18:45:00.000Z",
+  "counters": {
+    "total": 7,
+    "eligible": null,
+    "ok": 7,
+    "error": null,
+    "idx_len": 7
+  },
+  "sample": {
+    "event_id": "sh_ed3c95e81b246ca78d045342e62f5db0",
+    "type": "adr0020.shadow",
+    "would_escalate": false,
+    "source_verdict": "BLOCK",
+    "trigger_code": "not_review",
+    "shadow_status": "ok",
+    "binding_source": "caller_asserted",
+    "eligible_for_q2_decision": false,
+    "sink": "upstash",
+    "error_code": null
+  },
+  "note": "t0 after canary flag-on + 5 pilot live + smoke structured calls; eligible=0 expected while public verdicts are BLOCK (not_review)"
+}
