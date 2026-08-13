@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Typecheck filter (ADR-0020 paths must be clean)
+        run: |
+          set +e
+          OUT=$(npx tsc --noEmit 2>&1)
+          CODE=$?
+          echo "$OUT"
+          # Fail if ADR-0020 related sources have errors
+          if echo "$OUT" | grep -E 'src/adr0020/|src/validation\.ts|src/types\.ts|api/sentinel/verify\.ts'; then
+            echo "::error::Type errors in ADR-0020 related files"
+            exit 1
+          fi
+          # Pre-existing errors elsewhere are allowed for now
+          echo "No ADR-0020 related type errors (tsc exit=$CODE)"
+      - name: ADR-0020 MJS↔TS parity (skips if pack not in repo)
+        run: node scripts/adr0020-parity.mjs

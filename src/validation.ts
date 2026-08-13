@@ -1,4 +1,4 @@
-import type { AgentContext, SentinelVerifyRequest, SentinelMode, SentinelTier, SignedEventEvidence, KeyManifest } from './types.js';
+import type { AgentContext, SentinelVerifyRequest, SentinelMode, SentinelTier, SignedEventEvidence, KeyManifest, RequiredCondition, EvidenceBinding } from './types.js';
 import type { AuthorizationMandate, GateMode } from './engine/authorization-gate.js';
 import { TIER_CONFIGS } from './tiers.js';
 
@@ -36,7 +36,18 @@ const MAX_AGENT_CONTEXT_TAGS = 16;
 const ALLOWED_BODY_FIELDS = new Set([
   'id', 'claim', 'evidence', 'mode', 'tier', 'mandate', 'gateMode',
   'agent_context', 'signed_evidence', 'key_manifest',
+  // ADR-0020 shadow measurement (does not affect verdict)
+  'required_conditions', 'action_hash',
 ]);
+const VALID_PROOF_REQUIREMENTS = new Set(['machine', 'any', 'none']);
+const VALID_FRESHNESS = new Set(['fresh', 'current', 'stale', 'expired', 'unknown']);
+const VALID_GRADES = new Set(['machine', 'human', 'unspecified']);
+const CONDITION_ID_RE = /^[a-z][a-z0-9_]{1,63}$/;
+const EVIDENCE_ID_RE = /^evidence:[a-z0-9][a-z0-9_-]{1,63}$/;
+/** Canonical action_hash: 0x + 64 hex (case-insensitive input, stored lowercase). */
+const ACTION_HASH_RE = /^0x[a-fA-F0-9]{64}$/;
+const MAX_REQUIRED_CONDITIONS = 32;
+const MAX_BINDINGS_PER_CONDITION = 16;
 const ALLOWED_SIGNED_EVIDENCE_ITEM_FIELDS = new Set([
   'type', 'raw_event', 'signature_scheme', 'signer_pubkey',
   'claims', 'verification', 'key_manifest_ref',
@@ -203,6 +214,178 @@ function parseAgentContext(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/**
+ * ADR-0020 optional structured conditions. Does not affect verdict.
+ * Reconstructs a clean object (strict nested whitelist).
+ */
+function parseRequiredConditions(
+  raw: unknown,
+  errors: ValidationError[],
+): RequiredCondition[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    errors.push({ field: 'required_conditions', message: 'Must be an array' });
+    return undefined;
+  }
+  if (raw.length > MAX_REQUIRED_CONDITIONS) {
+    errors.push({
+      field: 'required_conditions',
+      message: `Exceeds max ${MAX_REQUIRED_CONDITIONS} conditions`,
+    });
+    return undefined;
+  }
+
+  const out: RequiredCondition[] = [];
+  const seenConditionIds = new Set<string>();
+  for (let i = 0; i < raw.length; i++) {
+    const item = raw[i];
+    const base = `required_conditions[${i}]`;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      errors.push({ field: base, message: 'Must be an object' });
+      continue;
+    }
+    const c = item as Record<string, unknown>;
+    const allowed = new Set([
+      'condition_id',
+      'required',
+      'proof_requirement',
+      'evidence_bindings',
+      // valid_bound_evidence_count intentionally NOT accepted (untrusted caller count)
+    ]);
+    for (const key of Object.keys(c)) {
+      if (!allowed.has(key)) {
+        errors.push({ field: `${base}.${key}`, message: `Unknown field "${key}"` });
+      }
+    }
+
+    if (typeof c.condition_id !== 'string' || !CONDITION_ID_RE.test(c.condition_id)) {
+      errors.push({
+        field: `${base}.condition_id`,
+        message: 'Must match ^[a-z][a-z0-9_]{1,63}$',
+      });
+      continue;
+    }
+    if (seenConditionIds.has(c.condition_id)) {
+      errors.push({
+        field: `${base}.condition_id`,
+        message: `duplicate condition_id "${c.condition_id}"`,
+      });
+      continue;
+    }
+    seenConditionIds.add(c.condition_id);
+    if (typeof c.required !== 'boolean') {
+      errors.push({ field: `${base}.required`, message: 'Must be a boolean' });
+      continue;
+    }
+    if (typeof c.proof_requirement !== 'string' || !VALID_PROOF_REQUIREMENTS.has(c.proof_requirement)) {
+      errors.push({
+        field: `${base}.proof_requirement`,
+        message: 'Must be one of: machine, any, none',
+      });
+      continue;
+    }
+
+    let evidence_bindings: EvidenceBinding[] | undefined;
+    if (c.evidence_bindings !== undefined) {
+      if (!Array.isArray(c.evidence_bindings)) {
+        errors.push({ field: `${base}.evidence_bindings`, message: 'Must be an array' });
+        continue;
+      }
+      if (c.evidence_bindings.length > MAX_BINDINGS_PER_CONDITION) {
+        errors.push({
+          field: `${base}.evidence_bindings`,
+          message: `Exceeds max ${MAX_BINDINGS_PER_CONDITION} bindings`,
+        });
+        continue;
+      }
+      evidence_bindings = [];
+      for (let j = 0; j < c.evidence_bindings.length; j++) {
+        const bRaw = c.evidence_bindings[j];
+        const bBase = `${base}.evidence_bindings[${j}]`;
+        if (!bRaw || typeof bRaw !== 'object' || Array.isArray(bRaw)) {
+          errors.push({ field: bBase, message: 'Must be an object' });
+          continue;
+        }
+        const b = bRaw as Record<string, unknown>;
+        const bAllowed = new Set([
+          'evidence_id',
+          'bound_condition_id',
+          'syntactically_valid',
+          'freshness',
+          'contradicted',
+          'grade',
+          'valid_bound',
+        ]);
+        for (const key of Object.keys(b)) {
+          if (!bAllowed.has(key)) {
+            errors.push({ field: `${bBase}.${key}`, message: `Unknown field "${key}"` });
+          }
+        }
+        if (typeof b.evidence_id !== 'string' || !EVIDENCE_ID_RE.test(b.evidence_id)) {
+          errors.push({
+            field: `${bBase}.evidence_id`,
+            message: 'Must match ^evidence:[a-z0-9][a-z0-9_-]{1,63}$',
+          });
+          continue;
+        }
+        if (typeof b.bound_condition_id !== 'string' || b.bound_condition_id.length === 0) {
+          errors.push({ field: `${bBase}.bound_condition_id`, message: 'Required non-empty string' });
+          continue;
+        }
+        if (typeof b.syntactically_valid !== 'boolean') {
+          errors.push({ field: `${bBase}.syntactically_valid`, message: 'Must be a boolean' });
+          continue;
+        }
+        if (typeof b.freshness !== 'string' || !VALID_FRESHNESS.has(b.freshness)) {
+          errors.push({
+            field: `${bBase}.freshness`,
+            message: 'Must be one of: fresh, current, stale, expired, unknown',
+          });
+          continue;
+        }
+        if (typeof b.contradicted !== 'boolean') {
+          errors.push({ field: `${bBase}.contradicted`, message: 'Must be a boolean' });
+          continue;
+        }
+        if (typeof b.grade !== 'string' || !VALID_GRADES.has(b.grade)) {
+          errors.push({
+            field: `${bBase}.grade`,
+            message: 'Must be one of: machine, human, unspecified',
+          });
+          continue;
+        }
+        const binding: EvidenceBinding = {
+          evidence_id: b.evidence_id,
+          bound_condition_id: b.bound_condition_id,
+          syntactically_valid: b.syntactically_valid,
+          freshness: b.freshness as EvidenceBinding['freshness'],
+          contradicted: b.contradicted,
+          grade: b.grade as EvidenceBinding['grade'],
+        };
+        if (b.valid_bound !== undefined) {
+          if (typeof b.valid_bound !== 'boolean') {
+            errors.push({ field: `${bBase}.valid_bound`, message: 'Must be a boolean' });
+            continue;
+          }
+          binding.valid_bound = b.valid_bound;
+        }
+        evidence_bindings.push(binding);
+      }
+    }
+
+    // valid_bound_evidence_count is rejected via allowed-set (untrusted caller count).
+    const cond: RequiredCondition = {
+      condition_id: c.condition_id,
+      required: c.required,
+      proof_requirement: c.proof_requirement as RequiredCondition['proof_requirement'],
+    };
+    if (evidence_bindings !== undefined) cond.evidence_bindings = evidence_bindings;
+    out.push(cond);
+  }
+
+  return out;
+}
+
 export function validateVerifyRequest(body: unknown): { valid: true; data: SentinelVerifyRequest } | { valid: false; errors: ValidationError[] } {
   const errors: ValidationError[] = [];
 
@@ -248,6 +431,24 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
   const keyManifest = validateKeyManifest(b.key_manifest, errors);
 
   const agent_context = parseAgentContext(b.agent_context, errors);
+  const required_conditions = parseRequiredConditions(b.required_conditions, errors);
+
+  let normalizedActionHash: string | undefined;
+  if (b.action_hash !== undefined) {
+    if (typeof b.action_hash !== 'string') {
+      errors.push({ field: 'action_hash', message: 'Must be a string when provided' });
+    } else {
+      const trimmed = b.action_hash.trim();
+      if (!ACTION_HASH_RE.test(trimmed)) {
+        errors.push({
+          field: 'action_hash',
+          message: 'Must be 0x followed by exactly 64 hex characters',
+        });
+      } else {
+        normalizedActionHash = trimmed.toLowerCase();
+      }
+    }
+  }
 
   // Size limits
   if (typeof b.claim === 'string' && b.claim.length > 100_000) {
@@ -274,6 +475,8 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       agent_context,
       signed_evidence: signedEvidence,
       key_manifest: keyManifest,
+      ...(required_conditions !== undefined ? { required_conditions } : {}),
+      ...(normalizedActionHash !== undefined ? { action_hash: normalizedActionHash } : {}),
     },
   };
 }

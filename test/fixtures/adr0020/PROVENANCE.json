@@ -1,0 +1,10 @@
+{
+  "purpose": "ADR-0020 MJS\u2194TS parity fixtures for CI",
+  "evaluation_only": true,
+  "n_cases": 25,
+  "cases_sha256": "3cebcb4cc6e6e0b465348b2175d7157f69bc04679c5a261e74565d49d39f3f1e",
+  "frozen_judge_sha256": "d7d94b314efd8d92b9ab78408edc7ac018466e1fb6ab1f03d23594d98c4d613b",
+  "frozen_judge_version": "adr0020.q1.judge.v0",
+  "source": "vendored from product_run/out/adr0020_measurement_pack_v0 (2026-08-13)",
+  "note": "Frozen MJS judge is independent of TS port; no shared predicate helper."
+}

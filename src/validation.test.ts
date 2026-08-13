@@ -285,4 +285,159 @@ describe('validateVerifyRequest', () => {
       }
     });
   });
+
+  // ------------------------------------------------------------
+  // ADR-0020: action_hash + required_conditions validation
+  // ------------------------------------------------------------
+  describe('ADR-0020 structured fields', () => {
+    const goodHash = '0x' + 'ab'.repeat(32);
+    const goodCondition = {
+      condition_id: 'alpha_required',
+      required: true,
+      proof_requirement: 'machine',
+      evidence_bindings: [
+        {
+          evidence_id: 'evidence:alpha_ok',
+          bound_condition_id: 'alpha_required',
+          syntactically_valid: true,
+          freshness: 'fresh',
+          contradicted: false,
+          grade: 'machine',
+        },
+      ],
+    };
+
+    it('accepts canonical action_hash and lowercases it', () => {
+      const upper = '0x' + 'AB'.repeat(32);
+      const result = validateVerifyRequest({ ...validBody, action_hash: upper });
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.data.action_hash).toBe(upper.toLowerCase());
+      }
+    });
+
+    it('rejects free-text action_hash (PII / secret guard)', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        action_hash: 'user@example.com secret-token',
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        const err = result.errors.find((e) => e.field === 'action_hash');
+        expect(err).toBeDefined();
+        expect(err!.message).toMatch(/0x.*64 hex/i);
+      }
+    });
+
+    it('rejects short / malformed action_hash', () => {
+      for (const bad of ['0xabc', 'ab'.repeat(32), '0x' + 'g'.repeat(64), '', '  ']) {
+        const result = validateVerifyRequest({ ...validBody, action_hash: bad });
+        expect(result.valid).toBe(false);
+      }
+    });
+
+    it('accepts well-formed required_conditions', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        action_hash: goodHash,
+        required_conditions: [goodCondition],
+      });
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.data.required_conditions).toHaveLength(1);
+        expect(result.data.required_conditions![0].condition_id).toBe('alpha_required');
+        expect(result.data.required_conditions![0].evidence_bindings).toHaveLength(1);
+      }
+    });
+
+    it('rejects duplicate condition_id', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        required_conditions: [
+          goodCondition,
+          { ...goodCondition, condition_id: 'alpha_required' },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.errors.some((e) => e.message.includes('duplicate'))).toBe(true);
+      }
+    });
+
+    it('rejects unknown nested fields on conditions and bindings', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        required_conditions: [
+          {
+            ...goodCondition,
+            sneaky: true,
+            evidence_bindings: [
+              {
+                ...goodCondition.evidence_bindings[0],
+                raw_secret: 'leak-me',
+              },
+            ],
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        const fields = result.errors.map((e) => e.field);
+        expect(fields).toContain('required_conditions[0].sneaky');
+        expect(fields).toContain('required_conditions[0].evidence_bindings[0].raw_secret');
+      }
+    });
+
+    it('rejects valid_bound_evidence_count (untrusted caller count)', () => {
+      const result = validateVerifyRequest({
+        ...validBody,
+        required_conditions: [
+          {
+            ...goodCondition,
+            valid_bound_evidence_count: 99,
+          },
+        ],
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(
+          result.errors.some((e) => e.field === 'required_conditions[0].valid_bound_evidence_count'),
+        ).toBe(true);
+      }
+    });
+
+    it('rejects more than 32 required_conditions', () => {
+      const many = Array.from({ length: 33 }, (_, i) => ({
+        condition_id: `cond_${i}`,
+        required: true,
+        proof_requirement: 'machine',
+      }));
+      const result = validateVerifyRequest({ ...validBody, required_conditions: many });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.errors.some((e) => e.field === 'required_conditions')).toBe(true);
+      }
+    });
+
+    it('rejects more than 16 bindings per condition', () => {
+      const bindings = Array.from({ length: 17 }, (_, i) => ({
+        evidence_id: `evidence:b_${i}`,
+        bound_condition_id: 'alpha_required',
+        syntactically_valid: true,
+        freshness: 'fresh',
+        contradicted: false,
+        grade: 'machine',
+      }));
+      const result = validateVerifyRequest({
+        ...validBody,
+        required_conditions: [{ ...goodCondition, evidence_bindings: bindings }],
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(
+          result.errors.some((e) => e.field === 'required_conditions[0].evidence_bindings'),
+        ).toBe(true);
+      }
+    });
+  });
 });
