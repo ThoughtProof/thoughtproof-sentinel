@@ -44,6 +44,8 @@ const VALID_FRESHNESS = new Set(['fresh', 'current', 'stale', 'expired', 'unknow
 const VALID_GRADES = new Set(['machine', 'human', 'unspecified']);
 const CONDITION_ID_RE = /^[a-z][a-z0-9_]{1,63}$/;
 const EVIDENCE_ID_RE = /^evidence:[a-z0-9][a-z0-9_-]{1,63}$/;
+/** Canonical action_hash: 0x + 64 hex (case-insensitive input, stored lowercase). */
+const ACTION_HASH_RE = /^0x[a-fA-F0-9]{64}$/;
 const MAX_REQUIRED_CONDITIONS = 32;
 const MAX_BINDINGS_PER_CONDITION = 16;
 const ALLOWED_SIGNED_EVIDENCE_ITEM_FIELDS = new Set([
@@ -431,11 +433,20 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
   const agent_context = parseAgentContext(b.agent_context, errors);
   const required_conditions = parseRequiredConditions(b.required_conditions, errors);
 
+  let normalizedActionHash: string | undefined;
   if (b.action_hash !== undefined) {
-    if (typeof b.action_hash !== 'string' || b.action_hash.trim().length === 0) {
-      errors.push({ field: 'action_hash', message: 'Must be a non-empty string when provided' });
-    } else if (b.action_hash.length > 128) {
-      errors.push({ field: 'action_hash', message: 'Exceeds 128 character limit' });
+    if (typeof b.action_hash !== 'string') {
+      errors.push({ field: 'action_hash', message: 'Must be a string when provided' });
+    } else {
+      const trimmed = b.action_hash.trim();
+      if (!ACTION_HASH_RE.test(trimmed)) {
+        errors.push({
+          field: 'action_hash',
+          message: 'Must be 0x followed by exactly 64 hex characters',
+        });
+      } else {
+        normalizedActionHash = trimmed.toLowerCase();
+      }
     }
   }
 
@@ -465,7 +476,7 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       signed_evidence: signedEvidence,
       key_manifest: keyManifest,
       ...(required_conditions !== undefined ? { required_conditions } : {}),
-      ...(typeof b.action_hash === 'string' ? { action_hash: b.action_hash.trim() } : {}),
+      ...(normalizedActionHash !== undefined ? { action_hash: normalizedActionHash } : {}),
     },
   };
 }

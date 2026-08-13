@@ -4,7 +4,9 @@ import {
   isShadowEnabled,
   deterministicEventId,
   extractReasonCode,
+  sanitizeActionHashForLog,
   SHADOW_SCHEMA_VERSION,
+  ACTION_HASH_RE,
 } from './shadow.js';
 import type { SentinelVerifyRequest, SentinelVerifyResponse } from '../types.js';
 
@@ -83,7 +85,14 @@ describe('ADR-0020 shadow observability', () => {
     expect(isShadowEnabled({ SHADOW_ADR0020: '1' })).toBe(true);
   });
 
-  it('disabled when flag off — no event, response unchanged', () => {
+  it('undocumented ADR0020_SHADOW alias does NOT enable', () => {
+    expect(isShadowEnabled({ ADR0020_SHADOW: 'on' } as NodeJS.ProcessEnv)).toBe(false);
+    expect(isShadowEnabled({ ADR0020_SHADOW: '1', SHADOW_ADR0020: 'off' } as NodeJS.ProcessEnv)).toBe(
+      false,
+    );
+  });
+
+  it('disabled when flag off — true no-op: same response ref, no event', () => {
     const response = baseResponse();
     const request = baseRequest();
     const events: unknown[] = [];
@@ -94,11 +103,26 @@ describe('ADR-0020 shadow observability', () => {
       emit: (e) => events.push(e),
     });
     expect(result.shadow_status).toBe('disabled');
+    expect(result.error_code).toBe('flag_off');
     expect(result.shadow).toBeNull();
     expect(events).toHaveLength(0);
-    expect(result.response.verdict).toBe(response.verdict);
-    expect(result.response.id).toBe(response.id);
+    // True no-op: original object reference returned (no clone/stringify)
+    expect(result.response).toBe(response);
     expect(result.mutation_detected).toBe(false);
+  });
+
+  it('sanitizeActionHashForLog never emits raw free text', () => {
+    const good = '0x' + 'ab'.repeat(32);
+    expect(sanitizeActionHashForLog(good)).toBe(good);
+    expect(sanitizeActionHashForLog(good.toUpperCase())).toBe(good);
+    expect(sanitizeActionHashForLog('sha256:' + 'cd'.repeat(32))).toBe('0x' + 'cd'.repeat(32));
+    const leaked = sanitizeActionHashForLog('user@example.com api_key=secret');
+    expect(leaked).not.toBeNull();
+    expect(leaked).toMatch(ACTION_HASH_RE);
+    expect(leaked).not.toContain('user@');
+    expect(leaked).not.toContain('secret');
+    expect(sanitizeActionHashForLog(null)).toBeNull();
+    expect(sanitizeActionHashForLog('')).toBeNull();
   });
 
   it('when on: escalates eligible case, does not mutate response', () => {
@@ -122,6 +146,11 @@ describe('ADR-0020 shadow observability', () => {
     expect(result.shadow?.schema_version).toBe(SHADOW_SCHEMA_VERSION);
     expect(result.shadow?.binding_source).toBe('caller_asserted');
     expect(result.shadow?.eligible_for_q2_decision).toBe(false);
+    expect(result.shadow?.eligibility_basis).toBe('caller_asserted_structure');
+    expect(result.shadow?.missing_caller_asserted_bound_count).toBe(
+      result.shadow?.missing_machine_proof_count,
+    );
+    expect(result.shadow?.action_hash).toMatch(ACTION_HASH_RE);
     expect(result.response.verdict).toBe('UNCERTAIN');
     expect(result.response.reasoning).toBe(response.reasoning);
     expect(result.mutation_detected).toBe(false);
