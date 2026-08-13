@@ -66,10 +66,9 @@ export interface ShadowEvent {
   required_count: number | null;
   /**
    * Count of required machine conditions lacking structurally-valid
-   * caller-asserted bindings. Not server-verified proof count.
+   * caller-asserted bindings. NOT server-verified machine-proof count.
+   * Internal judge stats use a historical name; event schema uses this only.
    */
-  missing_machine_proof_count: number | null;
-  /** Explicit name: caller-asserted structure only (alias of missing_machine_proof_count). */
   missing_caller_asserted_bound_count: number | null;
   event_id: string | null;
   shadow_status: ShadowStatus;
@@ -256,7 +255,6 @@ export function runShadowObservability(args: {
         final_verdict: runtime.source_verdict,
         action_hash: safeActionHash,
         required_count: null,
-        missing_machine_proof_count: null,
         missing_caller_asserted_bound_count: null,
         event_id: null,
         shadow_status: 'error',
@@ -308,7 +306,6 @@ export function runShadowObservability(args: {
       final_verdict: runtime.source_verdict,
       action_hash: safeActionHash,
       required_count: stats.required_count,
-      missing_machine_proof_count: stats.missing_machine_proof_count,
       missing_caller_asserted_bound_count: stats.missing_machine_proof_count,
       event_id,
       shadow_status: 'ok',

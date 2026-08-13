@@ -147,9 +147,8 @@ describe('ADR-0020 shadow observability', () => {
     expect(result.shadow?.binding_source).toBe('caller_asserted');
     expect(result.shadow?.eligible_for_q2_decision).toBe(false);
     expect(result.shadow?.eligibility_basis).toBe('caller_asserted_structure');
-    expect(result.shadow?.missing_caller_asserted_bound_count).toBe(
-      result.shadow?.missing_machine_proof_count,
-    );
+    expect(result.shadow?.missing_caller_asserted_bound_count).toBe(1);
+    expect(result.shadow).not.toHaveProperty('missing_machine_proof_count');
     expect(result.shadow?.action_hash).toMatch(ACTION_HASH_RE);
     expect(result.response.verdict).toBe('UNCERTAIN');
     expect(result.response.reasoning).toBe(response.reasoning);
