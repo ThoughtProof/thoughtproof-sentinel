@@ -11,7 +11,21 @@
 | Deploy | `thoughtproof-sentinel-kcm2wvgdy` · aliased `sentinel.thoughtproof.ai` |
 | Sink | Upstash `sentinel:a1:production:*` · TTL 30d · fail-open |
 | Producer | `adr0020.a1.pilot.v0` only (`scripts/a1-pilot-producer.mjs --live`) |
+| **Producer allowlist** | **Server-enforced** — default `[adr0020.a1.pilot.v0]`; override `SHADOW_PRODUCER_ALLOWLIST=id1,id2` |
 | Non-goals | A2 RV, A3 live merge, Full80, ModeQ, global traffic producers |
+
+### Scope enforcement
+
+Flag `SHADOW_ADR0020` is global, but the shadow **runner** skips unless
+`request.agent_context.agent_id` is on the allowlist:
+
+| `agent_id` | Flag on | Result |
+|---|---|---|
+| `adr0020.a1.pilot.v0` | on | shadow runs + sink |
+| other / missing | on | `shadow_status=skipped` · `producer_not_allowlisted` / `producer_missing` · **no emit** |
+| any | off | true no-op |
+
+Events carry `producer_id` + `producer_allowed` for 24–48h review.
 
 ## Initial live proof (t0)
 
@@ -56,13 +70,21 @@ node scripts/a1-flag-off-smoke.mjs
 
 ```bash
 node scripts/a1-upstash-counters.mjs --env-file=<prod env pull>
-# rates:
-#   eligible/total from counters
-#   error/total
-#   idx growth
 ```
 
+| Metric | How |
+|---|---|
+| `eligible / total` | Upstash `c:eligible` / `c:total` |
+| `error / total` | `c:error` / `c:total` |
+| Sink latency | event `shadow_latency_ms` / `judge_latency_ms` p50/p95 |
+| HTTP latency | Vercel/function duration vs pre-canary |
+| Events by `producer_id` | scan `evt:*` / idx tail |
+| Unknown producers | must stay **0 emits** (skipped server-side); if any slip → kill or tighten allowlist |
+| PII / schema | no claim/evidence/mandate keys; `action_hash` only `0x`+64; `eligible_for_q2_decision=false` |
+
 Record into `reports/a1-canary-rates-YYYY-MM-DD.json` before any A2 discussion.
+
+**Trip:** unknown producer events observed, schema/PII anomaly, error storm, response drift → kill switch.
 
 ## Explicitly still blocked
 

@@ -2,12 +2,16 @@ import { describe, it, expect } from 'vitest';
 import {
   runShadowObservability,
   isShadowEnabled,
+  isProducerAllowed,
+  getShadowProducerAllowlist,
   deterministicEventId,
   extractReasonCode,
   sanitizeActionHashForLog,
   SHADOW_SCHEMA_VERSION,
   ACTION_HASH_RE,
+  DEFAULT_SHADOW_PRODUCER_ALLOWLIST,
 } from './shadow.js';
+import { PILOT_PRODUCER_ID } from './pilot-producer.js';
 import type { SentinelVerifyRequest, SentinelVerifyResponse } from '../types.js';
 
 function binding(eid: string, cond: string) {
@@ -41,6 +45,13 @@ function baseRequest(overrides: Partial<SentinelVerifyRequest> = {}): SentinelVe
       },
     ],
     action_hash: '0x' + 'ab'.repeat(32),
+    // A1 canary default allowlist requires pilot agent_id
+    agent_context: {
+      agent_id: PILOT_PRODUCER_ID,
+      agent_runtime: 'a1-pilot',
+      environment: 'paper',
+      tags: ['adr0020', 'a1-pilot', 'caller_asserted'],
+    },
     ...overrides,
   };
 }
@@ -90,6 +101,45 @@ describe('ADR-0020 shadow observability', () => {
     expect(isShadowEnabled({ ADR0020_SHADOW: '1', SHADOW_ADR0020: 'off' } as NodeJS.ProcessEnv)).toBe(
       false,
     );
+  });
+
+  it('default producer allowlist is pilot only', () => {
+    expect(getShadowProducerAllowlist({})).toEqual([...DEFAULT_SHADOW_PRODUCER_ALLOWLIST]);
+    expect(DEFAULT_SHADOW_PRODUCER_ALLOWLIST).toContain(PILOT_PRODUCER_ID);
+    expect(isProducerAllowed(baseRequest()).allowed).toBe(true);
+    expect(isProducerAllowed(baseRequest({ agent_context: { agent_id: 'other-agent' } })).allowed).toBe(
+      false,
+    );
+    expect(isProducerAllowed(baseRequest({ agent_context: undefined })).allowed).toBe(false);
+  });
+
+  it('unknown producer is skipped (no emit) when flag on', () => {
+    const events: unknown[] = [];
+    const response = baseResponse();
+    const result = runShadowObservability({
+      response,
+      request: baseRequest({ agent_context: { agent_id: 'unknown-prod' } }),
+      env: { SHADOW_ADR0020: 'on' },
+      emit: (e) => events.push(e),
+    });
+    expect(result.shadow_status).toBe('skipped');
+    expect(result.error_code).toBe('producer_not_allowlisted');
+    expect(result.shadow).toBeNull();
+    expect(events).toHaveLength(0);
+    expect(result.response).toBe(response);
+  });
+
+  it('missing producer is skipped when flag on', () => {
+    const events: unknown[] = [];
+    const result = runShadowObservability({
+      response: baseResponse(),
+      request: baseRequest({ agent_context: undefined }),
+      env: { SHADOW_ADR0020: 'on' },
+      emit: (e) => events.push(e),
+    });
+    expect(result.shadow_status).toBe('skipped');
+    expect(result.error_code).toBe('producer_missing');
+    expect(events).toHaveLength(0);
   });
 
   it('disabled when flag off — true no-op: same response ref, no event', () => {
@@ -150,6 +200,8 @@ describe('ADR-0020 shadow observability', () => {
     expect(result.shadow?.missing_caller_asserted_bound_count).toBe(1);
     expect(result.shadow).not.toHaveProperty('missing_machine_proof_count');
     expect(result.shadow?.action_hash).toMatch(ACTION_HASH_RE);
+    expect(result.shadow?.producer_id).toBe(PILOT_PRODUCER_ID);
+    expect(result.shadow?.producer_allowed).toBe(true);
     expect(result.response.verdict).toBe('UNCERTAIN');
     expect(result.response.reasoning).toBe(response.reasoning);
     expect(result.mutation_detected).toBe(false);

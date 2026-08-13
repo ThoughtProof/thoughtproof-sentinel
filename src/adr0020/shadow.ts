@@ -21,10 +21,18 @@ import {
   type RequiredCondition,
   type Q1RuntimeInput,
 } from './q1-judge.js';
+import { PILOT_PRODUCER_ID } from './pilot-producer.js';
 import type { SentinelVerifyRequest, SentinelVerifyResponse } from '../types.js';
 
 export const SHADOW_SCHEMA_VERSION = 'adr0020.shadow.v0';
 export const SHADOW_RUNNER_VERSION = 'adr0020.shadow.runner.v0';
+
+/**
+ * A1 canary: only allowlisted producers run the shadow path when flag is on.
+ * Default allowlist = pilot only. Override via SHADOW_PRODUCER_ALLOWLIST=id1,id2
+ * (comma-separated agent_id values). Empty override is ignored (keeps default).
+ */
+export const DEFAULT_SHADOW_PRODUCER_ALLOWLIST = [PILOT_PRODUCER_ID] as const;
 
 /** Pinned hash of frozen JS judge source (experiment pack). TS port must stay equivalent. */
 export const PINNED_JUDGE_LOGIC_ID = 'adr0020.q1.judge.v0+ts-port';
@@ -86,6 +94,10 @@ export interface ShadowEvent {
   binding_source: 'caller_asserted' | 'server_verified';
   /** Always false while binding_source is caller_asserted. */
   eligible_for_q2_decision: boolean;
+  /** Caller agent_id used for allowlist (safe short id; never free text claim). */
+  producer_id: string | null;
+  /** Whether producer_id was on the server allowlist at emit time. */
+  producer_allowed: boolean;
 }
 
 export interface ShadowPassResult {
@@ -139,6 +151,38 @@ function deepClone<T>(v: T): T {
 export function isShadowEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = (env.SHADOW_ADR0020 ?? 'off').toString().trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+}
+
+/** Resolve allowlisted producer agent_ids for A1 canary. */
+export function getShadowProducerAllowlist(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly string[] {
+  const raw = (env.SHADOW_PRODUCER_ALLOWLIST ?? '').toString().trim();
+  if (!raw) return DEFAULT_SHADOW_PRODUCER_ALLOWLIST;
+  const parts = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return parts.length > 0 ? parts : DEFAULT_SHADOW_PRODUCER_ALLOWLIST;
+}
+
+/** Extract producer id from request agent_context (agent_id only). */
+export function extractProducerId(request: SentinelVerifyRequest): string | null {
+  const id = request.agent_context?.agent_id;
+  if (typeof id !== 'string') return null;
+  const t = id.trim();
+  return t ? t.slice(0, 128) : null;
+}
+
+/** True only if producer_id is present and on allowlist. */
+export function isProducerAllowed(
+  request: SentinelVerifyRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): { allowed: boolean; producer_id: string | null } {
+  const producer_id = extractProducerId(request);
+  if (!producer_id) return { allowed: false, producer_id: null };
+  const list = getShadowProducerAllowlist(env);
+  return { allowed: list.includes(producer_id), producer_id };
 }
 
 export function deterministicEventId(args: {
@@ -249,8 +293,9 @@ export function runShadowObservability(args: {
   emit?: (event: ShadowEvent) => void;
   now?: () => number;
 }): ShadowPassResult {
+  const env = args.env ?? process.env;
   // FIRST operation: flag check — no clone/stringify when disabled (504-track hygiene)
-  if (!isShadowEnabled(args.env ?? process.env)) {
+  if (!isShadowEnabled(env)) {
     return {
       response: args.response,
       shadow: null,
@@ -260,10 +305,22 @@ export function runShadowObservability(args: {
     };
   }
 
+  // A1 canary: technical producer allowlist (default = pilot only)
+  const { allowed: producerAllowed, producer_id } = isProducerAllowed(args.request, env);
+  if (!producerAllowed) {
+    return {
+      response: args.response,
+      shadow: null,
+      shadow_status: 'skipped',
+      error_code: producer_id ? 'producer_not_allowlisted' : 'producer_missing',
+      mutation_detected: false,
+    };
+  }
+
   const t0 = (args.now ?? Date.now)();
   const original = deepClone(args.response);
   const originalFp = stableStringify(original);
-  const emit = args.emit ?? emitShadowEvent;
+  const emit = args.emit ?? ((e: ShadowEvent) => emitShadowEvent(e, env));
 
   try {
     const runtime = buildRuntimeInput(original, args.request);
@@ -303,6 +360,8 @@ export function runShadowObservability(args: {
         has_structured_conditions: hasStructured,
         binding_source: 'caller_asserted',
         eligible_for_q2_decision: false,
+        producer_id,
+        producer_allowed: true,
       };
       try {
         emit(errEvent);
@@ -354,6 +413,8 @@ export function runShadowObservability(args: {
       has_structured_conditions: hasStructured,
       binding_source: 'caller_asserted',
       eligible_for_q2_decision: false,
+      producer_id,
+      producer_allowed: true,
     };
 
     try {

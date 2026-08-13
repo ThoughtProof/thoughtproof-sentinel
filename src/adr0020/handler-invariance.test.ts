@@ -58,6 +58,12 @@ function baseRequest(): SentinelVerifyRequest {
     mode: 'action_authorization',
     tier: 'standard',
     action_hash: '0x' + 'cd'.repeat(32),
+    agent_context: {
+      agent_id: 'adr0020.a1.pilot.v0',
+      agent_runtime: 'a1-pilot',
+      environment: 'paper',
+      tags: ['adr0020', 'a1-pilot', 'caller_asserted'],
+    },
     required_conditions: [
       {
         condition_id: 'deadline_met',

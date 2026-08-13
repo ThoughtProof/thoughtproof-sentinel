@@ -129,6 +129,8 @@ export function toSinkPayload(event: ShadowEvent): Record<string, unknown> {
     has_structured_conditions: event.has_structured_conditions,
     binding_source: event.binding_source,
     eligible_for_q2_decision: event.eligible_for_q2_decision,
+    producer_id: event.producer_id,
+    producer_allowed: event.producer_allowed,
     // sink metadata
     sink: 'upstash',
     sink_ttl_s: SHADOW_SINK_TTL_SECONDS,

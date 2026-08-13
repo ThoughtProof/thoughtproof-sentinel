@@ -38,6 +38,8 @@ function baseEvent(over: Partial<ShadowEvent> = {}): ShadowEvent {
     has_structured_conditions: true,
     binding_source: 'caller_asserted',
     eligible_for_q2_decision: false,
+    producer_id: 'adr0020.a1.pilot.v0',
+    producer_allowed: true,
     ...over,
   };
 }
