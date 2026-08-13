@@ -1,12 +1,163 @@
 {
   "mjs_hash": "d7d94b314efd8d92b9ab78408edc7ac018466e1fb6ab1f03d23594d98c4d613b",
   "ts_hash": "358921bd922831c57bbe3c7522a1dd0eb4d3024af30845b3676bde8b951d8385",
+  "cases_sha256": "3cebcb4cc6e6e0b465348b2175d7157f69bc04679c5a261e74565d49d39f3f1e",
   "n_cases": 25,
+  "cases_executed": 25,
   "case_mismatches": 0,
-  "pass": true,
-  "parity_run_sha256": "544d9b0d606abb8e1f51614930209323e2762ef9da806c402fe5b37d47fe4bd6",
+  "metamorphic_shared_vocab": {
+    "n": 12,
+    "matched": 12,
+    "note": "12/12 shared-vocabulary metamorphic checks match",
+    "results": [
+      {
+        "name": "base",
+        "ok": true,
+        "m": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        },
+        "t": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        }
+      },
+      {
+        "name": "no_case_id",
+        "ok": true,
+        "m": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        },
+        "t": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        }
+      },
+      {
+        "name": "case_id",
+        "ok": true,
+        "m": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        },
+        "t": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        }
+      },
+      {
+        "name": "reorder",
+        "ok": true,
+        "m": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        },
+        "t": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        }
+      },
+      {
+        "name": "rename",
+        "ok": true,
+        "m": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        },
+        "t": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        }
+      },
+      {
+        "name": "optional",
+        "ok": true,
+        "m": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        },
+        "t": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        }
+      },
+      {
+        "name": "stale",
+        "ok": true,
+        "m": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        },
+        "t": {
+          "eligible": true,
+          "triggerCode": "multi_conjunct_missing_machine_proof"
+        }
+      },
+      {
+        "name": "fill",
+        "ok": true,
+        "m": {
+          "eligible": false,
+          "triggerCode": "all_required_machine_proofs_bound"
+        },
+        "t": {
+          "eligible": false,
+          "triggerCode": "all_required_machine_proofs_bound"
+        }
+      },
+      {
+        "name": "allow",
+        "ok": true,
+        "m": {
+          "eligible": false,
+          "triggerCode": "not_review"
+        },
+        "t": {
+          "eligible": false,
+          "triggerCode": "not_review"
+        }
+      },
+      {
+        "name": "block",
+        "ok": true,
+        "m": {
+          "eligible": false,
+          "triggerCode": "not_review"
+        },
+        "t": {
+          "eligible": false,
+          "triggerCode": "not_review"
+        }
+      },
+      {
+        "name": "reason",
+        "ok": true,
+        "m": {
+          "eligible": false,
+          "triggerCode": "reason_not_eligible"
+        },
+        "t": {
+          "eligible": false,
+          "triggerCode": "reason_not_eligible"
+        }
+      },
+      {
+        "name": "single",
+        "ok": true,
+        "m": {
+          "eligible": false,
+          "triggerCode": "insufficient_required_conditions"
+        },
+        "t": {
+          "eligible": false,
+          "triggerCode": "insufficient_required_conditions"
+        }
+      }
+    ]
+  },
   "uncertain_boundary": {
-    "note": "12/12 shared-vocabulary metamorphic checks match when using REVIEW; UNCERTAIN→REVIEW is explicit production-boundary normalization via canonicalizeVerdictForQ1",
+    "note": "12/12 shared-vocabulary metamorphic checks match when using REVIEW; UNCERTAIN→REVIEW is an explicit production-boundary normalization via canonicalizeVerdictForQ1",
     "mjs": {
       "eligible": false,
       "triggerCode": "not_review"
@@ -17,5 +168,7 @@
     },
     "canonical": "REVIEW"
   },
-  "mismatches": []
+  "parity_run_sha256": "544d9b0d606abb8e1f51614930209323e2762ef9da806c402fe5b37d47fe4bd6",
+  "fixtures_dir": "test/fixtures/adr0020",
+  "pass": true
 }

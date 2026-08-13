@@ -184,12 +184,13 @@ Additional locks:
 
 ### Q5 — Ship bar
 
-#### Phase A — Shadow (now)
+#### Phase A — Shadow (split; see docs/ADR-0020-PHASES.md)
 
-- Production final verdict stays as today (for 005: **REVIEW**, execution STOP)
-- When Q1 would fire: run RV **in parallel / async shadow**
-- Shadow results measured only — **no merge into final verdict**
-- No Full80 re-run solely to re-measure known debt
+- **A1 (current PR):** Q1 eligibility shadow only — log `would_escalate`; **no RV call**
+- **A2 (later explicit go):** RV result shadow — RV runs, log only, verdict unchanged
+- **A3 (later explicit go):** live semantic merge after targeted suite + Full80
+- Production final verdict stays as today during A1/A2 (for 005: hold/REVIEW path, execution STOP)
+- No Full80 re-run solely to re-measure known debt in A1
 
 #### Targeted eval family (before any semantic merge)
 
@@ -281,10 +282,11 @@ Escalation path = **`decision`**. Shadow may use `audit` batching if hot-path bu
 1. **[DONE 2026-08-13]** ADR text + Q1–Q5 lock  
 2. **Measurement:** structured `required_conditions` on eval pack / offline annotation for multi-conjunct family (incl. 005)  
 3. **Escalation judge (pure):** `(sentinelResult, mandateStructure) → { escalate, triggers[] }` implementing Q1 only  
-4. **Shadow runner:** fire RV with Q2 package; log child receipt; final verdict unchanged  
-5. **Targeted semantic family** against Q5 bar  
-6. **Merge candidate** only on explicit go after bar green  
-7. Optional thin `/pipeline` helper (client orchestrator first; server-side auto-RV not required for v0)
+4. **A1 Shadow (current PR):** Q1 eligibility only — no RV; final verdict unchanged  
+5. **A2 RV output shadow:** later separate go — RV package + log-only call  
+6. **A3 live merge:** still later — merge semantics only on explicit go  
+7. **Targeted semantic family** against Q5 bar (before A3)  
+8. Optional thin `/pipeline` helper (client orchestrator first; server-side auto-RV not required for v0)
 
 No production default flip until Phase A measurements + Q5 bar.
 
@@ -324,7 +326,9 @@ No production default flip until Phase A measurements + Q5 bar.
 - [x] Q5 Ship bar locked (shadow → targeted → then Full80)  
 - [x] Structured `required_conditions` measurement pack (v0 frozen: product_run/out/adr0020_measurement_pack_v0/measurement/)  
 - [x] Pure Q1 escalation judge frozen (q1_judge/ adr0020.q1.judge.v0)
-- [x] Shadow runner frozen (`adr0020_measurement_pack_v0/shadow_runner/`)  
+- [x] A1 Q1 eligibility shadow (flag-off code path in PR #27; experiment pack also frozen)  
+- [ ] A2 RV output shadow (separate go)  
+- [ ] A3 live merge (separate go)  
 - [ ] Targeted family green  
 - [ ] Explicit go for live merge / deploy  
 
@@ -357,3 +361,8 @@ Do **not** extrapolate pack composition to production RV volume.
 - ModeQ artifacts: `product_run/out/modeq_ab_*` · `semantic_sim005_*`  
 - pot-cli RV pipeline (`normalizeRvVerdict` / PublicVerdict contract)  
 - Raul decision lock 2026-08-13 (Telegram) — Q1–Q5 text authoritative over prior draft open choices  
+
+
+## Trust boundary v0 (PR #27)
+
+Structured binding fields on the request are `caller_asserted` until server-side verification exists. Shadow events set `binding_source=caller_asserted` and `eligible_for_q2_decision=false`. Q1 may measure structure; it must not authorize Q2/live merge from caller assertions alone. Caller-supplied `valid_bound_evidence_count` and `canonical_verdict` are never decision inputs.

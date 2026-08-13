@@ -136,7 +136,11 @@ export interface RequiredCondition {
   required: boolean;
   proof_requirement: 'machine' | 'any' | 'none';
   evidence_bindings?: EvidenceBinding[];
-  /** Precomputed count; shadow judge recomputes from bindings when present. */
+  /**
+   * @deprecated Not accepted on the public request validator and never used for Q1 decisions.
+   * Kept optional only for forward-compat diagnostics outside the trust path.
+   * Callers must not send this field; missing bindings mean unproven (count 0).
+   */
   valid_bound_evidence_count?: number;
 }
 
