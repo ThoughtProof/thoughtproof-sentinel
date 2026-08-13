@@ -73,9 +73,12 @@ function baseResponse(overrides: Partial<SentinelVerifyResponse> = {}): Sentinel
 }
 
 describe('ADR-0020 shadow observability', () => {
-  it('flag default off', () => {
+  it('flag default off; false/0/empty do not enable', () => {
     expect(isShadowEnabled({})).toBe(false);
     expect(isShadowEnabled({ SHADOW_ADR0020: 'off' })).toBe(false);
+    expect(isShadowEnabled({ SHADOW_ADR0020: 'false' })).toBe(false);
+    expect(isShadowEnabled({ SHADOW_ADR0020: '0' })).toBe(false);
+    expect(isShadowEnabled({ SHADOW_ADR0020: '' })).toBe(false);
     expect(isShadowEnabled({ SHADOW_ADR0020: 'on' })).toBe(true);
     expect(isShadowEnabled({ SHADOW_ADR0020: '1' })).toBe(true);
   });
@@ -113,7 +116,9 @@ describe('ADR-0020 shadow observability', () => {
     expect(result.shadow?.would_escalate).toBe(true);
     expect(result.shadow?.trigger_code).toBe('multi_conjunct_missing_machine_proof');
     expect(result.shadow?.rv_status).toBe('not_invoked_shadow');
-    expect(result.shadow?.final_verdict).toBe(result.shadow?.parent_verdict);
+    expect(result.shadow?.source_verdict).toBe('UNCERTAIN');
+    expect(result.shadow?.canonical_verdict).toBe('REVIEW');
+    expect(result.shadow?.final_verdict).toBe(result.shadow?.source_verdict);
     expect(result.shadow?.schema_version).toBe(SHADOW_SCHEMA_VERSION);
     expect(result.response.verdict).toBe('UNCERTAIN');
     expect(result.response.reasoning).toBe(response.reasoning);

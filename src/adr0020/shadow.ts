@@ -12,6 +12,7 @@ import { createHash } from 'node:crypto';
 import {
   evaluateQ1Eligibility,
   countProofStats,
+  canonicalizeVerdictForQ1,
   Q1_JUDGE_VERSION,
   type RequiredCondition,
   type Q1RuntimeInput,
@@ -34,7 +35,13 @@ export interface ShadowEvent {
   trigger_code: string;
   judge_version: string;
   judge_logic_id: string;
+  /** Public API verdict on the response (ALLOW|BLOCK|UNCERTAIN). */
+  source_verdict: string;
+  /** Q1 class after canonicalizeVerdictForQ1 (UNCERTAIN→REVIEW). */
+  canonical_verdict: string;
+  /** @deprecated alias of source_verdict — kept for early consumers */
   parent_verdict: string;
+  /** Always equals source_verdict — shadow never mutates final. */
   final_verdict: string;
   action_hash: string | null;
   required_count: number | null;
@@ -111,14 +118,19 @@ export function extractReasonCode(response: SentinelVerifyResponse): string {
 export function buildRuntimeInput(
   response: SentinelVerifyResponse,
   request: SentinelVerifyRequest,
-): Q1RuntimeInput {
+): Q1RuntimeInput & { canonical_verdict: string; source_verdict: string } {
   const conditions = (request.required_conditions ?? []) as RequiredCondition[];
   const action_hash =
     (typeof request.action_hash === 'string' && request.action_hash) ||
     response.meta?.package_digest ||
     null;
+  const source_verdict = response.verdict;
+  const canonical_verdict = canonicalizeVerdictForQ1(source_verdict);
   return {
-    sentinel_verdict: response.verdict,
+    // Judge consumes canonical hold class; source preserved on the shadow event.
+    sentinel_verdict: canonical_verdict,
+    canonical_verdict,
+    source_verdict,
     reason_code: extractReasonCode(response),
     required_conditions: conditions,
     action_hash,
@@ -177,8 +189,10 @@ export function runShadowObservability(args: {
         trigger_code: 'invalid_input',
         judge_version: Q1_JUDGE_VERSION,
         judge_logic_id: PINNED_JUDGE_LOGIC_ID,
-        parent_verdict: original.verdict,
-        final_verdict: original.verdict,
+        source_verdict: runtime.source_verdict,
+        canonical_verdict: runtime.canonical_verdict,
+        parent_verdict: runtime.source_verdict,
+        final_verdict: runtime.source_verdict,
         action_hash: runtime.action_hash ?? null,
         required_count: null,
         missing_machine_proof_count: null,
@@ -223,8 +237,10 @@ export function runShadowObservability(args: {
       trigger_code: decision.triggerCode,
       judge_version: Q1_JUDGE_VERSION,
       judge_logic_id: PINNED_JUDGE_LOGIC_ID,
-      parent_verdict: original.verdict,
-      final_verdict: original.verdict,
+      source_verdict: runtime.source_verdict,
+      canonical_verdict: runtime.canonical_verdict,
+      parent_verdict: runtime.source_verdict,
+      final_verdict: runtime.source_verdict,
       action_hash: runtime.action_hash ?? null,
       required_count: stats.required_count,
       missing_machine_proof_count: stats.missing_machine_proof_count,

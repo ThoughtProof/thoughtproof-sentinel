@@ -1,0 +1,180 @@
+{
+  "mjs_hash": "d7d94b314efd8d92b9ab78408edc7ac018466e1fb6ab1f03d23594d98c4d613b",
+  "ts_hash": "778f6c5eca8790d91fe82d098c0bae2204866ffc97615bd1b77c7d121c183481",
+  "n_cases": 25,
+  "case_mismatches": 0,
+  "metamorphic": [
+    {
+      "name": "base",
+      "ok": true,
+      "m": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      }
+    },
+    {
+      "name": "no_case_id",
+      "ok": true,
+      "m": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      }
+    },
+    {
+      "name": "case_id",
+      "ok": true,
+      "m": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      }
+    },
+    {
+      "name": "reorder",
+      "ok": true,
+      "m": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      }
+    },
+    {
+      "name": "rename",
+      "ok": true,
+      "m": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      }
+    },
+    {
+      "name": "optional",
+      "ok": true,
+      "m": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      }
+    },
+    {
+      "name": "stale_poison",
+      "ok": true,
+      "m": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      }
+    },
+    {
+      "name": "fill",
+      "ok": true,
+      "m": {
+        "eligible": false,
+        "triggerCode": "all_required_machine_proofs_bound"
+      },
+      "t": {
+        "eligible": false,
+        "triggerCode": "all_required_machine_proofs_bound"
+      }
+    },
+    {
+      "name": "allow",
+      "ok": true,
+      "m": {
+        "eligible": false,
+        "triggerCode": "not_review"
+      },
+      "t": {
+        "eligible": false,
+        "triggerCode": "not_review"
+      }
+    },
+    {
+      "name": "block",
+      "ok": true,
+      "m": {
+        "eligible": false,
+        "triggerCode": "not_review"
+      },
+      "t": {
+        "eligible": false,
+        "triggerCode": "not_review"
+      }
+    },
+    {
+      "name": "reason",
+      "ok": true,
+      "m": {
+        "eligible": false,
+        "triggerCode": "reason_not_eligible"
+      },
+      "t": {
+        "eligible": false,
+        "triggerCode": "reason_not_eligible"
+      }
+    },
+    {
+      "name": "single",
+      "ok": true,
+      "m": {
+        "eligible": false,
+        "triggerCode": "insufficient_required_conditions"
+      },
+      "t": {
+        "eligible": false,
+        "triggerCode": "insufficient_required_conditions"
+      }
+    },
+    {
+      "name": "uncertain_map",
+      "ok": true,
+      "note": "documented divergence",
+      "m": {
+        "eligible": false,
+        "triggerCode": "not_review"
+      },
+      "t": {
+        "eligible": true,
+        "triggerCode": "multi_conjunct_missing_machine_proof"
+      },
+      "ts_maps": "REVIEW"
+    }
+  ],
+  "metamorphic_mismatches": 0,
+  "uncertain_mjs": {
+    "eligible": false,
+    "triggerCode": "not_review"
+  },
+  "uncertain_ts": {
+    "eligible": true,
+    "triggerCode": "multi_conjunct_missing_machine_proof"
+  },
+  "parity_run_sha256": "544d9b0d606abb8e1f51614930209323e2762ef9da806c402fe5b37d47fe4bd6",
+  "pass": true,
+  "ts_hash_after_review_fixes": "321c6852888dfbdc3ecd2d72dfed19abdd8234954cc7245e5cec9fc0f8e4168b",
+  "shadow_ts_hash": "a12b69b3d622ef34ccd58b1addb0359d144e8d1304ffc06cdb7c3a5748e2ff5c",
+  "note": "Case parity 25/25 + metamorphic match run before source/canonical event fields; logic path unchanged for REVIEW inputs. UNCERTAIN handled via canonicalizeVerdictForQ1 at shadow boundary."
+}

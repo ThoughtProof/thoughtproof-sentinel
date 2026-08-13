@@ -55,10 +55,24 @@ export const Q1_ELIGIBLE_REASON_CODE = 'conditional_allow_no_machine_proof';
 const FRESH_OK = new Set(['fresh', 'current']);
 const EID_RE = /^evidence:[a-z0-9][a-z0-9_-]{1,63}$/;
 
-/** Map public Sentinel vocabulary → Q1 REVIEW class. */
-export function toQ1Verdict(publicVerdict: string): string {
+/**
+ * Canonicalize public Sentinel verdict for Q1 eligibility class.
+ *
+ * Sentinel public API emits ALLOW | BLOCK | UNCERTAIN (see types.SentinelVerdict).
+ * E-4 / ADR-0020 measurement vocabulary uses REVIEW for the non-terminal hold class.
+ * UNCERTAIN is the public name for that hold class — not a distinct third hold.
+ *
+ * Call path: source_verdict → canonicalizeVerdictForQ1() → Q1 judge.
+ * Do not silently equate strings inside trigger logic without this step.
+ */
+export function canonicalizeVerdictForQ1(publicVerdict: string): string {
   if (publicVerdict === 'UNCERTAIN') return 'REVIEW';
   return publicVerdict;
+}
+
+/** @deprecated use canonicalizeVerdictForQ1 */
+export function toQ1Verdict(publicVerdict: string): string {
+  return canonicalizeVerdictForQ1(publicVerdict);
 }
 
 function isValidBoundMachineEvidence(binding: unknown, conditionId: string): boolean {
@@ -126,8 +140,13 @@ export function evaluateQ1Eligibility(runtime: unknown): EscalationDecision {
     }
   }
 
-  const verdict = toQ1Verdict(r.sentinel_verdict);
-  if (verdict !== 'REVIEW') {
+  // Prefer explicit canonical field when caller already normalized; else canonicalize source.
+  const source = r.sentinel_verdict;
+  const canonical =
+    typeof r.canonical_verdict === 'string'
+      ? r.canonical_verdict
+      : canonicalizeVerdictForQ1(source);
+  if (canonical !== 'REVIEW') {
     return { eligible: false, triggerCode: 'not_review' };
   }
 
