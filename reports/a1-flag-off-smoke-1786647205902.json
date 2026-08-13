@@ -1,0 +1,49 @@
+{
+  "ts": "2026-08-13T18:53:25.901Z",
+  "base": "https://sentinel.thoughtproof.ai",
+  "expected_commit": "ebb8fe6",
+  "flag": "SHADOW_ADR0020 expected unset/off",
+  "checks": [
+    {
+      "name": "health_200",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "minimal_verify_2xx",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "minimal_no_shadow_field",
+      "ok": true,
+      "detail": "verdict=UNCERTAIN"
+    },
+    {
+      "name": "free_text_action_hash_400",
+      "ok": true,
+      "detail": "status=400"
+    },
+    {
+      "name": "free_text_action_hash_mentions_hex",
+      "ok": true,
+      "detail": "{\"error\":\"Validation failed\",\"code\":\"INVALID_REQUEST\",\"details\":[{\"field\":\"action_hash\",\"message\":\"Must be 0x followed by exactly 64 hex characters\"}]}"
+    },
+    {
+      "name": "structured_verify_2xx",
+      "ok": true,
+      "detail": "status=200"
+    },
+    {
+      "name": "structured_no_shadow_field",
+      "ok": true,
+      "detail": "verdict=BLOCK"
+    }
+  ],
+  "pass": true,
+  "samples": {
+    "minimal_id": "sent_cc3ec7ec2c814b25",
+    "structured_id": "sent_c76c400644c44f0d",
+    "bad_hash_status": 400
+  }
+}
