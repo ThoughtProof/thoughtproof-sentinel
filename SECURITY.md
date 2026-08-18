@@ -152,12 +152,12 @@ script. That is intentional:
 
 | Condition | Exit |
 |---|---|
-| Digest mismatch / uncomputable | 1 |
+| Missing `original-request.json` | 2 |
+| Digest mismatch / missing / uncomputable | 1 |
 | `signed_evidence` present, no trusted keys supplied | 1 |
-| `signer_pubkey` not in trusted set | 1 |
+| `signer_pubkey` not in trusted set / key_id mismatch | 1 |
 | Missing/malformed `raw_event` | 1 |
-| Invalid ed25519 over JCS payload | 1 |
-| Receipt claims `evidence_verification` but no request given | 1 |
+| Invalid ed25519 over JCS-canonical payload | 1 |
 | All requested checks pass | 0 |
 
 **Dependency note.** Signature and digest recompute require the same

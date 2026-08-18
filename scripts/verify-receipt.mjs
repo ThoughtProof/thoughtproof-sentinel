@@ -5,14 +5,16 @@
  *
  * Offline checks for ThoughtProof Sentinel receipts:
  *  1. Recompute package_digest from the original request (F1)
- *  2. Recompute ed25519 over signed_evidence[i].raw_event (F5)
- *     using caller-supplied trusted public keys — never trust
- *     server-emitted evidence_verification[].status
+ *  2. Recompute ed25519 over the JCS-canonical payload inside
+ *     signed_evidence[i].raw_event (F5) using caller-supplied trusted
+ *     public keys — never trust server-emitted evidence_verification[].status
  *
  * Usage:
- *   node scripts/verify-receipt.mjs <receipt.json> [original-request.json] \
+ *   node scripts/verify-receipt.mjs <receipt.json> <original-request.json> \
  *     [--trusted-pubkey <hex>]... \
  *     [--trusted-key <key_id>=<hex>]...
+ *
+ * Both positionals are required (fail closed).
  *
  * Exit codes:
  *   0 — all requested checks passed
@@ -25,7 +27,7 @@
  * Install deps from this repo (`npm i`) before running signature checks.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { createHash, createPublicKey, verify as cryptoVerify } from 'crypto';
 import { createRequire } from 'module';
 import { dirname, join } from 'path';
@@ -57,8 +59,8 @@ const canonicalize = loadCanonicalize();
 function parseArgs(argv) {
   const positionals = [];
   /** @type {Map<string, string>} key_id -> pubkey hex (lowercase) */
-  const trusted = new Map();
-  /** bare pubkeys without id (matched by hex equality) */
+  const trustedById = new Map();
+  /** bare pubkeys from --trusted-pubkey (matched by signer_pubkey hex only) */
   const barePubkeys = new Set();
 
   for (let i = 0; i < argv.length; i++) {
@@ -66,9 +68,7 @@ function parseArgs(argv) {
     if (a === '--trusted-pubkey' || a === '--pubkey') {
       const v = argv[++i];
       if (!v) throw new Error(`${a} requires a hex value`);
-      const hex = normalizeHex(v);
-      barePubkeys.add(hex);
-      trusted.set(hex, hex); // allow matching by pubkey as key_id
+      barePubkeys.add(normalizeHex(v));
     } else if (a === '--trusted-key') {
       const v = argv[++i];
       if (!v || !v.includes('=')) {
@@ -78,8 +78,8 @@ function parseArgs(argv) {
       const id = v.slice(0, eq).trim();
       const hex = normalizeHex(v.slice(eq + 1));
       if (!id) throw new Error('--trusted-key key_id must be non-empty');
-      trusted.set(id.toLowerCase(), hex);
-      barePubkeys.add(hex);
+      // Bind by key_id only — do NOT also accept this pubkey as a bare match.
+      trustedById.set(id.toLowerCase(), hex);
     } else if (a === '--help' || a === '-h') {
       printUsage();
       process.exit(0);
@@ -93,7 +93,7 @@ function parseArgs(argv) {
   return {
     receiptPath: positionals[0],
     requestPath: positionals[1],
-    trusted,
+    trustedById,
     barePubkeys,
   };
 }
@@ -108,12 +108,18 @@ function normalizeHex(v) {
 
 function printUsage() {
   console.log(`Usage:
-  node scripts/verify-receipt.mjs <receipt.json> [original-request.json] \\
+  node scripts/verify-receipt.mjs <receipt.json> <original-request.json> \\
     [--trusted-pubkey <hex>]... \\
     [--trusted-key <key_id>=<hex>]...
 
-F1  package_digest  — requires original-request.json
-F5  offline ed25519 — requires original-request.json + at least one trusted key
+Both positionals are required for offline verification (fail closed).
+
+F1  package_digest  — recomputed from original-request.json
+F5  offline ed25519 — over JCS-canonical payload inside raw_event
+    --trusted-pubkey matches item.signer_pubkey hex
+    --trusted-key binds key_id → pubkey; item must declare that key_id
+      (item.key_id | item.key_manifest_ref | raw_event.key_id) and
+      item.signer_pubkey must equal the bound pubkey
 
 Exit 0 = pass, 1 = verify fail, 2 = usage/load error.
 Never trusts receipt.meta.evidence_verification[].status.`);
@@ -189,22 +195,72 @@ function verifyEd25519Signature(message, signature, publicKeyHex) {
 }
 
 /**
- * Resolve whether a signer_pubkey is in the caller-supplied trust set.
- * key_id matching is optional via --trusted-key; bare --trusted-pubkey matches hex.
+ * Resolve trusted pubkey for an evidence item.
+ *
+ * - --trusted-pubkey: accept if item.signer_pubkey is in barePubkeys
+ * - --trusted-key id=hex: require item to declare key_id equal to id, AND
+ *   item.signer_pubkey must equal the bound hex
+ *
+ * Declared key_id sources (first match wins):
+ *   item.key_id | item.key_manifest_ref | raw_event.key_id | raw_event.payload.key_id
  */
-function isTrustedPubkey(signerPubkey, trusted, barePubkeys) {
-  const hex = String(signerPubkey || '').replace(/^0x/i, '').toLowerCase();
-  if (barePubkeys.has(hex)) return true;
-  // also allow key_id that equals pubkey
-  if (trusted.has(hex)) return true;
-  return false;
+function resolveTrustedKey(item, rawEvent, trustedById, barePubkeys) {
+  const signerHex = String(item?.signer_pubkey || '').replace(/^0x/i, '').toLowerCase();
+  if (!signerHex || !/^[0-9a-f]{64}$/.test(signerHex)) {
+    return { ok: false, pubkey: null, code: 'evidence_malformed', reason: 'Missing/invalid signer_pubkey' };
+  }
+
+  const declaredId = [
+    item?.key_id,
+    item?.key_manifest_ref,
+    rawEvent?.key_id,
+    rawEvent?.payload && typeof rawEvent.payload === 'object' ? rawEvent.payload.key_id : null,
+  ]
+    .filter((v) => typeof v === 'string' && v.trim())
+    .map((v) => String(v).trim().toLowerCase())[0] || null;
+
+  // Prefer explicit key_id binding when declared and present in trustedById
+  if (declaredId && trustedById.has(declaredId)) {
+    const expected = trustedById.get(declaredId);
+    if (expected !== signerHex) {
+      return {
+        ok: false,
+        pubkey: signerHex,
+        code: 'key_id_pubkey_mismatch',
+        reason: `key_id=${declaredId} is bound to a different pubkey than signer_pubkey`,
+      };
+    }
+    return { ok: true, pubkey: signerHex, code: null, reason: null };
+  }
+
+  // Bare pubkey trust (--trusted-pubkey only)
+  if (barePubkeys.has(signerHex)) {
+    return { ok: true, pubkey: signerHex, code: null, reason: null };
+  }
+
+  if (declaredId && trustedById.size > 0) {
+    return {
+      ok: false,
+      pubkey: signerHex,
+      code: 'untrusted_key_id',
+      reason: `key_id=${declaredId} not in --trusted-key set`,
+    };
+  }
+
+  return {
+    ok: false,
+    pubkey: signerHex,
+    code: 'untrusted_signer',
+    reason: 'signer_pubkey not in --trusted-pubkey set (and no matching --trusted-key id on item)',
+  };
 }
 
 /**
  * Offline recompute one signed_evidence item.
  * Does NOT read evidence_verification status from the receipt.
+ * Signature is over JCS-canonical payload inside raw_event (same as server).
  */
-function recomputeEvidenceItem(item, index, trusted, barePubkeys) {
+function recomputeEvidenceItem(item, index, trustedById, barePubkeys) {
   const base = { index, signer: item?.signer_pubkey ?? null };
 
   if (!item || typeof item !== 'object') {
@@ -228,17 +284,6 @@ function recomputeEvidenceItem(item, index, trusted, barePubkeys) {
     return { ...base, status: 'failed', code: 'evidence_malformed', reason: 'Missing signer_pubkey' };
   }
 
-  const signerHex = item.signer_pubkey.replace(/^0x/i, '').toLowerCase();
-  if (!isTrustedPubkey(signerHex, trusted, barePubkeys)) {
-    return {
-      ...base,
-      signer: signerHex,
-      status: 'failed',
-      code: 'untrusted_signer',
-      reason: 'signer_pubkey not in --trusted-pubkey / --trusted-key set',
-    };
-  }
-
   let rawEvent;
   try {
     const eventBytes = Buffer.from(item.raw_event, 'base64');
@@ -246,7 +291,6 @@ function recomputeEvidenceItem(item, index, trusted, barePubkeys) {
   } catch {
     return {
       ...base,
-      signer: signerHex,
       status: 'failed',
       code: 'evidence_malformed',
       reason: 'raw_event is not valid base64 JSON',
@@ -256,15 +300,27 @@ function recomputeEvidenceItem(item, index, trusted, barePubkeys) {
   if (!rawEvent || typeof rawEvent !== 'object' || !rawEvent.payload || typeof rawEvent.signature !== 'string') {
     return {
       ...base,
-      signer: signerHex,
       status: 'failed',
       code: 'evidence_malformed',
       reason: 'raw_event missing payload or signature',
     };
   }
 
+  const trust = resolveTrustedKey(item, rawEvent, trustedById, barePubkeys);
+  if (!trust.ok) {
+    return {
+      ...base,
+      signer: trust.pubkey,
+      status: 'failed',
+      code: trust.code,
+      reason: trust.reason,
+    };
+  }
+  const signerHex = trust.pubkey;
+
   let canonicalPayload;
   try {
+    // Same bytes the server signs: JCS-canonical payload, not the raw_event envelope.
     canonicalPayload = canonicalizePayload(rawEvent.payload);
   } catch (err) {
     return {
@@ -276,8 +332,6 @@ function recomputeEvidenceItem(item, index, trusted, barePubkeys) {
     };
   }
 
-  // IMPORTANT: verify against the trusted key set entry that matches signer,
-  // not a different key the caller might have also supplied.
   const sigOk = verifyEd25519Signature(canonicalPayload, rawEvent.signature, signerHex);
   if (!sigOk) {
     return {
@@ -333,9 +387,10 @@ function verifyDigest(receipt, request) {
   }
 }
 
-function verifyEvidenceOffline(request, trusted, barePubkeys) {
+function verifyEvidenceOffline(request, trustedById, barePubkeys) {
   console.log('\n=== F5 Offline ed25519 (caller-trusted keys only) ===');
   console.log('Note: server evidence_verification[].status is NOT trusted.');
+  console.log('Note: signature is over JCS-canonical payload inside raw_event (not envelope bytes).');
 
   const items = request.signed_evidence;
   if (!Array.isArray(items) || items.length === 0) {
@@ -343,13 +398,13 @@ function verifyEvidenceOffline(request, trusted, barePubkeys) {
     return { ok: true, results: [], hadEvidence: false };
   }
 
-  if (trusted.size === 0 && barePubkeys.size === 0) {
+  if (trustedById.size === 0 && barePubkeys.size === 0) {
     console.log('❌ signed_evidence present but no --trusted-pubkey / --trusted-key supplied');
     console.log('   Refusing to treat server status as proof.');
     return { ok: false, results: [], hadEvidence: true, missingTrust: true };
   }
 
-  const results = items.map((item, i) => recomputeEvidenceItem(item, i, trusted, barePubkeys));
+  const results = items.map((item, i) => recomputeEvidenceItem(item, i, trustedById, barePubkeys));
   let allOk = true;
   for (const r of results) {
     const mark = r.status === 'recomputed' ? '✅' : '❌';
@@ -398,6 +453,13 @@ function main() {
     process.exit(2);
   }
 
+  // original-request is always required for offline pass (fail closed)
+  if (!args.requestPath) {
+    console.error('Error: original-request.json is required for offline verification.');
+    printUsage();
+    process.exit(2);
+  }
+
   let receipt;
   try {
     receipt = JSON.parse(readFileSync(args.receiptPath, 'utf8'));
@@ -408,36 +470,22 @@ function main() {
 
   printHeader(receipt);
 
-  let request = null;
-  if (args.requestPath) {
-    try {
-      request = JSON.parse(readFileSync(args.requestPath, 'utf8'));
-    } catch (err) {
-      console.error(`Error loading request: ${err.message}`);
-      process.exit(2);
-    }
+  let request;
+  try {
+    request = JSON.parse(readFileSync(args.requestPath, 'utf8'));
+  } catch (err) {
+    console.error(`Error loading request: ${err.message}`);
+    process.exit(2);
   }
 
-  let digestOk = true;
-  let evidenceOk = true;
-  let offlineResults = [];
+  // Defaults false — never exit 0 without successful recompute
+  let digestOk = false;
+  let evidenceOk = false;
 
-  if (request) {
-    digestOk = verifyDigest(receipt, request);
-    const ev = verifyEvidenceOffline(request, args.trusted, args.barePubkeys);
-    evidenceOk = ev.ok;
-    offlineResults = ev.results;
-    crossCheckServerClaims(receipt, offlineResults);
-  } else {
-    console.log('\n💡 Provide original-request.json for F1 digest + F5 signature checks.');
-    console.log('   Without it, this script cannot recompute anything offline.');
-    // If receipt claims recomputed evidence but we cannot check → fail closed
-    const claims = receipt.meta?.evidence_verification;
-    if (Array.isArray(claims) && claims.length > 0) {
-      console.log('❌ Receipt claims evidence_verification but no request provided — fail closed.');
-      evidenceOk = false;
-    }
-  }
+  digestOk = verifyDigest(receipt, request);
+  const ev = verifyEvidenceOffline(request, args.trustedById, args.barePubkeys);
+  evidenceOk = ev.ok;
+  crossCheckServerClaims(receipt, ev.results);
 
   console.log('\n=== Overall ===');
   console.log(`${digestOk ? '✅' : '❌'} package_digest`);
