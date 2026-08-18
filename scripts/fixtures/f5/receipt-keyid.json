@@ -1,0 +1,18 @@
+{
+  "id": "sent_f5_keyid",
+  "verdict": "ALLOW",
+  "confidence": 90,
+  "tier": "standard",
+  "mode": "handoff",
+  "meta": {
+    "package_digest": "sha256:e01e94510307b3049955c823f9a5bb20e2217ed8d860d8aeb1aca27f38b308c8",
+    "proof_strength": "recomputed",
+    "evidence_verification": [
+      {
+        "index": 0,
+        "status": "recomputed",
+        "signer": "4bd157652fc4529d670b7e6ec8d01e030325ee8c569e558042bf24c165610dda"
+      }
+    ]
+  }
+}

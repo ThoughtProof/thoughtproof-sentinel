@@ -117,52 +117,59 @@ signature-verification part of that row is bounded separately in §2.6.
 
 ### 2.6 Trust boundary in `scripts/verify-receipt.mjs` (portable verifier)
 
-**What the portable script does today.** It reads a `(request, response)`
-pair and independently recomputes `package_digest` over the request using
-JCS + sha256, then compares against the value the server emitted in
-`meta.package_digest`. That check is fully offline and depends on nothing
-the server said.
+**What the portable script does (F1 + F5).**
 
-**What it does *not* do today.** For each `signed_evidence[i]`, the script
-displays the server-emitted `evidence_verification[i].status` (`recomputed`,
-`unverified`, `signature_invalid`) as-is. It does **not** re-derive ed25519
-over the JCS-canonical `raw_event` offline.
+1. **F1 — `package_digest`.** Given `(receipt, original-request)`, recomputes
+   the digest offline with the same JCS (`canonicalize` package) + sha256
+   path as the server (`src/package-digest.ts`) and compares to
+   `meta.package_digest`.
+2. **F5 — offline ed25519.** Given the original request's
+   `signed_evidence[]` **and** caller-supplied trusted key material
+   (`--trusted-pubkey <hex>` and/or `--trusted-key <id>=<hex>`), recomputes
+   ed25519 over the JCS-canonical payload inside each `raw_event` using the
+   same algorithm as `src/signed-evidence.ts`. Exit non-zero on any failure.
 
-**Attack this admits.** A forged `(request, response)` pair where the
-response claims `evidence_verification[i].status = "recomputed"` while the
-corresponding `signed_evidence[i].raw_event` was never actually signed by
-the declared `signer_pubkey` would print “package digest matches” and show
-the forged status without contradiction. The portable script alone is not
-sufficient to defend against a server that lies about signature results.
+**What it never does.** It does **not** treat
+`meta.evidence_verification[i].status` as proof. Server-emitted statuses are
+at most printed as an informational cross-check against the offline result.
+A forged receipt that claims `status: "recomputed"` with an invalid
+`raw_event` signature fails offline when trusted keys are supplied.
 
-**Why this is the shape today.**
+**Trusted key material is caller-supplied only.** There is no built-in
+well-known manifest, registry lookup, or revocation authority in this
+script. That is intentional:
 
-- Server-side signature verification lives in `src/signed-evidence.ts` and
-  runs on every request; the server's own outputs are trustworthy relative
-  to the server.
-- The portable script's role in v0 is to give a third party a
-  zero-dependency way to confirm that a receipt binds to the exact request
-  bytes they saw. That is a real property (§2.5 makes it unconditional for
-  accepted requests) but it is a *narrower* property than “recompute all of
-  §2.1 offline.”
+- A published key manifest (HTTPS or even a signed file) is only an interim
+  key-distribution mechanism. Without an out-of-band root pin, monotonic
+  version memory, and an external freshness anchor, it does **not** provide
+  authoritative revocation freshness or replay protection.
+- `status: revoked` style policy, temporal windows, and on-chain key rotation
+  (ERC-8004-shaped) remain **out of scope** for F5. If a manifest is used
+  later: revoked rejects unconditionally; `valid_from`/`valid_to` must not
+  be checked against the signer's self-declared event time.
 
-**Same class as the inline-manifest caveat (§2.2).** Both are cases where
-a v0 check depends on the party being checked. Inline-manifest: server
-trusts the caller for authorization ground truth. Portable script: third
-party trusts the server for signature-verification ground truth. Both are
-named here so integrators can reason about them explicitly.
+**Fail-closed rules.**
 
-**Not-in-scope, next pass.**
+| Condition | Exit |
+|---|---|
+| Missing `original-request.json` | 2 |
+| Digest mismatch / missing / uncomputable | 1 |
+| `signed_evidence` present, no trusted keys supplied | 1 |
+| `signer_pubkey` not in trusted set / key_id mismatch | 1 |
+| Missing/malformed `raw_event` | 1 |
+| Invalid ed25519 over JCS-canonical payload | 1 |
+| All requested checks pass | 0 |
 
-- Offline ed25519 re-verification in the portable script, with the
-  verifying key material carried in a form the script can trust (e.g.
-  passed as an explicit CLI arg, or resolved through a registry binding
-  once one exists). The current codebase has no place to put an
-  “authoritative pubkey” for a portable third party to consume, which is
-  why v0 defers this rather than half-doing it.
-- Signed responses: once the server signs its own output, the portable
-  script can chain into that signature and stop relying on the server's
-  bare word. Tracked as a separate F-item.
+**Dependency note.** Signature and digest recompute require the same
+`canonicalize` package the server uses (install via `npm i` in this repo).
+Matching the server byte-for-byte matters more here than a second pure-JS
+JCS that could silently diverge.
+
+**Still separate (not F5).**
+
+- Signed server responses (server signs its own output envelope).
+- Registry-backed key rotation / ERC-8004 authority.
+- Authoritative revocation freshness (transparency log / on-chain).
 
 ---
 

@@ -1,0 +1,8 @@
+{
+  "id": "sent_f5_no_evidence",
+  "verdict": "ALLOW",
+  "confidence": 80,
+  "tier": "standard",
+  "mode": "handoff",
+  "meta": {}
+}

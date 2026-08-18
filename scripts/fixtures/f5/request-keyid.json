@@ -1,0 +1,19 @@
+{
+  "claim": "key-id bound smoke",
+  "evidence": "e",
+  "mode": "handoff",
+  "tier": "standard",
+  "signed_evidence": [
+    {
+      "type": "signed_event",
+      "raw_event": "eyJwYXlsb2FkIjp7ImFjdGlvbiI6InRyYW5zZmVyIiwiYW1vdW50IjoxLCJrZXlfaWQiOiJvcHMtc2lnbmVyLTEifSwic2lnbmF0dXJlIjoiYmM3ODY2ZGNkOTNiMGZjMWFkMDQ1NTM1ZGUxYmJlMDM1YjU4MmI4YzVhNDRmOGZjYmQ0M2EyZTFhOGRlZGUxNzdkNGJiYWQzMDM2YWE5MzYxNWU3M2UzNmYyYzk3YTk3MWY4N2U0ZjA1Y2JjMTk4MWZmYTJiZWQ0MDJlOGIwMDMiLCJrZXlfaWQiOiJvcHMtc2lnbmVyLTEifQ==",
+      "signature_scheme": "ed25519",
+      "signer_pubkey": "4bd157652fc4529d670b7e6ec8d01e030325ee8c569e558042bf24c165610dda",
+      "key_id": "ops-signer-1",
+      "claims": [
+        "owner_signoff"
+      ],
+      "verification": "required"
+    }
+  ]
+}
