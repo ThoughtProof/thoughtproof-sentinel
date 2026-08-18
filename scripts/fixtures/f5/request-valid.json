@@ -1,0 +1,18 @@
+{
+  "claim": "Agent decided to transfer funds",
+  "evidence": "Policy requires approval for transfers > $1000. Transfer amount: $500.",
+  "mode": "handoff",
+  "tier": "standard",
+  "signed_evidence": [
+    {
+      "type": "signed_event",
+      "raw_event": "eyJwYXlsb2FkIjp7ImFjdGlvbiI6InRyYW5zZmVyIiwiYW1vdW50Ijo1MDAsImN1cnJlbmN5IjoiVVNEIiwidG8iOiJhY2N0X2RlbW8ifSwic2lnbmF0dXJlIjoiYjkwMzhiMjVlMmY2YWNmMTEzYzBmNWE4ZWE3N2Q1NzhjZmFmMTQwZWYzNDkxZDYxYmEwYzljMmVlY2VhODY3MzZiYmE0MTljNjUyNGU3ZGJmMTYwZWRmZGNlNzcwNzliZTZmZTJkNzRmZjY5OTQ3ODUyNDZlZmVhNTM1ZTVmMGYifQ==",
+      "signature_scheme": "ed25519",
+      "signer_pubkey": "9ca95a56f5163b99ebaed0791c7bc32d98bbd3ee7702be8deacd337439288fee",
+      "claims": [
+        "owner_signoff"
+      ],
+      "verification": "required"
+    }
+  ]
+}
