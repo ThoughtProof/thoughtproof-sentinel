@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getPotCliVersion } from '../src/runtime-versions.js';
 
 const spec = {
   openapi: '3.1.0',
@@ -7,6 +8,7 @@ const spec = {
     description:
       'Pre-execution verification checkpoint for autonomous AI agents. Multi-model cascade evaluates agent reasoning before irreversible actions. Returns ALLOW, BLOCK, or UNCERTAIN with structured per-step objections and optional EAS on-chain attestation.',
     version: '0.1.0',
+    'x-pot-cli': getPotCliVersion(),
     // AgentCash discovery reads info.x-guidance; keep legacy guidance too.
     guidance:
       'Use POST /sentinel/verify to check agent decisions before execution. Provide claim + evidence + mode. Auth via X-Sentinel-Key or x402 micropayment (USDC on Base). Tiers at GET /sentinel/tiers.',
@@ -429,7 +431,11 @@ const spec = {
                   type: 'object',
                   properties: {
                     ok: { type: 'boolean' },
-                    version: { type: 'string' },
+                    version: { type: 'string', description: 'Sentinel service version' },
+                    pot_cli: {
+                      type: 'string',
+                      description: 'Installed pot-cli package version (from pot-cli/package.json)',
+                    },
                     modes: { type: 'array', items: { type: 'string' } },
                     tiers: { type: 'array', items: { type: 'string' } },
                   },
