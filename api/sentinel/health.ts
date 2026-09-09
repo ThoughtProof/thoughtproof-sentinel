@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getPotCliVersion } from '../../src/runtime-versions.js';
 
 const VERSION = '0.1.0';
 const MODES = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning', 'action_authorization'] as const;
@@ -17,6 +18,7 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
     res.status(200).json({
       ok: true,
       version: VERSION,
+      pot_cli: getPotCliVersion(),
       modes: [...MODES],
       tiers: [...TIERS],
     });
