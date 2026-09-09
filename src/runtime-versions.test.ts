@@ -2,19 +2,26 @@
  * pot-cli version must come from the installed package, not a hardcoded string.
  */
 
-import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import handler from '../api/sentinel/health.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
+function installedPotCliVersion(): string {
+  const pkg = JSON.parse(
+    readFileSync(join(process.cwd(), 'node_modules', 'pot-cli', 'package.json'), 'utf8'),
+  ) as { name: string; version: string };
+  expect(pkg.name).toBe('pot-cli');
+  return pkg.version;
+}
+
 describe('getPotCliVersion', () => {
   it('matches the installed pot-cli package.json version', () => {
-    const require = createRequire(import.meta.url);
-    const pkg = require('pot-cli/package.json') as { name: string; version: string };
+    const pkgVersion = installedPotCliVersion();
 
-    expect(pkg.name).toBe('pot-cli');
-    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(getPotCliVersion()).toBe(pkg.version);
+    expect(pkgVersion).toMatch(/^\d+\.\d+\.\d+/);
+    expect(getPotCliVersion()).toBe(pkgVersion);
     expect(getPotCliVersion()).not.toBe('0.1.0');
     expect(getPotCliVersion()).not.toBe('unavailable');
   });

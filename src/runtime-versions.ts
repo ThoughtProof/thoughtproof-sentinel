@@ -4,7 +4,6 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,8 +27,7 @@ function versionFromPackageJson(pkgJsonPath: string): string | undefined {
 function walkForPotCliPackageJson(startDir: string): string | undefined {
   let dir = startDir;
   for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, 'node_modules', 'pot-cli', 'package.json');
-    const version = versionFromPackageJson(candidate);
+    const version = versionFromPackageJson(join(dir, 'node_modules', 'pot-cli', 'package.json'));
     if (version) return version;
     const parent = dirname(dir);
     if (parent === dir) break;
@@ -40,20 +38,13 @@ function walkForPotCliPackageJson(startDir: string): string | undefined {
 
 /** Installed pot-cli semver, or `unavailable` if the package.json cannot be read. */
 export function getPotCliVersion(): string {
-  try {
-    const require = createRequire(import.meta.url);
-    const resolved = require.resolve('pot-cli/package.json');
-    const version = versionFromPackageJson(resolved);
-    if (version) return version;
-  } catch {
-    // fall through to filesystem walk
-  }
+  // Prefer cwd so Vercel includeFiles (node_modules/pot-cli/package.json) is found.
+  // Do not require('pot-cli/package.json') — pot-cli's exports map omits that subpath.
+  const fromCwd = walkForPotCliPackageJson(process.cwd());
+  if (fromCwd) return fromCwd;
 
   const fromModule = walkForPotCliPackageJson(dirname(fileURLToPath(import.meta.url)));
   if (fromModule) return fromModule;
-
-  const fromCwd = walkForPotCliPackageJson(process.cwd());
-  if (fromCwd) return fromCwd;
 
   return 'unavailable';
 }
