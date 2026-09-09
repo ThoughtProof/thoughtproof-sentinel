@@ -23,6 +23,10 @@ import { mapVerdict, canPromoteStep2Only, resolveActionAuthPromotion } from './v
 import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import { bindStepObjections } from '../objection-evidence-bind.js';
 import {
+  normalizeStepQuote,
+  sanitizeReasoning,
+} from '../step-quote-provenance.js';
+import {
   ENGINE_BUDGET_MS,
   ENGINE_BUDGET_REASON,
   buildBudgetTrace,
@@ -265,18 +269,20 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     criterionByStepId.set(`step_${gs.index}`, gs.acceptance_criterion ?? gs.description);
   }
 
+  const evidence = req.evidence ?? '';
   const rawObjections = steps.map((s) => {
     const criterion = criterionByStepId.get(s.step_id) ?? '';
-    const prose = (s.reasoning ?? '').trim();
+    const norm = normalizeStepQuote(s, evidence);
+    const prose = norm.reasoning.trim();
     return {
       step_id: s.step_id,
       criterion,
       score: Math.round(s.score * 1000) / 1000,
       predicate: String(s.predicate),
-      quote: s.quote,
+      quote: norm.quote,
       reasoning: prose.length > 0
         ? prose
-        : synthesizeReasoning(String(s.predicate), criterion, s.quote),
+        : synthesizeReasoning(String(s.predicate), criterion, norm.quote),
     };
   });
 
@@ -298,7 +304,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     id,
     verdict,
     confidence: Math.round(avgScore * 1000) / 1000,
-    reasoning: cascadeOutput.result.verdict_reasoning,
+    reasoning: sanitizeReasoning(cascadeOutput.result.verdict_reasoning),
     objections,
     mode: req.mode,
     tier,

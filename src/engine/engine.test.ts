@@ -420,7 +420,7 @@ describe('Sentinel Engine', () => {
       mockEvaluateItem.mockResolvedValueOnce(result as any);
 
       const res = await verify({
-        claim: 'test', evidence: 'test', mode: 'trade_execution', tier: 'checkpoint',
+        claim: 'test', evidence: 'the test quote is in the source', mode: 'trade_execution', tier: 'checkpoint',
       });
 
       expect(Array.isArray(res.objections)).toBe(true);
@@ -444,7 +444,7 @@ describe('Sentinel Engine', () => {
       mockEvaluateItem.mockResolvedValueOnce(result as any);
 
       const res = await verify({
-        claim: 'test', evidence: 'test', mode: 'trade_execution', tier: 'checkpoint',
+        claim: 'test', evidence: 'the test quote is in the source', mode: 'trade_execution', tier: 'checkpoint',
       });
 
       const obj = res.objections[0];
