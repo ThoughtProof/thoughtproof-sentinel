@@ -153,6 +153,14 @@ describe('action_authorization quote:null provenance (dogfood 2026-09-09)', () =
     expect(res.objections.every((o) => !o.reasoning.includes('PROVENANCE DOWNGRADE'))).toBe(
       true,
     );
+    const recovered = res.objections.filter((o) => o.quote === FYI_MANDATE);
+    expect(recovered.length).toBeGreaterThan(0);
+    for (const obj of recovered) {
+      expect(obj.quote_source).toBe('recovered_mandate');
+      expect(obj.reasoning.toLowerCase()).toContain(
+        'provenance recovered from host mandate span',
+      );
+    }
   });
 
   it('Ship-mismatch: fail-closed on scope/objective, not only provenance', async () => {
@@ -221,6 +229,7 @@ describe('action_authorization quote:null provenance (dogfood 2026-09-09)', () =
     for (const obj of res.objections) {
       if (obj.quote !== null) {
         expect(isEvidenceSubstring(obj.quote, evidence)).toBe(true);
+        expect(obj.quote_source).toBe('recovered_mandate');
       }
     }
   });

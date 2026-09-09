@@ -13,37 +13,55 @@ import {
   coerceQuote,
   extractMandateVerbatimQuote,
   isEvidenceSubstring,
+  matchEvidenceQuote,
+  MCP_EVIDENCE_ACTION_LABEL,
+  MCP_EVIDENCE_MANDATE_LABEL,
+  MCP_EVIDENCE_REASONING_LABEL,
   normalizeStepQuote,
   PROVENANCE_DOWNGRADE_STAMP,
+  RECOVERED_MANDATE_NOTE,
   sanitizeReasoning,
 } from './step-quote-provenance.js';
 
 const FYI_MANDATE = 'Tell CoS host runs git main';
 
-function mcpEvidence(mandate: string, action: string, reasoning: string): string {
-  return [
-    `${'Principal mandate (verbatim quote)'}:`,
-    mandate,
+/**
+ * Byte-compatible with thoughtproof-mcp `buildSentinelEvidence` when the
+ * host quote is omitted (quote === full mandate, no fallback note).
+ */
+function mcpBuildSentinelEvidence(input: {
+  mandate: string;
+  proposed_action: string;
+  reasoning: string;
+  context?: string;
+}): string {
+  const parts = [
+    MCP_EVIDENCE_MANDATE_LABEL,
+    input.mandate,
     '',
-    'Proposed action:',
-    action,
+    MCP_EVIDENCE_ACTION_LABEL,
+    input.proposed_action,
     '',
-    'Agent reasoning:',
-    reasoning,
-  ].join('\n');
+    MCP_EVIDENCE_REASONING_LABEL,
+    input.reasoning,
+  ];
+  if (input.context) {
+    parts.push('', 'Context:', input.context);
+  }
+  return parts.join('\n');
 }
 
-const fyiEvidence = mcpEvidence(
-  FYI_MANDATE,
-  FYI_MANDATE,
-  'FYI to CoS that the host is running on git main.',
-);
+const fyiEvidence = mcpBuildSentinelEvidence({
+  mandate: FYI_MANDATE,
+  proposed_action: FYI_MANDATE,
+  reasoning: 'FYI to CoS that the host is running on git main.',
+});
 
-const shipEvidence = mcpEvidence(
-  'Ship the release only after pinning the npm version and CI is green.',
-  'Notify CoS that we are shipping now.',
-  'Notify chief of staff; do not pin npm or wait for CI.',
-);
+const shipEvidence = mcpBuildSentinelEvidence({
+  mandate: 'Ship the release only after pinning the npm version and CI is green.',
+  proposed_action: 'Notify CoS that we are shipping now.',
+  reasoning: 'Notify chief of staff; do not pin npm or wait for CI.',
+});
 
 describe('coerceQuote', () => {
   it('maps nullish and JS stringification artifacts to null', () => {
@@ -81,8 +99,57 @@ describe('sanitizeReasoning', () => {
   });
 });
 
+describe('MCP evidence contract (thoughtproof-mcp buildSentinelEvidence)', () => {
+  it('parses the exact MCP builder output including a multiline mandate', () => {
+    // Mirrors thoughtproof-mcp test/verify-decision.test.js:
+    // /Principal mandate \(verbatim quote\):\nShip the release\nto production/
+    const evidence = mcpBuildSentinelEvidence({
+      mandate: 'Ship the release\nto production',
+      proposed_action: 'Deploy the API to production',
+      reasoning: 'CI is green; send-to-prod now',
+    });
+    expect(evidence).toContain(`${MCP_EVIDENCE_MANDATE_LABEL}\nShip the release\nto production`);
+    expect(extractMandateVerbatimQuote(evidence)).toBe('Ship the release\nto production');
+  });
+
+  it('parses MCP output that includes the host-quote fallback note', () => {
+    const evidence = [
+      '[ThoughtProof quote] host quote rejected (too_short; floor is 20 characters); using full mandate for provenance.',
+      '',
+      MCP_EVIDENCE_MANDATE_LABEL,
+      'Ship it',
+      '',
+      MCP_EVIDENCE_ACTION_LABEL,
+      'Ship it',
+      '',
+      MCP_EVIDENCE_REASONING_LABEL,
+      'ok',
+    ].join('\n');
+    // Short embedded span is valid — MCP 20-char floor is host-excerpt only.
+    expect(extractMandateVerbatimQuote(evidence)).toBe('Ship it');
+  });
+
+  it('uses the declared format labels as the cross-repo marker', () => {
+    expect(MCP_EVIDENCE_MANDATE_LABEL).toBe('Principal mandate (verbatim quote):');
+    expect(fyiEvidence.startsWith(`${MCP_EVIDENCE_MANDATE_LABEL}\n${FYI_MANDATE}`)).toBe(
+      true,
+    );
+  });
+});
+
+describe('matchEvidenceQuote returns the actually matched span', () => {
+  it('returns the evidence span for a unicode-folded match', () => {
+    const evidence = 'the principal said hello\u2014world today';
+    const m = matchEvidenceQuote('hello-world', evidence);
+    expect(m.matched).toBe(true);
+    expect(m.match_mode).toBe('unicode');
+    expect(m.span).toBe('hello\u2014world');
+    expect(evidence.includes(m.span!)).toBe(true);
+  });
+});
+
 describe('FYI-aligned (mandate ≈ action, MCP mandate span present)', () => {
-  it('recovers an evidence-substring quote and does not emit undefined [PROVENANCE', () => {
+  it('recovers a labeled mandate quote and does not emit undefined [PROVENANCE', () => {
     const n = normalizeStepQuote(
       {
         predicate: 'weakly_faithful',
@@ -96,9 +163,11 @@ describe('FYI-aligned (mandate ≈ action, MCP mandate span present)', () => {
     expect(n.quote).toBe(FYI_MANDATE);
     expect(isEvidenceSubstring(n.quote!, fyiEvidence)).toBe(true);
     expect(n.recovered_quote).toBe(true);
+    expect(n.quote_source).toBe('recovered_mandate');
     expect(n.false_provenance_stripped).toBe(true);
     expect(n.reasoning).not.toMatch(/undefined\s*\[PROVENANCE/i);
     expect(n.reasoning).not.toContain('PROVENANCE DOWNGRADE');
+    expect(n.reasoning.toLowerCase()).toContain(RECOVERED_MANDATE_NOTE);
   });
 
   it('extracts the MCP Principal mandate verbatim span', () => {
@@ -120,13 +189,14 @@ describe('Ship-mismatch (mandate = npm pin / ship, action = notify CoS)', () => 
       shipEvidence,
     );
 
-    expect(n.reasoning).toBe(scope);
+    expect(n.reasoning).toContain(scope);
     expect(n.reasoning).not.toMatch(/undefined\s*\[PROVENANCE/i);
     expect(n.reasoning).not.toContain('PROVENANCE DOWNGRADE');
     expect(n.reasoning).toMatch(/scope|objective|npm pin/i);
-    // Recovered cite is allowed (mandate is in evidence) but must be a substring.
     if (n.quote !== null) {
       expect(isEvidenceSubstring(n.quote, shipEvidence)).toBe(true);
+      expect(n.quote_source).toBe('recovered_mandate');
+      expect(n.reasoning.toLowerCase()).toContain(RECOVERED_MANDATE_NOTE);
     }
   });
 
@@ -157,6 +227,7 @@ describe('fail-closed when no citeable span exists', () => {
       'no mandate label here',
     );
     expect(n.quote).toBeNull();
+    expect(n.quote_source).toBeNull();
     expect(n.reasoning).not.toMatch(/^undefined /);
     expect(n.reasoning).toMatch(/not a citeable substring/i);
   });
@@ -172,6 +243,7 @@ describe('fail-closed when no citeable span exists', () => {
       fyiEvidence,
     );
     expect(n.quote).toBeNull();
+    expect(n.quote_source).toBeNull();
     expect(n.reasoning).toMatch(/not a substring/i);
   });
 });

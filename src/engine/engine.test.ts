@@ -429,6 +429,7 @@ describe('Sentinel Engine', () => {
       expect(obj.step_id).toBe('step_0');
       expect(obj.predicate).toBe('supported');
       expect(obj.quote).toBe('test quote');
+      expect(obj.quote_source).toBe('cascade');
       expect(obj.reasoning).toBe('step reasoning'); // evaluator prose preserved
       expect(obj.score).toBe(0.2);
       // criterion is attached from the trade_execution gold step 0

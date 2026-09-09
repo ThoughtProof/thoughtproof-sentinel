@@ -246,6 +246,17 @@ export interface SentinelStepObjection {
   /** Verbatim quote from evidence the evaluator keyed on, if any */
   quote: string | null;
   /**
+   * How `quote` was obtained. `recovered_mandate` means Sentinel filled a
+   * missing cascade cite from the MCP host mandate span — not that the
+   * cascade cited it. Null when `quote` is null.
+   */
+  quote_source?: 'cascade' | 'recovered_mandate' | null;
+  /**
+   * How `quote` matched `evidence` (exact vs folded). Present when a quote
+   * was accepted on the surface.
+   */
+  quote_match_mode?: 'exact' | 'trimmed' | 'line_whitespace' | 'unicode' | 'none';
+  /**
    * Per-step reasoning. Uses the evaluator's prose when present; otherwise a
    * deterministic fallback synthesized from predicate + criterion (the cheap
    * SERV tiers do not always emit per-step prose).

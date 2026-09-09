@@ -103,6 +103,7 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
       score: 0.0,
       predicate: 'unsupported',
       quote: null,
+      quote_source: null,
       reasoning: `${failed.code}:${failed.index} — Evidence signature verification failed: ${failed.reason}`,
     });
   }
@@ -114,6 +115,7 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
       score: 0.3,
       predicate: 'partial',
       quote: null,
+      quote_source: null,
       reasoning: `${uncertain.code}:${uncertain.index} — Evidence verification uncertain: ${uncertain.reason}`,
     });
   }
@@ -200,6 +202,7 @@ export function applyEvidenceEffects(
       score: 0.3,
       predicate: 'partial',
       quote: null,
+      quote_source: null,
       reasoning: 'package_digest_uncomputable — verdict could not be bound to the exact request package',
     });
   }
