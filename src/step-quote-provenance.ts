@@ -15,9 +15,15 @@
  *   - quotes are evidence substrings (or null) — all modes, not only
  *     action_authorization
  *   - null/undefined never become the literal prefix `undefined`
+ *   - mandate recovery is gated to near-pass: provenance stamp present
+ *     or score ≥ PARTIAL / R1 no-quote floor (0.25). Hard unfaithful /
+ *     score-0 steps are not backfilled
  *   - recovered cites are labeled `quote_source: recovered_mandate`
  *   - hard unfaithful + real scope/objective prose is left intact
  */
+
+/** pot-cli PARTIAL_THRESHOLD / R1_NO_QUOTE_FLOOR — near-pass band starts here. */
+export const NEAR_PASS_SCORE_FLOOR = 0.25;
 
 /** Cross-repo contract with thoughtproof-mcp `buildSentinelEvidence`. */
 export const MCP_EVIDENCE_MANDATE_LABEL = 'Principal mandate (verbatim quote):';
@@ -113,6 +119,48 @@ function buildNormalizedIndexMap(
 }
 
 /**
+ * Same index-map idea as {@link buildNormalizedIndexMap}, for pot-cli's
+ * per-line leading whitespace fold (`^[ \t]+` per line). Skipped indent
+ * chars have no map entries so `evidence.slice(start, end)` is a real
+ * substring of the original evidence.
+ */
+function buildLineWhitespaceIndexMap(original: string): { text: string; map: number[] } {
+  let text = '';
+  const map: number[] = [];
+  let atLineStart = true;
+  for (let i = 0; i < original.length; i++) {
+    const ch = original[i]!;
+    if (ch === '\n' || ch === '\r') {
+      text += ch;
+      map.push(i);
+      atLineStart = true;
+      continue;
+    }
+    if (atLineStart && (ch === ' ' || ch === '\t')) {
+      continue;
+    }
+    atLineStart = false;
+    text += ch;
+    map.push(i);
+  }
+  return { text, map };
+}
+
+function spanFromIndexMap(
+  original: string,
+  mapped: { text: string; map: number[] },
+  needle: string,
+): string | null {
+  if (!needle || mapped.map.length === 0) return null;
+  const idx = mapped.text.indexOf(needle);
+  if (idx === -1) return null;
+  const start = mapped.map[idx];
+  const endIdx = mapped.map[idx + needle.length - 1];
+  if (start === undefined || endIdx === undefined) return null;
+  return original.slice(start, endIdx + 1);
+}
+
+/**
  * Match `quote` against `evidence` and return the actually matched
  * evidence span (not the LLM's possibly folded form).
  */
@@ -127,24 +175,20 @@ export function matchEvidenceQuote(quote: string, evidence: string): QuoteMatch 
   if (cleanQuote && evidence.includes(cleanQuote)) {
     return { matched: true, span: cleanQuote, match_mode: 'trimmed' };
   }
-  const normTrace = evidence.replace(/^[ \t]+/gm, '');
   const normQuote = cleanQuote.replace(/^[ \t]+/gm, '');
-  if (normQuote && normTrace.includes(normQuote)) {
-    const span = evidence.includes(normQuote) ? normQuote : normQuote;
-    return { matched: true, span, match_mode: 'line_whitespace' };
+  if (normQuote) {
+    const ws = buildLineWhitespaceIndexMap(evidence);
+    const wsSpan = spanFromIndexMap(evidence, ws, normQuote);
+    if (wsSpan) {
+      return { matched: true, span: wsSpan, match_mode: 'line_whitespace' };
+    }
   }
   const uni = buildNormalizedIndexMap(evidence, (ch) => normalizeUnicodeForMatch(ch));
   const uniQuote = normalizeUnicodeForMatch(cleanQuote);
   if (uniQuote.length > 0) {
-    const idx = uni.text.indexOf(uniQuote);
-    if (idx !== -1) {
-      const start = uni.map[idx]!;
-      const end = uni.map[idx + uniQuote.length - 1]! + 1;
-      return {
-        matched: true,
-        span: evidence.slice(start, end),
-        match_mode: 'unicode',
-      };
+    const uniSpan = spanFromIndexMap(evidence, uni, uniQuote);
+    if (uniSpan) {
+      return { matched: true, span: uniSpan, match_mode: 'unicode' };
     }
   }
   return { matched: false, span: null, match_mode: 'none' };
@@ -242,7 +286,8 @@ function withRecoveredNote(reasoning: string): string {
  * Normalize one cascade step for the Sentinel objection surface.
  *
  * Recovered cites are labeled and annotated so a signed receipt cannot
- * imply the cascade cited the mandate span.
+ * imply the cascade cited the mandate span. Recovery runs only on
+ * near-pass (provenance stamp or score ≥ {@link NEAR_PASS_SCORE_FLOOR}).
  */
 export function normalizeStepQuote(
   step: StepQuoteInput,
@@ -250,6 +295,12 @@ export function normalizeStepQuote(
 ): NormalizedStepQuote {
   const rawQuote = coerceQuote(step.quote);
   const quoteWasPresent = rawQuote !== null;
+  const score =
+    typeof step.score === 'number' ? step.score : Number(step.score);
+  let reasoning = sanitizeReasoning(step.reasoning);
+  const stamped = hasProvenanceDowngradeStamp(reasoning);
+  const allowRecover =
+    stamped || (Number.isFinite(score) && score >= NEAR_PASS_SCORE_FLOOR);
 
   let quote: string | null = null;
   let quote_source: QuoteSource | null = null;
@@ -265,7 +316,7 @@ export function normalizeStepQuote(
     }
   }
 
-  if (!quoteWasPresent && quote === null) {
+  if (!quoteWasPresent && quote === null && allowRecover) {
     const recovered = extractMandateVerbatimQuote(evidence);
     if (recovered) {
       const m = matchEvidenceQuote(recovered, evidence);
@@ -278,9 +329,7 @@ export function normalizeStepQuote(
     }
   }
 
-  let reasoning = sanitizeReasoning(step.reasoning);
   let false_provenance_stripped = false;
-  const stamped = hasProvenanceDowngradeStamp(reasoning);
 
   if (stamped) {
     if (recovered_quote && quote !== null) {

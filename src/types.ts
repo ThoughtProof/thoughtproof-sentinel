@@ -248,7 +248,8 @@ export interface SentinelStepObjection {
   /**
    * How `quote` was obtained. `recovered_mandate` means Sentinel filled a
    * missing cascade cite from the MCP host mandate span — not that the
-   * cascade cited it. Null when `quote` is null.
+   * cascade cited it. Live verify/gate paths always set this to `null`
+   * when there is no quote (never omit) so canonicalize/EAS stay stable.
    */
   quote_source?: 'cascade' | 'recovered_mandate' | null;
   /**

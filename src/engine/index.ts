@@ -280,8 +280,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       score: Math.round(s.score * 1000) / 1000,
       predicate: String(s.predicate),
       quote: s.quote,
-      quote_source: s.quote_source,
-      quote_match_mode: s.quote ? s.match_mode : undefined,
+      quote_source: s.quote_source ?? null,
+      quote_match_mode: s.quote ? s.match_mode : null,
       reasoning: prose.length > 0
         ? prose
         : synthesizeReasoning(String(s.predicate), criterion, s.quote),

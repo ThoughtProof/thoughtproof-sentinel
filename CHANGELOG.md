@@ -19,5 +19,7 @@
   (and annotated `provenance recovered from host mandate span`). They are
   not presented as cascade citations. Score stays at the cascade value
   (typically 0.25 / `weakly_faithful` after the provenance cap).
+  Recovery is gated to near-pass (provenance stamp or score ≥ 0.25);
+  hard unfaithful / score-0 steps are not backfilled.
 - Vendored pot-cli identity is **`0.8.10-tp.1`**, not upstream `0.8.10`
   (auditability for `/sentinel/health` `pot_cli` from #30).

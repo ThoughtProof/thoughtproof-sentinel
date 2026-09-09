@@ -221,16 +221,18 @@ describe('action_authorization quote:null provenance (dogfood 2026-09-09)', () =
     const reasons = res.objections.map((o) => o.reasoning).join(' ');
     expect(reasons).toMatch(/scope|objective|npm pin|ship/i);
     expect(reasons).not.toMatch(/PROVENANCE DOWNGRADE/);
+    expect(reasons.toLowerCase()).not.toContain('provenance recovered from host mandate span');
     // Fail-closed on real criteria, not a provenance-only stamp.
     const provenanceOnly = res.objections.every((o) =>
       /PROVENANCE DOWNGRADE|citeable substring/i.test(o.reasoning),
     );
     expect(provenanceOnly).toBe(false);
     for (const obj of res.objections) {
-      if (obj.quote !== null) {
-        expect(isEvidenceSubstring(obj.quote, evidence)).toBe(true);
-        expect(obj.quote_source).toBe('recovered_mandate');
-      }
+      expect(obj.quote).toBeNull();
+      expect(obj.quote_source).toBeNull();
+      expect(obj.reasoning.toLowerCase()).not.toContain(
+        'provenance recovered from host mandate span',
+      );
     }
   });
 });

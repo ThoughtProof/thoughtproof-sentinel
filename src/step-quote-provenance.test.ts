@@ -146,6 +146,18 @@ describe('matchEvidenceQuote returns the actually matched span', () => {
     expect(m.span).toBe('hello\u2014world');
     expect(evidence.includes(m.span!)).toBe(true);
   });
+
+  it('returns an evidence.substring span for line_whitespace (not stripped normQuote)', () => {
+    // Quote indent is spaces; evidence indent is a tab. Exact/trimmed fail;
+    // per-line leading-ws fold matches. Span must still live in raw evidence.
+    const evidence = 'lead\n\tfoo\n\tbar\ntrail';
+    const m = matchEvidenceQuote('foo\n  bar', evidence);
+    expect(m.matched).toBe(true);
+    expect(m.match_mode).toBe('line_whitespace');
+    expect(m.span).toBeTruthy();
+    expect(evidence.includes(m.span!)).toBe(true);
+    expect(m.span).toBe('foo\n\tbar');
+  });
 });
 
 describe('FYI-aligned (mandate ≈ action, MCP mandate span present)', () => {
@@ -173,10 +185,25 @@ describe('FYI-aligned (mandate ≈ action, MCP mandate span present)', () => {
   it('extracts the MCP Principal mandate verbatim span', () => {
     expect(extractMandateVerbatimQuote(fyiEvidence)).toBe(FYI_MANDATE);
   });
+
+  it('recovers on near-pass score without a provenance stamp', () => {
+    const n = normalizeStepQuote(
+      {
+        predicate: 'weakly_faithful',
+        score: 0.25,
+        quote: null,
+        reasoning: undefined,
+      },
+      fyiEvidence,
+    );
+    expect(n.quote_source).toBe('recovered_mandate');
+    expect(n.quote).toBe(FYI_MANDATE);
+    expect(n.reasoning.toLowerCase()).toContain(RECOVERED_MANDATE_NOTE);
+  });
 });
 
 describe('Ship-mismatch (mandate = npm pin / ship, action = notify CoS)', () => {
-  it('keeps real scope/objective objections and does not provenance-only fail', () => {
+  it('keeps real scope/objective objections and does not recover mandate cites', () => {
     const scope =
       'Action notifies CoS; mandate is about npm pin / ship — scope and objective mismatch.';
     const n = normalizeStepQuote(
@@ -189,15 +216,14 @@ describe('Ship-mismatch (mandate = npm pin / ship, action = notify CoS)', () => 
       shipEvidence,
     );
 
-    expect(n.reasoning).toContain(scope);
+    expect(n.reasoning).toBe(scope);
     expect(n.reasoning).not.toMatch(/undefined\s*\[PROVENANCE/i);
     expect(n.reasoning).not.toContain('PROVENANCE DOWNGRADE');
     expect(n.reasoning).toMatch(/scope|objective|npm pin/i);
-    if (n.quote !== null) {
-      expect(isEvidenceSubstring(n.quote, shipEvidence)).toBe(true);
-      expect(n.quote_source).toBe('recovered_mandate');
-      expect(n.reasoning.toLowerCase()).toContain(RECOVERED_MANDATE_NOTE);
-    }
+    expect(n.quote).toBeNull();
+    expect(n.quote_source).toBeNull();
+    expect(n.recovered_quote).toBe(false);
+    expect(n.reasoning.toLowerCase()).not.toContain(RECOVERED_MANDATE_NOTE);
   });
 
   it('does not rewrite unfaithful steps that already have real prose', () => {
@@ -211,6 +237,9 @@ describe('Ship-mismatch (mandate = npm pin / ship, action = notify CoS)', () => 
       shipEvidence,
     );
     expect(n.false_provenance_stripped).toBe(false);
+    expect(n.recovered_quote).toBe(false);
+    expect(n.quote_source).toBeNull();
+    expect(n.reasoning).toBe('Recipient / objective differs from the granted mandate.');
     expect(n.reasoning).toContain('objective');
   });
 });
