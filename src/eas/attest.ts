@@ -14,6 +14,7 @@
 
 import { createHash } from 'crypto';
 import { SENTINEL_EAS_CONFIG } from '../eas-config.js';
+import { confidenceToPercent } from '../confidence.js';
 import type { AttestationData, AttestationResult, SentinelVerifyResponse, SentinelVerifyRequest } from '../types.js';
 
 // Lazy ethers — only loaded when actually attesting
@@ -81,7 +82,7 @@ export function buildAttestationData(
     tier: res.tier,
     mode: res.mode,
     verdict: res.verdict,
-    confidence: Math.max(0, Math.min(100, Math.round(res.confidence * 100))), // uint8 0-100, clamped
+    confidence: confidenceToPercent(res.confidence), // uint8 0-100; NaN → 0
     claimHash: hashToBytes32(req.claim),
     evidenceHash: hashToBytes32(req.evidence),
     evaluatedAt: Math.floor(new Date(res.meta.verified_at).getTime() / 1000),

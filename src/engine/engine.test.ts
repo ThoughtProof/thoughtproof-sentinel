@@ -467,5 +467,69 @@ describe('Sentinel Engine', () => {
       expect(res.objections).toEqual([]);
       expect(res.confidence).toBe(0);
     });
+
+    function expectFiniteUnitConfidence(confidence: unknown): asserts confidence is number {
+      expect(typeof confidence).toBe('number');
+      expect(Number.isFinite(confidence)).toBe(true);
+      expect(confidence as number).toBeGreaterThanOrEqual(0);
+      expect(confidence as number).toBeLessThanOrEqual(1);
+      const json = JSON.parse(JSON.stringify({ confidence })) as { confidence: unknown };
+      expect(json.confidence).not.toBeNull();
+      expect(typeof json.confidence).toBe('number');
+      expect(Number.isFinite(json.confidence as number)).toBe(true);
+    }
+
+    it('missing step scores yield finite confidence, never NaN/null in JSON (issue #39)', async () => {
+      const result = makeItemResult('HOLD', 0.9);
+      delete (result.step_evaluations[0] as { score?: number }).score;
+      result.step_evaluations.push({
+        step_id: 'step_1',
+        predicate: 'weakly_faithful',
+        quote: 'test quote',
+        reasoning: 'degraded step omitted score',
+      } as (typeof result.step_evaluations)[number]);
+      mockEvaluateItem.mockResolvedValueOnce(result as any);
+
+      const res = await verify({
+        claim: 'test',
+        evidence: 'the test quote is in the source',
+        mode: 'handoff',
+        tier: 'checkpoint',
+      });
+
+      expectFiniteUnitConfidence(res.confidence);
+      // two missing scores → (0 + 0) / 2
+      expect(res.confidence).toBe(0);
+      expect(res.objections.every((o) => Number.isFinite(o.score))).toBe(true);
+      const parsed = JSON.parse(JSON.stringify(res)) as { confidence: unknown };
+      expect(parsed.confidence).toBe(0);
+    });
+
+    it('NaN step scores yield finite confidence, never NaN/null in JSON (issue #39)', async () => {
+      const result = makeItemResult('HOLD', 0.8);
+      result.step_evaluations[0].score = Number.NaN;
+      result.step_evaluations.push({
+        step_id: 'step_1',
+        predicate: 'supported',
+        score: 0.9,
+        quote: 'test quote',
+        reasoning: 'finite sibling',
+      });
+      mockEvaluateItem.mockResolvedValueOnce(result as any);
+
+      const res = await verify({
+        claim: 'test',
+        evidence: 'the test quote is in the source',
+        mode: 'handoff',
+        tier: 'checkpoint',
+      });
+
+      expectFiniteUnitConfidence(res.confidence);
+      // NaN coerced to 0, sibling 0.9 → 0.45
+      expect(res.confidence).toBe(0.45);
+      const parsed = JSON.parse(JSON.stringify(res)) as { confidence: unknown };
+      expect(parsed.confidence).toBe(0.45);
+      expect(JSON.stringify(res)).not.toMatch(/"confidence":null/);
+    });
   });
 });

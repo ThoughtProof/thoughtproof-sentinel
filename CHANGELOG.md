@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- **Finite receipt confidence (issue #39):**
+  Averaging step scores now coerces missing / NaN / Infinity `score` to
+  `0` (`Number.isFinite(s.score) ? s.score : 0`). Response `confidence`
+  is asserted to a finite number in `[0, 1]` before return; EAS
+  attestation and canonical-verdict copies use the same clamp so
+  `JSON.stringify` cannot emit `confidence: null`. Fail-closed: a
+  degraded cascade is a low readable score, not an unreadable receipt.
 - **Health readiness + verify config errors (issue #32):**
   `GET /sentinel/health` now reports `ready` and `serv_key` (`present` |
   `missing`) without emitting the key value. `ok` remains liveness only —
