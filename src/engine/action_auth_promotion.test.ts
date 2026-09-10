@@ -154,6 +154,34 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).toBe('already_allow');
   });
 
+  it('4b. agreement_allow + objective_mismatch → BLOCK (never already_allow)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: true,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.promoted).toBe(false);
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4c. HOLD/UNCERTAIN + objective_mismatch → BLOCK (not weak REVIEW)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'HOLD',
+      cascadeReason: 'agreement_hold',
+      mappedVerdict: 'UNCERTAIN',
+      steps: allPass,
+      objectiveMismatch: true,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+  });
+
   it('5. non-action_authorization modes are pass-through (DQL/other lanes untouched)', () => {
     const d = resolveActionAuthPromotion({
       mode: 'handoff',

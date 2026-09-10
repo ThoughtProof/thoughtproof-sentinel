@@ -104,7 +104,8 @@ export type ActionAuthPromotionReason =
   | 'conditional_allow_no_machine_proof'
   | 'steps_not_all_pass'
   | 'promoted_all_steps_pass'
-  | 'no_promote_path';
+  | 'no_promote_path'
+  | 'objective_mismatch_fail_closed';
 
 export interface ActionAuthPromotionInput {
   mode: SentinelMode | string;
@@ -126,6 +127,12 @@ export interface ActionAuthPromotionInput {
    * proof contract exists. Must NEVER be inferred from LLM text.
    */
   machineConditionProof?: MachineConditionProof | null;
+  /**
+   * Deterministic classifier: mandate is ship/pin/deploy/publish and the
+   * action is notify/FYI only. When true, public ALLOW is forbidden — BLOCK.
+   * Must never be inferred from LLM step scores.
+   */
+  objectiveMismatch?: boolean | null;
 }
 
 /**
@@ -224,6 +231,12 @@ export function resolveActionAuthPromotion(
 
   if (input.mode !== 'action_authorization') {
     return finish(input.mappedVerdict, false, 'not_action_authorization');
+  }
+
+  // P0 2026-09-10: Ship-mismatch is machine-checkable. Cascade agreement_allow
+  // (and MCP claim=proposed_action faithfulness) must not public-ALLOW.
+  if (input.objectiveMismatch === true) {
+    return finish('BLOCK', false, 'objective_mismatch_fail_closed');
   }
 
   // Hard stop: primary BLOCK disagreement must never promote to ALLOW.

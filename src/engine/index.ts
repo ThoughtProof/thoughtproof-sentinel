@@ -15,12 +15,17 @@ import type {
   SentinelVerifyRequest,
   SentinelVerifyResponse,
   SentinelTier,
+  SentinelStepObjection,
 } from '../types.js';
 
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
 import { mapVerdict, canPromoteStep2Only, resolveActionAuthPromotion } from './verdict.js';
 import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
+import {
+  classifyActionAuthKind,
+  OBJECTIVE_MISMATCH_BLOCK_REASON,
+} from './action-auth-kind.js';
 import { bindStepObjections } from '../objection-evidence-bind.js';
 import {
   normalizeCascadeSteps,
@@ -60,6 +65,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     req.mode === 'action_authorization'
       ? runAuthorizationGate(req.mandate, gateMode)
       : null;
+
+  // Deterministic Ship-mismatch (notify/FYI vs ship/pin/deploy/publish).
+  // Computed before the cascade so budget-exhaust and agreement_allow cannot
+  // fail-open. Same classifier the mode handler uses for SENTINEL_AXIS_HINT.
+  const actionAuthKind =
+    req.mode === 'action_authorization'
+      ? classifyActionAuthKind(req.claim, req.evidence, req.mandate)
+      : null;
+  const objectiveMismatch = actionAuthKind?.objective_mismatch === true;
 
   const gateField = gateResult && !gateResult.silent
     ? {
@@ -131,7 +145,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     budget.clear();
     if (isEngineBudgetExhaustedError(err)) {
       const publicVerdict =
-        err.knownInternalVerdict === 'BLOCK' ? 'BLOCK' : 'UNCERTAIN';
+        err.knownInternalVerdict === 'BLOCK' || objectiveMismatch
+          ? 'BLOCK'
+          : 'UNCERTAIN';
       const trace = buildBudgetTrace({
         stage: err.stage,
         elapsedMs: err.elapsedMs,
@@ -171,13 +187,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
                   mapped_verdict: publicVerdict,
                   public_verdict: publicVerdict,
                   promoted: false,
-                  reason: ENGINE_BUDGET_REASON,
+                  reason: objectiveMismatch
+                    ? 'objective_mismatch_fail_closed'
+                    : ENGINE_BUDGET_REASON,
                   steps_all_pass: false,
                   machine_condition_proof_present: false,
                   machine_condition_proof_accepted: false,
                   release_id: releaseId,
                   policy:
-                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s',
+                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed',
                 },
               }
             : {}),
@@ -232,6 +250,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       })),
       // No structured proof contract yet — never pass LLM text here.
       machineConditionProof: null,
+      objectiveMismatch,
     });
     verdict = decision.publicVerdict;
     promotionMeta = {
@@ -251,13 +270,14 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         process.env.GIT_COMMIT ||
         process.env.RELEASE_ID ||
         undefined,
-      policy: 'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed',
+      policy:
+        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed',
     };
   }
 
   // 4. Calculate confidence from step scores
   const steps = cascadeOutput.result.step_evaluations;
-  const avgScore = steps.length > 0
+  let avgScore = steps.length > 0
     ? steps.reduce((sum, s) => sum + s.score, 0) / steps.length
     : 0;
 
@@ -302,15 +322,31 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     claim: req.claim,
     evidence: req.evidence,
   });
-  const objections = bind.surface_objections;
+  let objections = bind.surface_objections;
+
+  // 5c. Ship-mismatch surface: if the classifier fired, step_2 must not
+  // remain a near-pass ("objective only weakly supported") on a public BLOCK.
+  if (objectiveMismatch) {
+    objections = applyObjectiveMismatchSurface(
+      objections,
+      modeOutput.evalInput.gold_plan_steps,
+    );
+    if (objections.length > 0) {
+      avgScore = objections.reduce((sum, o) => sum + o.score, 0) / objections.length;
+    }
+  }
 
   const durationMs = Date.now() - startMs;
+  const publicReasoning =
+    objectiveMismatch && internalVerdict !== 'BLOCK'
+      ? OBJECTIVE_MISMATCH_BLOCK_REASON
+      : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
 
   return {
     id,
     verdict,
     confidence: Math.round(avgScore * 1000) / 1000,
-    reasoning: sanitizeReasoning(cascadeOutput.result.verdict_reasoning),
+    reasoning: publicReasoning,
     objections,
     mode: req.mode,
     tier,
@@ -362,4 +398,38 @@ function synthesizeReasoning(predicate: string, criterion: string, quote: string
     ? `Criterion "${criterion}" was ${phrase}.`
     : `This step was ${phrase}.`;
   return quote ? `${base} Keyed on: "${quote}"` : base;
+}
+
+function applyObjectiveMismatchSurface(
+  objections: SentinelStepObjection[],
+  goldSteps: Array<{ index: number; description: string; acceptance_criterion?: string }>,
+): SentinelStepObjection[] {
+  const gold = goldSteps.find((g) => g.index === 2);
+  const criterion = gold?.acceptance_criterion ?? gold?.description ?? 'Action serves the instruction given';
+  if (!objections.some((o) => o.step_id === 'step_2')) {
+    return [
+      ...objections,
+      {
+        step_id: 'step_2',
+        criterion,
+        score: 0,
+        predicate: 'unfaithful',
+        quote: null,
+        quote_source: null,
+        reasoning: OBJECTIVE_MISMATCH_BLOCK_REASON,
+        objection_source: 'deterministic_gate',
+      },
+    ];
+  }
+  return objections.map((o) =>
+    o.step_id === 'step_2'
+      ? {
+          ...o,
+          score: 0,
+          predicate: 'unfaithful',
+          reasoning: OBJECTIVE_MISMATCH_BLOCK_REASON,
+          objection_source: 'deterministic_gate',
+        }
+      : o,
+  );
 }

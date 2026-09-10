@@ -29,6 +29,8 @@ export const NEAR_PASS_SCORE_FLOOR = 0.25;
 export const MCP_EVIDENCE_MANDATE_LABEL = 'Principal mandate (verbatim quote):';
 export const MCP_EVIDENCE_ACTION_LABEL = 'Proposed action:';
 export const MCP_EVIDENCE_REASONING_LABEL = 'Agent reasoning:';
+/** Present only when the host quote is a proper excerpt (not the full mandate). */
+export const MCP_EVIDENCE_USER_MANDATE_LABEL = 'User mandate:';
 
 export const PROVENANCE_DOWNGRADE_STAMP =
   '[PROVENANCE DOWNGRADE: quote invalid or missing]';

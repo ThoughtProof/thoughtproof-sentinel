@@ -177,6 +177,178 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(evalInput.question).toMatch(/action_kind=informational/);
   });
 
+  it('MCP verify_before_action body: claim=proposed_action + cascade ALLOW → BLOCK', async () => {
+    // thoughtproof-mcp buildSentinelVerifyBody sets claim to proposed_action
+    // (default MCP tier is checkpoint; fail-closed is tier-independent).
+    // After #34, steps 0/1/3 PASS informational; cascade can agreement_allow.
+    // That is the prod fail-open (sent_4c39a37b390344eb). Must stay BLOCK.
+    const mandate =
+      'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'Notify CoS that we are shipping now.';
+    const evidence = mcpEvidence(
+      mandate,
+      action,
+      'Notify chief of staff; do not pin npm or wait for CI.',
+    );
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend scope to exceed.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'CoS is a named teammate.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.85, quote: action, reasoning: 'Notify about shipping serves the ship mandate.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Notify is minimally scoped.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.public_verdict).toBe('BLOCK');
+    expect(res.reasoning).toMatch(/objective_mismatch|ship\/pin|notify\/FYI/i);
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2).toBeDefined();
+    expect(step2!.predicate).toBe('unfaithful');
+    expect(step2!.score).toBe(0);
+    expect(step2!.reasoning).toMatch(/objective_mismatch|Ship-mismatch/i);
+    expect(step2!.quote).toBe(action);
+    expect(step2!.objection_source).toBe('deterministic_gate');
+    expect(JSON.stringify(res)).not.toMatch(/undefined\s*\[PROVENANCE/i);
+    const evalInput = mockRunCascade.mock.calls[0][0] as { question: string };
+    expect(evalInput.question).toMatch(/objective_mismatch=true/);
+  });
+
+  it('MCP FYI-aligned: claim=proposed_action + cascade ALLOW stays ALLOW', async () => {
+    const evidence = mcpEvidence(
+      FYI_MANDATE,
+      FYI_MANDATE,
+      'FYI to CoS that the host is running on git main.',
+    );
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'No spend.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'CoS is the mandate recipient.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Action is the instructed FYI.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.85, quote: FYI_MANDATE, reasoning: 'Notify is minimally scoped.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: FYI_MANDATE,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(JSON.stringify(res)).not.toMatch(/undefined\s*\[PROVENANCE/i);
+  });
+
+  it('MCP host-quote excerpt + User mandate: cascade UNCERTAIN → BLOCK', async () => {
+    const full =
+      'Ship the 0.8.10 package only when CI is green and the changelog is ready.';
+    const excerpt = 'when CI is green and the changelog';
+    const action = 'Notify CoS that the host switched to git main.';
+    const evidence = [
+      'User mandate:',
+      full,
+      '',
+      MCP_EVIDENCE_MANDATE_LABEL,
+      excerpt,
+      '',
+      MCP_EVIDENCE_ACTION_LABEL,
+      action,
+      '',
+      MCP_EVIDENCE_REASONING_LABEL,
+      'FYI only; do not pin npm or ship.',
+    ].join('\n');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('HOLD', 'agreement_hold', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.8, quote: null, reasoning: 'No spend.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.8, quote: null, reasoning: 'Named teammate.' },
+        { step_id: 'step_2', predicate: 'weakly_faithful', score: 0.25, quote: null, reasoning: 'Objective only weakly supported.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.8, quote: null, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.reasoning).not.toMatch(/weakly supported/i);
+  });
+
+  it('MCP German ship mandate + notify: claim=proposed_action + cascade ALLOW → BLOCK', async () => {
+    const mandate = 'Deploye erst wenn CI grün. Veröffentliche das Paket nach dem npm-Pin.';
+    const action = 'Notify CoS that CI is green.';
+    const evidence = mcpEvidence(mandate, action, 'Status ping only; nicht ausliefern.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named teammate.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.85, quote: action, reasoning: 'Notify looks aligned.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.quote).toBe(action);
+    expect(step2?.objection_source).toBe('deterministic_gate');
+  });
+
+  it('MCP payment mandate + notify: claim=proposed_action + cascade ALLOW → BLOCK', async () => {
+    const mandate = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const action = 'Notify CoS that the invoice is handled.';
+    const evidence = mcpEvidence(mandate, action, 'FYI only; do not send USDC.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend in the action.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'CoS named.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'FYI about the invoice.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.quote).toBe(action);
+    expect(step2?.objection_source).toBe('deterministic_gate');
+  });
+
   it('Ship-mismatch stays BLOCK on scope/objective (not provenance)', async () => {
     const mandate =
       'Ship the release only after pinning the npm version and CI is green.';
