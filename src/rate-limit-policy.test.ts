@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
@@ -6,7 +9,16 @@ import {
   RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S,
   RATE_LIMIT_WINDOW,
 } from './rate-limit-policy.js';
-import policy from './rate-limit-policy.json';
+
+const policy = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'rate-limit-policy.json'), 'utf8'),
+) as {
+  authenticatedPerMinute: number;
+  globalPerMinuteDefault: number;
+  windowSeconds: number;
+  unavailableRetryAfterS: number;
+  burstCheckDefaultN: number;
+};
 
 describe('rate-limit-policy single source', () => {
   it('exports the JSON ceiling used by limiter, callers, and burst script', () => {
@@ -19,6 +31,7 @@ describe('rate-limit-policy single source', () => {
 
   it('burst default sits above the authenticated ceiling', () => {
     expect(BURST_CHECK_DEFAULT_N).toBeGreaterThan(AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
+    expect(BURST_CHECK_DEFAULT_N).toBe(policy.burstCheckDefaultN);
     expect(BURST_CHECK_DEFAULT_N).toBe(140);
   });
 });

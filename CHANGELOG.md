@@ -36,6 +36,14 @@
 
 ### Fixed
 
+- **Preview `/sentinel/health` 500 (issue #43 dogfood):** health no longer
+  imports `src/auth.ts` (which pulled `@upstash/ratelimit` and
+  `import` of `rate-limit-policy.json`). Vercel Node does not transform
+  JSON imports the way Vitest does, so the handler failed at load
+  (`FUNCTION_INVOCATION_FAILED`) while `npm test` stayed green. Policy
+  numbers are TypeScript literals; the burst script still reads the
+  sibling JSON (lockstep-tested). `rate_limit` is resolved via
+  `upstash-env` (config probe, no Redis SDK).
 - **Unknown-action abstention + DE informational markers (issue #47):**
   After #46, `informationalActionMayPublicAllow` returned true whenever
   `action_kind !== 'informational'`, so `unknown` actions abstained and

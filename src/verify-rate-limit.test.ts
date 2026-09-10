@@ -8,6 +8,10 @@ import { RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S } from './rate-limit-policy.js';
 
 const SECRET = 'sk_test_DO_NOT_LEAK_sentinel_43';
 
+const x402Mocks = vi.hoisted(() => ({
+  x402Gate: vi.fn(async () => ({ allowed: true, paymentMethod: 'api-key' })),
+}));
+
 vi.mock('./engine/index.js', () => ({
   verify: vi.fn(),
 }));
@@ -21,18 +25,17 @@ vi.mock('./billing.js', () => ({
 }));
 
 vi.mock('./middleware/x402.js', () => ({
-  x402Gate: vi.fn(async () => ({ allowed: true, paymentMethod: 'api-key' })),
+  x402Gate: x402Mocks.x402Gate,
 }));
 
 import handler from '../api/sentinel/verify.js';
 import { verify } from './engine/index.js';
 import { recordBillingEvent } from './billing.js';
-import { x402Gate } from './middleware/x402.js';
 import { _resetLimiters } from './auth.js';
 
 const verifyMock = vi.mocked(verify);
 const billingMock = vi.mocked(recordBillingEvent);
-const x402GateMock = vi.mocked(x402Gate);
+const x402GateMock = x402Mocks.x402Gate;
 
 function mockRes() {
   const headers: Record<string, string> = {};

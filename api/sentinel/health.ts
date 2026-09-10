@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getRateLimitReadiness } from '../../src/auth.js';
 import { getModelReadiness } from '../../src/model-config.js';
 import { getPotCliVersion } from '../../src/runtime-versions.js';
+import { getRateLimitReadiness } from '../../src/upstash-env.js';
 
 const VERSION = '0.1.0';
 const MODES = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning', 'action_authorization'] as const;
@@ -21,6 +21,9 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
     // ready = cascade (serv_key) AND limiter store. Fail-closed Redis
     // (configured-but-invalid) makes ready false so health matches verify 503.
     // serv_key presence only — never the key value.
+    // Readiness comes from upstash-env (env probe only). Do not import
+    // auth / rate-limit-policy.json / @upstash/ratelimit here — those
+    // crashed Preview health at load (FUNCTION_INVOCATION_FAILED on c944f5b).
     const { ready: modelReady, serv_key } = getModelReadiness();
     const { rate_limit } = getRateLimitReadiness();
     const ready = modelReady && rate_limit !== 'unavailable';

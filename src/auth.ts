@@ -29,7 +29,6 @@ import {
   RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S,
   RATE_LIMIT_WINDOW,
   RATE_LIMIT_WINDOW_SECONDS,
-  type RateLimitBackend,
 } from './rate-limit-policy.js';
 
 export {
@@ -40,6 +39,8 @@ export {
   RATE_LIMIT_WINDOW_SECONDS,
   type RateLimitBackend,
 } from './rate-limit-policy.js';
+
+export { getRateLimitReadiness } from './upstash-env.js';
 
 // --- API Key Store ---
 // Phase 1: Move to Vercel KV or Supabase. For now, env-var based.
@@ -148,26 +149,6 @@ function unavailableResult(): RateLimitResult {
     unavailable: true,
     code: 'RATE_LIMIT_UNAVAILABLE',
   };
-}
-
-/**
- * Rate-limit store readiness for `/sentinel/health` (issue #43).
- * Config probe only — no Redis I/O. After limiters have been initialized
- * in this process, reports the cached limiter state (including init error).
- */
-export function getRateLimitReadiness(
-  env: NodeJS.ProcessEnv = process.env,
-): { rate_limit: RateLimitBackend } {
-  if (env === process.env && _upstashChecked) {
-    if (_upstashState === 'ready') return { rate_limit: 'redis' };
-    if (_upstashState === 'missing') return { rate_limit: 'in_memory' };
-    return { rate_limit: 'unavailable' };
-  }
-
-  const cfg = resolveUpstashConfig(env);
-  if (cfg.status === 'configured') return { rate_limit: 'redis' };
-  if (cfg.status === 'missing') return { rate_limit: 'in_memory' };
-  return { rate_limit: 'unavailable' };
 }
 
 /** Reset cached limiters — for testing only */

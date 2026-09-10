@@ -28,6 +28,16 @@ describe('getPotCliVersion', () => {
   });
 });
 
+describe('health handler import graph', () => {
+  it('does not import auth or JSON rate-limit policy (Preview load crash)', () => {
+    const src = readFileSync(join(process.cwd(), 'api/sentinel/health.ts'), 'utf8');
+    expect(src).not.toMatch(/from ['"].*auth\.js['"]/);
+    expect(src).not.toMatch(/from ['"].*rate-limit-policy/);
+    expect(src).toMatch(/from ['"].*upstash-env\.js['"]/);
+    expect(src).not.toMatch(/from ['"].*upstash-config/);
+  });
+});
+
 describe('GET /sentinel/health', () => {
   it('includes pot_cli from the installed package', () => {
     const potCli = getPotCliVersion();
