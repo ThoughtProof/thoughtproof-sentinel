@@ -109,10 +109,23 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(c0).toMatch(/informational\/notify action/);
     expect(c0).toMatch(/financial_pair_match=true/);
     expect(c0).toMatch(/amount_within_grant=true/);
+    expect(c0).toMatch(/faithful \/ supported|not unfaithful/);
+    expect(c0).not.toMatch(/even when framed as notify\/fyi/);
+    const c0Raw = steps[0]!.acceptance_criterion;
+    expect(c0Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(c0Raw.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
+      c0Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i),
+    );
     expect(c1).toMatch(/named recipient|teammate|notify\/tell object/);
     expect(c1).toMatch(/wallet address is not required/);
     expect(c1).toMatch(/financial_pair_match=true/);
     expect(c1).toMatch(/amount_within_grant=true/);
+    expect(c1).toMatch(/faithful \/ supported|not unfaithful/);
+    const c1Raw = steps[1]!.acceptance_criterion;
+    expect(c1Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(c1Raw.search(/FAIL if the action names a 0x/i)).toBeGreaterThan(
+      c1Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i),
+    );
     expect(c2).toMatch(/ship|npm|deploy/);
     expect(c2).toMatch(/objective_mismatch|notify/);
     expect(c2).toMatch(/positively informational|unknown/);
@@ -133,8 +146,15 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(out.evalInput.question).toMatch(/informational\/notify action/);
     expect(out.evalInput.question).toMatch(/financial_pair_match=true/);
     expect(out.evalInput.question).toMatch(/amount_within_grant=true/);
+    expect(out.evalInput.question).toMatch(/faithful \/ supported|not unfaithful/);
+    expect(out.evalInput.question).not.toMatch(/even when framed as notify\/FYI/i);
     expect(out.evalInput.question).not.toMatch(
       /FAIL if the action also send\/transfer\/pay/,
+    );
+    const q = out.evalInput.question;
+    expect(q.search(/POSITIVE PASS \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(q.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
+      q.search(/POSITIVE PASS \(financial\)/i),
     );
   });
 
@@ -990,6 +1010,39 @@ function allPassSteps(quote: string) {
 
 describe('action_authorization suite fixtures — financial PASS hint (#55)', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('prepared question mounts SENTINEL_AXIS_HINT on exact suite ok-01/02/03', () => {
+    for (const id of [
+      'ok-01-exact-swap-approval',
+      'ok-02-exact-payment',
+      'ok-03-exact-limit-order',
+    ]) {
+      const s = suiteRow(id);
+      const out = actionAuthorization({
+        id,
+        claim: s.claim,
+        evidence: s.evidence,
+        mode: 'action_authorization',
+      });
+      expect(out.evalInput.question, id).toContain(SENTINEL_AXIS_HINT_LABEL);
+      const hint = out.evalInput.question.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+      expect(hint, id).toMatch(/financial_pair_match=true/);
+      expect(hint, id).toMatch(/amount_within_grant=true/);
+      expect(hint, id).not.toMatch(/objective_mismatch=true/);
+      expect(hint.trim().length, id).toBeGreaterThan(0);
+      const q = out.evalInput.question;
+      expect(q.search(/POSITIVE PASS \(financial\)/i), id).toBeGreaterThanOrEqual(0);
+      expect(q.search(/FAIL if an informational\/notify action/i), id).toBeGreaterThan(
+        q.search(/POSITIVE PASS \(financial\)/i),
+      );
+      expect(out.evalInput.gold_plan_steps[0]!.acceptance_criterion, id).toMatch(
+        /grade faithful \/ supported/,
+      );
+      expect(out.evalInput.gold_plan_steps[1]!.acceptance_criterion, id).toMatch(
+        /grade faithful \/ supported/,
+      );
+    }
+  });
 
   for (const id of [
     'ok-01-exact-swap-approval',

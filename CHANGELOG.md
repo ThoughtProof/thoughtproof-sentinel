@@ -18,8 +18,16 @@
   recipient steps PASS when the amount is at or below the granted
   figure and every action 0x is in the mandate. Overshoot, injected
   recipient, unbounded / MaxUint256, and pay-vs-ship stay silent or
-  kind-BLOCK. #53/#54 allowlist unchanged. FYI informational ALLOW
-  unchanged. Trade modes untouched.
+  kind-BLOCK. Preview `39f93b7e` still false-BLOCKed ok-01/02/03
+  (`already_block` cascade; ok-02 failScore=2, 4×0.5 TE) because
+  POSITIVE PASS sat after a FAIL paragraph that still said "even
+  when framed as notify/FYI" and lacked #46 grade language. Follow-up:
+  financial POSITIVE PASS now sits **before** FAIL, says grade
+  faithful / supported (not unfaithful), and states the classifier
+  already established the matching pair / amount ≤ grant / authorized
+  0x. Redundant "even when framed as notify/FYI" dropped. #53/#54
+  allowlist unchanged. FYI informational ALLOW unchanged. Trade modes
+  untouched.
 - **value_transfer / permission vs non-matching mandate allowlist (issue #53):**
   After #49, `informationalActionMayPublicAllow('value_transfer', 'unknown')`
   and `('permission', 'unknown')` were still `true`. Prod receipt
