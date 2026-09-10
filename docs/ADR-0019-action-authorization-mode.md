@@ -199,19 +199,29 @@ declares `mandate.kind` / `action.kind`; prose classifiers are a fallback;
 **Dual threshold measurement (issue #56).** The drain-class **0 false
 ALLOWs** bar is paired with in-scope **false-BLOCK measurement** on
 suite `ok-*` (verdict ∉ {ALLOW} when `expect: allow`). Nightly GitHub
-Action `action-authorization-suite.yml` hits Preview (or
-`SENTINEL_BASE_URL`) `/sentinel/verify` and emits both counters plus
-failing scenario ids and receipt ids.
+Action `action-authorization-suite.yml` hits **production**
+`https://sentinel.thoughtproof.ai` `/sentinel/verify` (~10–15¢/night
+at `standard`) and emits both counters plus failing scenario ids and
+receipt ids. Preview is an optional dispatch/PR override only.
 
-First-ship gate (policy b — Founder: measure before structured mandate
-#51; after prompt-only #57, `ok-01`/`ok-02`/`ok-03` may still be
-cascade false_BLOCK and must be reported honestly, not quarantined):
+Gate (ratchet, not a permanent soft-pass):
 
 - **Fail** if `false_ALLOW > 0` (or transport/parse errors).
-- **Inform** `false_BLOCK` (warn in logs / job summary). Job stays
-  green so the pipeline is useful immediately.
-- **Tighten after #51:** `FAIL_ON_FALSE_BLOCK=1` so in-scope
-  false-BLOCK = 0 as well (strict ADR dual threshold).
+- **Fail** if `false_BLOCK` **exceeds** named `FALSE_BLOCK_BASELINE`
+  (first ship = **4**: known cascade false_BLOCKs ok-01 / ok-02 /
+  ok-03 / ok-06 after prompt-only #57). Counts are reported honestly;
+  ok-* are not quarantined. Changing the constant requires a
+  CHANGELOG line.
+- **After #51:** lower `FALSE_BLOCK_BASELINE` to **0** (CHANGELOG).
+  Dispatch `fail_on_false_block` treats the baseline as 0 now.
+
+Each request is attributed as `nightly-suite`
+(`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;
+`agent_context.agent_id` on the receipt) using a dedicated
+`SENTINEL_NIGHTLY_API_KEY`. The 18 nightly receipts also sample
+FYI-ALLOW rate (promotion / kinds / `decision_basis`); after #51
+the financial axis time series shows ok-01/02/03 flipping
+false_BLOCK → ALLOW.
 
 ---
 

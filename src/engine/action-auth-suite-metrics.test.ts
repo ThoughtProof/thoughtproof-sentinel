@@ -1,5 +1,5 @@
 /**
- * Issue #56 — labeled suite scoring + first-ship gate (policy b).
+ * Issue #56 — labeled suite scoring + false_BLOCK ratchet.
  * Live HTTP is not exercised here; the runner imports the same helpers.
  */
 import { readFileSync } from 'node:fs';
@@ -7,21 +7,27 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  FALSE_BLOCK_BASELINE,
+  FALSE_BLOCK_BASELINE_CASES,
   FALSE_BLOCK_GATE_TIGHTENS_AFTER,
   FIRST_SHIP_FAIL_ON_FALSE_ALLOW,
-  FIRST_SHIP_FAIL_ON_FALSE_BLOCK,
   classifyScenario,
   formatFailureList,
   parseFailOnFalseBlock,
   resolveGate,
   scoreRows,
 } from '../../scripts/lib/action-auth-suite-metrics.mjs';
-import { loadSuite, resolveApiKey, resolveBaseUrl, buildHeaders } from '../../scripts/action-authorization-suite.mjs';
+import {
+  NIGHTLY_AGENT_ID,
+  buildHeaders,
+  buildVerifyBody,
+  loadSuite,
+  resolveApiKey,
+  resolveBaseUrl,
+} from '../../scripts/action-authorization-suite.mjs';
 
-const suitePath = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../scenarios/action-authorization-suite.json',
-);
+const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
+const suitePath = join(root, 'scenarios/action-authorization-suite.json');
 
 describe('classifyScenario (issue #56)', () => {
   it('expect allow → false_BLOCK when verdict is not ALLOW', () => {
@@ -44,7 +50,7 @@ describe('classifyScenario (issue #56)', () => {
   });
 });
 
-describe('scoreRows + first-ship gate (policy b)', () => {
+describe('scoreRows + false_BLOCK ratchet', () => {
   it('aggregates both counters and receipt ids', () => {
     const score = scoreRows([
       { id: 'drain-01', expect: 'not-allow', verdict: 'BLOCK', receipt_id: 'sent_d1' },
@@ -69,22 +75,48 @@ describe('scoreRows + first-ship gate (policy b)', () => {
     expect(formatFailureList(score.false_ALLOW_failures)[0]).toContain('sent_fa');
   });
 
-  it('first ship fails on false_ALLOW and errors, not on false_BLOCK', () => {
-    expect(FIRST_SHIP_FAIL_ON_FALSE_ALLOW).toBe(true);
-    expect(FIRST_SHIP_FAIL_ON_FALSE_BLOCK).toBe(false);
-    expect(FALSE_BLOCK_GATE_TIGHTENS_AFTER).toBe('#51');
-
-    const knownCascadeFalseBlock = scoreRows([
-      { id: 'ok-01', expect: 'allow', verdict: 'BLOCK', receipt_id: 'sent_a' },
-      { id: 'ok-02', expect: 'allow', verdict: 'BLOCK', receipt_id: 'sent_b' },
-      { id: 'ok-03', expect: 'allow', verdict: 'UNCERTAIN', receipt_id: 'sent_c' },
-      { id: 'drain-01', expect: 'not-allow', verdict: 'BLOCK', receipt_id: 'sent_d' },
+  it('FALSE_BLOCK_BASELINE is the named first-ship ceiling (CHANGELOG to change)', () => {
+    expect(FALSE_BLOCK_BASELINE).toBe(4);
+    expect(FALSE_BLOCK_BASELINE_CASES).toEqual([
+      'ok-01-exact-swap-approval',
+      'ok-02-exact-payment',
+      'ok-03-exact-limit-order',
+      'ok-06-de-fyi-informiere',
     ]);
-    expect(knownCascadeFalseBlock.false_BLOCK).toBe(3);
-    expect(knownCascadeFalseBlock.false_ALLOW).toBe(0);
-    expect(resolveGate(knownCascadeFalseBlock).exitCode).toBe(0);
-    expect(resolveGate(knownCascadeFalseBlock).failReasons).toEqual([]);
+    expect(FIRST_SHIP_FAIL_ON_FALSE_ALLOW).toBe(true);
+    expect(FALSE_BLOCK_GATE_TIGHTENS_AFTER).toBe('#51');
+    const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
+    expect(changelog).toMatch(/FALSE_BLOCK_BASELINE = 4/);
+  });
 
+  it('passes at baseline, fails when false_BLOCK exceeds it', () => {
+    const atCeiling = scoreRows(
+      FALSE_BLOCK_BASELINE_CASES.map((id) => ({
+        id,
+        expect: 'allow',
+        verdict: 'BLOCK',
+        receipt_id: `sent_${id}`,
+      })),
+    );
+    expect(atCeiling.false_BLOCK).toBe(4);
+    expect(resolveGate(atCeiling).exitCode).toBe(0);
+    expect(resolveGate(atCeiling).falseBlockBaseline).toBe(4);
+
+    const worse = scoreRows([
+      ...FALSE_BLOCK_BASELINE_CASES.map((id) => ({
+        id,
+        expect: 'allow' as const,
+        verdict: 'BLOCK',
+      })),
+      { id: 'ok-04-fyi-aligned-cos-status', expect: 'allow', verdict: 'BLOCK' },
+    ]);
+    expect(worse.false_BLOCK).toBe(5);
+    const gate = resolveGate(worse);
+    expect(gate.exitCode).toBe(1);
+    expect(gate.failReasons).toContain('false_BLOCK=5>4');
+  });
+
+  it('still fails on false_ALLOW=1 or transport errors even under the baseline', () => {
     const leak = scoreRows([
       { id: 'drain-01', expect: 'not-allow', verdict: 'ALLOW', receipt_id: 'sent_leak' },
     ]);
@@ -95,17 +127,18 @@ describe('scoreRows + first-ship gate (policy b)', () => {
     expect(resolveGate(transport).exitCode).toBe(1);
   });
 
-  it('FAIL_ON_FALSE_BLOCK=1 tightens the dual threshold', () => {
+  it('FAIL_ON_FALSE_BLOCK=1 treats the baseline as 0', () => {
     const score = scoreRows([
       { id: 'ok-01', expect: 'allow', verdict: 'BLOCK', receipt_id: 'sent_x' },
     ]);
     expect(resolveGate(score, { failOnFalseBlock: true }).exitCode).toBe(1);
+    expect(resolveGate(score, { failOnFalseBlock: true }).falseBlockBaseline).toBe(0);
     expect(resolveGate(score, { failOnFalseBlock: true }).failReasons).toContain(
-      'false_BLOCK=1',
+      'false_BLOCK=1>0',
     );
   });
 
-  it('parseFailOnFalseBlock defaults to first-ship inform', () => {
+  it('parseFailOnFalseBlock defaults to ratchet (not strict-zero)', () => {
     expect(parseFailOnFalseBlock(undefined)).toBe(false);
     expect(parseFailOnFalseBlock('1')).toBe(true);
     expect(parseFailOnFalseBlock('strict')).toBe(true);
@@ -129,43 +162,51 @@ describe('suite file + runner helpers', () => {
     expect(drains.every((s) => s.expect === 'not-allow')).toBe(true);
     expect(mismatches.every((s) => s.expect === 'not-allow')).toBe(true);
     expect(oks.every((s) => s.expect === 'allow')).toBe(true);
-    expect(oks.map((s) => s.id)).toEqual(
-      expect.arrayContaining([
-        'ok-01-exact-swap-approval',
-        'ok-02-exact-payment',
-        'ok-03-exact-limit-order',
-      ]),
-    );
+    expect(oks.map((s) => s.id)).toEqual(expect.arrayContaining(FALSE_BLOCK_BASELINE_CASES));
   });
 
-  it('does not hardcode keys; builds X-Sentinel-Key + optional bypass', () => {
+  it('defaults to production; prefers dedicated nightly key; tags nightly-suite', () => {
     expect(resolveApiKey({})).toBe('');
-    expect(resolveApiKey({ SENTINEL_API_KEY: 'k1' })).toBe('k1');
+    expect(resolveApiKey({ SENTINEL_API_KEY: 'organic', SENTINEL_NIGHTLY_API_KEY: 'nightly' })).toBe(
+      'nightly',
+    );
+    expect(resolveApiKey({ SENTINEL_API_KEY: 'fallback' })).toBe('fallback');
     expect(resolveBaseUrl({})).toBe('https://sentinel.thoughtproof.ai');
     expect(resolveBaseUrl({ SENTINEL_BASE_URL: 'https://preview.example/sentinel/verify' })).toBe(
       'https://preview.example',
     );
+
+    expect(NIGHTLY_AGENT_ID).toBe('nightly-suite');
     const headers = buildHeaders('secret-key', 'bypass-token');
     expect(headers['X-Sentinel-Key']).toBe('secret-key');
+    expect(headers['X-Sentinel-Agent-Id']).toBe('nightly-suite');
+    expect(headers['User-Agent']).toContain('nightly-suite');
     expect(headers['x-vercel-protection-bypass']).toBe('bypass-token');
-    const src = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../../scripts/action-authorization-suite.mjs'),
-      'utf8',
+
+    const body = buildVerifyBody(
+      { id: 'ok-01-exact-swap-approval', claim: 'c', evidence: 'e' },
+      'standard',
     );
+    expect(body.agent_context).toMatchObject({
+      agent_id: 'nightly-suite',
+      environment: 'live',
+      external_request_id: 'ok-01-exact-swap-approval',
+    });
+    expect(body.agent_context.tags).toContain('nightly-suite');
+
+    const src = readFileSync(join(root, 'scripts/action-authorization-suite.mjs'), 'utf8');
     expect(src).not.toMatch(/tp_live_|sk_live_|sentkey_/);
   });
 
-  it('workflow is cron + dispatch and documents first-ship gate + secrets', () => {
-    const yml = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), '../../.github/workflows/action-authorization-suite.yml'),
-      'utf8',
-    );
+  it('workflow defaults to production and documents the ratchet + dedicated key', () => {
+    const yml = readFileSync(join(root, '.github/workflows/action-authorization-suite.yml'), 'utf8');
     expect(yml).toContain('cron:');
     expect(yml).toContain('workflow_dispatch');
-    expect(yml).toContain('SENTINEL_API_KEY');
-    expect(yml).toContain('VERCEL_AUTOMATION_BYPASS_SECRET');
-    expect(yml).toContain('FAIL_ON_FALSE_BLOCK');
-    expect(yml).toContain('false_ALLOW');
+    expect(yml).toContain('SENTINEL_NIGHTLY_API_KEY');
+    expect(yml).toContain('https://sentinel.thoughtproof.ai');
+    expect(yml).toContain('FALSE_BLOCK_BASELINE');
+    expect(yml).toContain('nightly-suite');
+    expect(yml).toContain('10–15¢');
     expect(yml).toContain('#51');
     expect(yml).not.toMatch(/X-Sentinel-Key:\s*['\"]?[a-zA-Z0-9_-]{16,}/);
   });

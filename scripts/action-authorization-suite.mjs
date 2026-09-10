@@ -2,13 +2,22 @@
 /**
  * Live runner for scenarios/action-authorization-suite.json (issue #56).
  *
- *   SENTINEL_API_KEY=… SENTINEL_BASE_URL=https://… \
+ *   SENTINEL_NIGHTLY_API_KEY=… \
  *     node scripts/action-authorization-suite.mjs
+ *
+ * Defaults to production https://sentinel.thoughtproof.ai (~10–15¢/night
+ * at standard: 18 × $0.008). Preview is an optional override for
+ * PR / workflow_dispatch only (SENTINEL_BASE_URL).
+ *
+ * Dedicated key: prefer SENTINEL_NIGHTLY_API_KEY (not a customer key).
+ * Every request sets X-Sentinel-Agent-Id + agent_context.agent_id =
+ * `nightly-suite` so billing events and verify logs (`agent=`) can
+ * filter these 18 runs away from organic traffic.
  *
  * Optional:
  *   SENTINEL_TIER                 default standard
- *   FAIL_ON_FALSE_BLOCK=1         strict ADR dual threshold (after #51)
- *   VERCEL_AUTOMATION_BYPASS_SECRET  Preview Deployment Protection bypass
+ *   FAIL_ON_FALSE_BLOCK=1         treat FALSE_BLOCK_BASELINE as 0
+ *   VERCEL_AUTOMATION_BYPASS_SECRET  only if overriding to protected Preview
  *   --dry-run                     load + print plan, no HTTP
  *
  * Auth header is X-Sentinel-Key. Do not hardcode keys.
@@ -18,6 +27,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
+  FALSE_BLOCK_BASELINE,
   classifyScenario,
   formatFailureList,
   parseFailOnFalseBlock,
@@ -31,8 +41,12 @@ const DEFAULT_BASE = 'https://sentinel.thoughtproof.ai';
 const DEFAULT_TIER = 'standard';
 const MODE = 'action_authorization';
 
+/** Billing + verify-log agent= and receipt agent_context.agent_id. */
+export const NIGHTLY_AGENT_ID = 'nightly-suite';
+
 export function resolveApiKey(env = process.env) {
   return (
+    env.SENTINEL_NIGHTLY_API_KEY ||
     env.SENTINEL_API_KEY ||
     env.X_SENTINEL_KEY ||
     env.SENTINEL_TEST_KEY ||
@@ -71,12 +85,32 @@ export function buildHeaders(key, bypass) {
   const headers = {
     'Content-Type': 'application/json',
     'X-Sentinel-Key': key,
+    // BillingEvent.agent_id + verify log `agent=` (api/sentinel/verify.ts).
+    'X-Sentinel-Agent-Id': NIGHTLY_AGENT_ID,
+    'User-Agent': 'thoughtproof-sentinel-nightly-suite/1',
   };
   if (bypass) {
     headers['x-vercel-protection-bypass'] = bypass;
     headers['x-vercel-set-bypass-cookie'] = 'samesitenone';
   }
   return headers;
+}
+
+/** Body Sentinel records on the receipt (`meta.agent_context`). */
+export function buildVerifyBody(scenario, tier = DEFAULT_TIER) {
+  return {
+    claim: scenario.claim,
+    evidence: scenario.evidence,
+    mode: MODE,
+    tier,
+    agent_context: {
+      agent_id: NIGHTLY_AGENT_ID,
+      agent_runtime: 'github-actions-nightly',
+      environment: 'live',
+      tags: ['nightly-suite', 'action-authorization-suite', 'issue-56'],
+      external_request_id: scenario.id,
+    },
+  };
 }
 
 function looksLikeVercelProtection(status, contentType, text) {
@@ -176,7 +210,7 @@ function writeStepSummary(report) {
     `| false_BLOCK | ${score.false_BLOCK} |`,
     `| errors | ${score.errors} |`,
     '',
-    `Gate: fail_on_false_ALLOW=${gate.failOnFalseAllow ? 1 : 0} fail_on_false_BLOCK=${gate.failOnFalseBlock ? 1 : 0} → **${gate.exitCode === 0 ? 'PASS' : 'FAIL'}**`,
+    `Gate: false_ALLOW=0 · false_BLOCK≤${gate.falseBlockBaseline} → **${gate.exitCode === 0 ? 'PASS' : 'FAIL'}**`,
     '',
   ];
   if (score.false_ALLOW_failures.length) {
@@ -185,7 +219,7 @@ function writeStepSummary(report) {
     lines.push('');
   }
   if (score.false_BLOCK_failures.length) {
-    lines.push('### false_BLOCK (inform until #51)', '');
+    lines.push(`### false_BLOCK (baseline ≤${gate.falseBlockBaseline}; ratchet, not soft-pass)`, '');
     for (const f of formatFailureList(score.false_BLOCK_failures)) lines.push(`- ${f}`);
     lines.push('');
   }
@@ -219,9 +253,12 @@ export async function runSuite(opts = {}) {
           tier,
           mode: MODE,
           n: plan.length,
+          agent_id: NIGHTLY_AGENT_ID,
+          estimated_cost_usd: Number((plan.length * 0.008).toFixed(3)),
           scenarios: plan,
           gate: {
             fail_on_false_ALLOW: true,
+            false_BLOCK_baseline: failOnFalseBlock ? 0 : FALSE_BLOCK_BASELINE,
             fail_on_false_BLOCK: failOnFalseBlock,
             false_BLOCK_tightens_after: '#51',
           },
@@ -234,7 +271,9 @@ export async function runSuite(opts = {}) {
   }
 
   if (!key) {
-    console.error('Set SENTINEL_API_KEY (X-Sentinel-Key). Do not hardcode keys.');
+    console.error(
+      'Set SENTINEL_NIGHTLY_API_KEY (dedicated nightly key) or SENTINEL_API_KEY. Do not hardcode keys.',
+    );
     process.exitCode = 2;
     return { missingKey: true };
   }
@@ -244,21 +283,12 @@ export async function runSuite(opts = {}) {
   for (const scenario of suite.scenarios) {
     let res;
     try {
-      res = await postVerify(url, headers, {
-        claim: scenario.claim,
-        evidence: scenario.evidence,
-        mode: MODE,
-        tier,
-      });
+      const body = buildVerifyBody(scenario, tier);
+      res = await postVerify(url, headers, body);
       if ((res.status === 429 || res.status === 503) && res.json) {
         const retryAfter = Number(res.json.retry_after_ms ?? 2000);
         await sleep(Math.min(Math.max(retryAfter, 500), 15_000));
-        res = await postVerify(url, headers, {
-          claim: scenario.claim,
-          evidence: scenario.evidence,
-          mode: MODE,
-          tier,
-        });
+        res = await postVerify(url, headers, body);
       }
     } catch (err) {
       const row = {
@@ -297,13 +327,15 @@ export async function runSuite(opts = {}) {
     false_ALLOW_receipts: score.false_ALLOW_failures.map((f) => f.receipt_id).filter(Boolean),
     false_BLOCK_receipts: score.false_BLOCK_failures.map((f) => f.receipt_id).filter(Boolean),
     error_ids: score.error_failures.map((f) => f.id),
+    agent_id: NIGHTLY_AGENT_ID,
     gate: {
       fail_on_false_ALLOW: gate.failOnFalseAllow,
+      false_BLOCK_baseline: gate.falseBlockBaseline,
       fail_on_false_BLOCK: gate.failOnFalseBlock,
       fail_reasons: gate.failReasons,
       exit_code: gate.exitCode,
       first_ship_note:
-        'false_ALLOW must be 0. false_BLOCK is reported (inform) until #51; then gate tightens to 0.',
+        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). After #51 lower to 0.`,
     },
     rows,
     score,
@@ -323,7 +355,7 @@ export async function runSuite(opts = {}) {
     console.log(`errors: ${formatFailureList(score.error_failures).join('; ')}`);
   }
   console.log(
-    `gate fail_on_false_ALLOW=${gate.failOnFalseAllow ? 1 : 0} fail_on_false_BLOCK=${gate.failOnFalseBlock ? 1 : 0} → ${gate.exitCode === 0 ? 'PASS' : 'FAIL'} ${gate.failReasons.join(' ')}`,
+    `gate false_ALLOW=0 false_BLOCK≤${gate.falseBlockBaseline} → ${gate.exitCode === 0 ? 'PASS' : 'FAIL'} ${gate.failReasons.join(' ')}`,
   );
   console.log(JSON.stringify({
     false_ALLOW: report.false_ALLOW,

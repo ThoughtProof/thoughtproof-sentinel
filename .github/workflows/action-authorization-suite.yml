@@ -1,22 +1,39 @@
 # Nightly (and on-demand) labeled action_authorization suite vs live /sentinel/verify.
 # Issue #56 — dual counters: false_ALLOW (drain / mismatch) + false_BLOCK (ok-*).
 #
-# Required repository secrets / variables (do not hardcode keys):
-#   SENTINEL_API_KEY                 X-Sentinel-Key for Preview or prod
-#   SENTINEL_BASE_URL                repo variable (preferred) or secret.
-#                                    Preview URL, e.g. https://<preview>.vercel.app
-#                                    or https://sentinel.thoughtproof.ai
-#   VERCEL_AUTOMATION_BYPASS_SECRET  optional; set if the target has
-#                                    Vercel Deployment Protection
+# Default target is PRODUCTION https://sentinel.thoughtproof.ai
+# (~10–15¢/night at standard: 18 × $0.008). Preview is an optional
+# override for workflow_dispatch / PR only — nightly does not follow
+# rotating Preview URLs or SSO bypass.
 #
-# First-ship gate (policy b, founder: measure before #51):
+# Required repository secrets (do not hardcode keys):
+#   SENTINEL_NIGHTLY_API_KEY     dedicated X-Sentinel-Key for this job
+#                                (preferred; keep organic/customer keys
+#                                off this workflow)
+#   SENTINEL_API_KEY             fallback if the nightly-named secret
+#                                is not set yet
+#   VERCEL_AUTOMATION_BYPASS_SECRET  only if dispatch/PR overrides to a
+#                                protection-gated Preview URL
+#
+# Optional:
+#   SENTINEL_BASE_URL            repo variable — Preview override for
+#                                PR/dispatch. Ignored on the nightly cron
+#                                (always production).
+#
+# Gate:
 #   fail if false_ALLOW > 0 or transport/parse errors > 0
-#   report false_BLOCK + receipt ids; do not fail the job
-#   After structured mandate (#51) set FAIL_ON_FALSE_BLOCK=1 (or dispatch
-#   fail_on_false_block) so the ADR-0019 dual threshold is both = 0.
+#   fail if false_BLOCK > FALSE_BLOCK_BASELINE (named constant = 4:
+#   ok-01/02/03 + ok-06). Not a permanent soft-pass. Changing the
+#   constant requires a CHANGELOG line. After #51 lower baseline to 0.
+#   Dispatch fail_on_false_block treats baseline as 0 now.
 #
-# After #57 (prompt-only) ok-01/ok-02/ok-03 may still be cascade false_BLOCK.
-# The job reports them honestly — no quarantine / expected-fail skip.
+# Attribution (filter 18 runs/night from organic):
+#   X-Sentinel-Agent-Id: nightly-suite  → billing agent_id + verify log agent=
+#   body agent_context.agent_id         → receipt meta.agent_context
+#
+# Side benefit: 18 receipts/night carry promotion / kinds / decision_basis,
+# so FYI-ALLOW rate sampling rides along. After #51 the financial axis
+# time series shows ok-01/02/03 flipping false_BLOCK → ALLOW.
 
 name: Action-authorization suite
 
@@ -26,11 +43,11 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: Override SENTINEL_BASE_URL (Preview or prod)
+        description: Override base URL (Preview only; nightly cron stays production)
         required: false
         type: string
       fail_on_false_block:
-        description: Fail when false_BLOCK > 0 (strict dual threshold)
+        description: Treat FALSE_BLOCK_BASELINE as 0 (strict dual threshold)
         required: false
         type: boolean
         default: false
@@ -60,23 +77,30 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Require SENTINEL_API_KEY (cron / dispatch)
-        if: github.event_name != 'pull_request' && secrets.SENTINEL_API_KEY == ''
+      - name: Require dedicated nightly API key (cron / dispatch)
+        if: >-
+          github.event_name != 'pull_request' &&
+          secrets.SENTINEL_NIGHTLY_API_KEY == '' &&
+          secrets.SENTINEL_API_KEY == ''
         run: |
-          echo "::error::Set repository secret SENTINEL_API_KEY (X-Sentinel-Key). Optional: SENTINEL_BASE_URL, VERCEL_AUTOMATION_BYPASS_SECRET."
+          echo "::error::Set repository secret SENTINEL_NIGHTLY_API_KEY (dedicated X-Sentinel-Key; not a customer key). SENTINEL_API_KEY is a fallback."
           exit 1
 
       - name: Skip live suite (PR without API key)
-        if: github.event_name == 'pull_request' && secrets.SENTINEL_API_KEY == ''
+        if: >-
+          github.event_name == 'pull_request' &&
+          secrets.SENTINEL_NIGHTLY_API_KEY == '' &&
+          secrets.SENTINEL_API_KEY == ''
         run: |
-          echo "No SENTINEL_API_KEY on this PR (forks / unset). Scoring is covered by npm test."
-          echo "Nightly / workflow_dispatch still require the secret."
+          echo "No SENTINEL_NIGHTLY_API_KEY / SENTINEL_API_KEY on this PR. Scoring is covered by npm test."
+          echo "Nightly / workflow_dispatch still require a dedicated key."
 
       - name: Run action-authorization suite
-        if: secrets.SENTINEL_API_KEY != ''
+        if: secrets.SENTINEL_NIGHTLY_API_KEY != '' || secrets.SENTINEL_API_KEY != ''
         env:
-          SENTINEL_API_KEY: ${{ secrets.SENTINEL_API_KEY }}
-          SENTINEL_BASE_URL: ${{ github.event.inputs.base_url || vars.SENTINEL_BASE_URL || secrets.SENTINEL_BASE_URL }}
+          SENTINEL_NIGHTLY_API_KEY: ${{ secrets.SENTINEL_NIGHTLY_API_KEY || secrets.SENTINEL_API_KEY }}
+          # Cron always production. Dispatch/PR may override (Preview rotate + SSO).
+          SENTINEL_BASE_URL: ${{ github.event_name == 'schedule' && 'https://sentinel.thoughtproof.ai' || (github.event.inputs.base_url || vars.SENTINEL_BASE_URL || 'https://sentinel.thoughtproof.ai') }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           FAIL_ON_FALSE_BLOCK: ${{ github.event.inputs.fail_on_false_block == 'true' && '1' || '0' }}
           SENTINEL_TIER: standard

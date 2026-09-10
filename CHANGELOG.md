@@ -84,18 +84,26 @@
 - **Nightly action_authorization suite (issue #56):** GitHub Action
   cron (`15 5 * * *`) + `workflow_dispatch`, and on PRs that touch the
   suite / engine / runner. `scripts/action-authorization-suite.mjs`
-  posts `scenarios/action-authorization-suite.json` to Preview (or
-  `SENTINEL_BASE_URL`) `/sentinel/verify` with `X-Sentinel-Key`.
-  Counts **false_ALLOW** (`expect: not-allow` + verdict ALLOW) and
-  **false_BLOCK** (`expect: allow` + verdict ≠ ALLOW), plus receipt
-  ids, `decision_basis` / `promotion.reason` / kinds. First-ship
-  baseline (policy b): job **fails if false_ALLOW > 0**; false_BLOCK
-  is reported (ok-01/02/03 may still be cascade false_BLOCK after
-  #57) and does **not** fail the job until structured mandate #51
-  tightens the gate to 0. Secrets: `SENTINEL_API_KEY`, optional
-  `SENTINEL_BASE_URL` / `VERCEL_AUTOMATION_BYPASS_SECRET`. ADR-0019
-  drain false-ALLOW threshold is now paired with in-scope false-BLOCK
-  measurement. No `financial_pair_pass` / trade-mode change.
+  posts `scenarios/action-authorization-suite.json` to **production**
+  `https://sentinel.thoughtproof.ai` `/sentinel/verify` (Preview is
+  dispatch/PR override only). Cost ~10–15¢/night (`standard`,
+  18 × $0.008). Dedicated secret `SENTINEL_NIGHTLY_API_KEY`
+  (`SENTINEL_API_KEY` fallback). Every request sets
+  `X-Sentinel-Agent-Id: nightly-suite` (billing `agent_id` + verify
+  log `agent=`) and `agent_context.agent_id` so the 18 runs can be
+  filtered from organic traffic. Counts **false_ALLOW** (`expect:
+  not-allow` + verdict ALLOW) and **false_BLOCK** (`expect: allow` +
+  verdict ≠ ALLOW), plus receipt ids, `decision_basis` /
+  `promotion.reason` / kinds. Gate: **false_ALLOW must be 0**;
+  **false_BLOCK ratchet** fails if count exceeds named
+  `FALSE_BLOCK_BASELINE = 4` (ok-01/02/03 + ok-06 cascade
+  false_BLOCKs after #57) — not a permanent soft-pass. Changing
+  `FALSE_BLOCK_BASELINE` requires a CHANGELOG line; after #51 lower
+  it to 0. Side benefit: 18 receipts/night sample FYI-ALLOW rate;
+  after #51 the financial axis time series shows ok-01/02/03
+  flipping false_BLOCK → ALLOW. ADR-0019 drain false-ALLOW
+  threshold is now paired with in-scope false-BLOCK measurement.
+  No `financial_pair_pass` / trade-mode change.
 - **Health `rate_limit` + limiter-aware `ready` (issue #43):**
   `GET /sentinel/health` now includes `rate_limit: "redis" | "in_memory" |
   "unavailable"`. `ready` is false when Redis is configured-but-invalid
