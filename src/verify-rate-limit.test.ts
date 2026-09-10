@@ -20,18 +20,19 @@ vi.mock('./billing.js', () => ({
   recordBillingEvent: vi.fn(async () => undefined),
 }));
 
-const x402Gate = vi.fn(async () => ({ allowed: true, paymentMethod: 'api-key' }));
 vi.mock('./middleware/x402.js', () => ({
-  x402Gate,
+  x402Gate: vi.fn(async () => ({ allowed: true, paymentMethod: 'api-key' })),
 }));
 
 import handler from '../api/sentinel/verify.js';
 import { verify } from './engine/index.js';
 import { recordBillingEvent } from './billing.js';
+import { x402Gate } from './middleware/x402.js';
 import { _resetLimiters } from './auth.js';
 
 const verifyMock = vi.mocked(verify);
 const billingMock = vi.mocked(recordBillingEvent);
+const x402GateMock = vi.mocked(x402Gate);
 
 function mockRes() {
   const headers: Record<string, string> = {};
@@ -89,7 +90,7 @@ describe('POST /sentinel/verify rate-limit before x402', () => {
   beforeEach(() => {
     verifyMock.mockReset();
     billingMock.mockReset();
-    x402Gate.mockClear();
+    x402GateMock.mockClear();
     process.env.SERV_API_KEY = SECRET;
     delete process.env.SENTINEL_X402_ENABLED;
     delete process.env.SENTINEL_AUTH_REQUIRED;
@@ -113,7 +114,7 @@ describe('POST /sentinel/verify rate-limit before x402', () => {
     expect(ctx.headers['Retry-After']).toBe(String(RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S));
     expect(ctx.body).toMatchObject({ code: 'RATE_LIMIT_UNAVAILABLE' });
     expect(ctx.body).not.toHaveProperty('verdict');
-    expect(x402Gate).not.toHaveBeenCalled();
+    expect(x402GateMock).not.toHaveBeenCalled();
     expect(verifyMock).not.toHaveBeenCalled();
     expect(billingMock).not.toHaveBeenCalled();
   });
