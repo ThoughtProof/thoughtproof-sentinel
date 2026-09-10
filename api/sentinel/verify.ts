@@ -160,6 +160,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const promotionReason = processedResponse.meta.promotion?.reason;
     const mandateKind = processedResponse.meta.promotion?.mandate_kind;
     const actionKind = processedResponse.meta.promotion?.action_kind;
+    const mandateKindSource = processedResponse.meta.promotion?.mandate_kind_source;
+    const actionKindSource = processedResponse.meta.promotion?.action_kind_source;
     const unknownAction = processedResponse.meta.promotion?.unknown_action;
     const unknownMandate = processedResponse.meta.promotion?.unknown_mandate;
     const unclassifiedAbstention = processedResponse.meta.promotion?.unclassified_abstention;
@@ -170,6 +172,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `${promotionReason ? ` promotion=${promotionReason}` : ''}` +
         `${mandateKind ? ` mandate_kind=${mandateKind}` : ''}` +
         `${actionKind ? ` action_kind=${actionKind}` : ''}` +
+        `${mandateKindSource ? ` mandate_kind_source=${mandateKindSource}` : ''}` +
+        `${actionKindSource ? ` action_kind_source=${actionKindSource}` : ''}` +
         `${unknownAction !== undefined ? ` unknown_action=${unknownAction ? 1 : 0}` : ''}` +
         `${unknownMandate !== undefined ? ` unknown_mandate=${unknownMandate ? 1 : 0}` : ''}` +
         `${unclassifiedAbstention !== undefined ? ` unclassified_abstention=${unclassifiedAbstention ? 1 : 0}` : ''}`,

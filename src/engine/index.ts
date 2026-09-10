@@ -218,13 +218,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
                     ? {
                         action_kind: actionAuthKind.action_kind,
                         mandate_kind: actionAuthKind.mandate_kind,
+                        action_kind_source: actionAuthKind.action_kind_source,
+                        mandate_kind_source: actionAuthKind.mandate_kind_source,
                         ...(unknownKinds ?? {}),
                         unclassified_abstention: unclassifiedAbstention,
                       }
                     : {}),
                   release_id: releaseId,
                   policy:
-                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain',
+                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-host-declared-kinds',
                 },
               }
             : {}),
@@ -324,6 +326,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         ? {
             action_kind: actionAuthKind.action_kind,
             mandate_kind: actionAuthKind.mandate_kind,
+            action_kind_source: actionAuthKind.action_kind_source,
+            mandate_kind_source: actionAuthKind.mandate_kind_source,
             ...(unknownKinds ?? {}),
             unclassified_abstention: unclassifiedAbstention,
           }
@@ -336,7 +340,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         process.env.RELEASE_ID ||
         undefined,
       policy:
-        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain',
+        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-host-declared-kinds',
     };
   }
 

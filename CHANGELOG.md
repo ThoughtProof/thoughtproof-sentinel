@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Added
+
+- **Host-declared `mandate.kind` / `action.kind` (issue #51):** optional
+  `ActionKind` on the verify mandate (`informational` | `value_transfer` |
+  `permission` | `deploy_ship` | `unknown`). Present + valid host kinds
+  win over prose classification; omitted → prose fallback; declared
+  `unknown` stays fail-closed (no public ALLOW — #48/#49). MCP
+  `verify_before_action` maps `action.kind` → `mandate.action.kind`.
+  Receipts record `mandate_kind_source` / `action_kind_source`
+  (`host` | `prose`) on promotion meta. Structured
+  `granted.maxAmount` / `action.amount` / recipient / allowance are
+  preferred for the authorization gate and financial-axis hints when
+  present (amounts and addresses as data — no new regex dual). Gate
+  may ADD BLOCKs / UNCERTAIN only; no `financial_pair_pass` /
+  `informational_pair_pass` ALLOW. Trust-first, coverage-later.
+  Companion: thoughtproof-mcp#21 (claim framing + passing kinds).
+  Trade modes untouched.
+
 ### Changed
 
 - **Prompt-only #55: 0x FAIL scoped to informational/notify (not a financial ALLOW fix):**

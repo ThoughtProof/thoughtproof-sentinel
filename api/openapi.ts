@@ -112,15 +112,45 @@ const spec = {
                   mandate: {
                     type: 'object',
                     description:
-                      'Optional machine-readable authorization mandate for action_authorization mode. Enables deterministic gate checks (amount limits, recipient allowlist) before the LLM.',
+                      'Optional machine-readable authorization mandate for action_authorization mode. Enables deterministic gate checks (amount limits, recipient allowlist) before the LLM. Optional mandate.kind / mandate.action.kind (ActionKind) are host-declared; prose classifies only when omitted. MCP action.kind maps to mandate.action.kind. Declared unknown is fail-closed (no public ALLOW).',
                     properties: {
+                      kind: {
+                        type: 'string',
+                        enum: [
+                          'informational',
+                          'value_transfer',
+                          'permission',
+                          'deploy_ship',
+                          'unknown',
+                        ],
+                        description:
+                          'Host-declared mandate kind (issue #51). Preferred over prose when present and valid.',
+                      },
                       granted: {
                         type: 'object',
-                        description: 'Authorized parameters (maxAmount, allowedRecipients, etc.)',
+                        description:
+                          'Authorized parameters (maxAmount, asset, recipient, allowUnlimited). Preferred for the financial gate when present — amounts and addresses as data.',
                       },
                       action: {
                         type: 'object',
-                        description: 'Proposed action to check against the mandate',
+                        description:
+                          'Proposed action to check against the mandate. kind is the host-declared action kind (MCP action.kind).',
+                        properties: {
+                          kind: {
+                            type: 'string',
+                            enum: [
+                              'informational',
+                              'value_transfer',
+                              'permission',
+                              'deploy_ship',
+                              'unknown',
+                            ],
+                          },
+                          amount: { type: 'number' },
+                          asset: { type: 'string' },
+                          recipient: { type: 'string' },
+                          allowance: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                        },
                       },
                     },
                   },

@@ -186,9 +186,23 @@ Trade modes untouched.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.
 
-**Target architecture (issue #47, not a host API in this ADR):** the host
-declares `mandate.kind` / `action.kind`; prose classifiers are a fallback;
-`unknown` → fail-closed. Sentinel does not invent that host contract here.
+**Host-declared kinds (issue #51, implements the #47 target):** the host
+MAY declare `mandate.kind` and `mandate.action.kind` on
+`POST /sentinel/verify` (`ActionKind`: `informational` | `value_transfer`
+| `permission` | `deploy_ship` | `unknown`). MCP `verify_before_action`
+maps `action.kind` → `mandate.action.kind` (companion thoughtproof-mcp#21
+— claim framing + passing kinds; do not block on MCP merge). Present +
+valid host kinds are preferred over prose classification. Omitted →
+prose fallback. Declared or classified `unknown` → fail-closed (no
+public ALLOW). Receipts record `mandate_kind_source` /
+`action_kind_source` (`host` | `prose`). Structured financial fields
+already on the mandate (`granted.maxAmount`, `action.amount` /
+recipient / allowance) are preferred for the deterministic
+authorization gate when present — amounts and addresses as data, not a
+second regex. **Trust-first, coverage-later.** No
+`financial_pair_pass` / `informational_pair_pass` ALLOW promotion.
+The gate may ADD BLOCKs / UNCERTAIN; it never upgrades cascade BLOCK →
+ALLOW via prose predicates.
 
 **Validation gate (before any live gating)**
 - A labeled scenario suite (in-scope ALLOWs + over-scope/injection BLOCKs) with

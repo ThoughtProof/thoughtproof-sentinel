@@ -86,6 +86,9 @@ export interface SentinelVerifyRequest {
    * hard-checks binary/unfixable authority violations (amount overshoot,
    * recipient mismatch, unlimited approval) BEFORE the LLM. Ignored by all
    * other modes. See engine/authorization-gate.ts.
+   *
+   * Issue #51: optional `mandate.kind` and `mandate.action.kind` (`ActionKind`).
+   * MCP `verify_before_action` maps host `action.kind` → `mandate.action.kind`.
    */
   mandate?: AuthorizationMandate;
   /**
@@ -358,6 +361,13 @@ export interface SentinelVerifyResponse {
       /** Classifier kinds (issues #38 / #47 allowlist). Present on action_authorization. */
       action_kind?: string;
       mandate_kind?: string;
+      /**
+       * Where each kind came from (issue #51). `host` = declared on
+       * `mandate.kind` / `mandate.action.kind` and valid. `prose` = classifier
+       * fallback. Independent per side (mixed host+prose is allowed).
+       */
+      action_kind_source?: 'host' | 'prose';
+      mandate_kind_source?: 'host' | 'prose';
       /** Per-request unknown-kind flags (issue #47 abstention counters). */
       unknown_action?: boolean;
       unknown_mandate?: boolean;

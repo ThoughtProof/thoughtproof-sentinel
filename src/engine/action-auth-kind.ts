@@ -59,12 +59,19 @@
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`) plus a small DE informational set
  * (Informiere, Info an, Bescheid geben, Rückmeldung, Status an).
- * Target architecture: host-declared `mandate.kind` / `action.kind`
- * (companion thoughtproof-mcp#21); prose is fallback; `unknown` →
- * fail-closed. This file does not invent that host API.
+ *
+ * Host-declared kinds (issue #51): `mandate.kind` / `mandate.action.kind`
+ * (MCP `action.kind` maps onto the latter). Present + valid `ActionKind`
+ * wins over prose. Omitted → prose fallback. Declared `unknown` stays
+ * `unknown` (fail-closed; no public ALLOW) — do not "help" with prose.
+ * Receipts record `mandate_kind_source` / `action_kind_source`
+ * (`host` | `prose`). Structured `granted.maxAmount` / `action.amount`
+ * / recipient / allowance are preferred for the financial axes when
+ * present (data, not a second regex). No pair-pass ALLOW promotion.
  */
 
 import type { AuthorizationMandate } from './authorization-gate.js';
+import { allowanceLooksUnlimited } from './authorization-gate.js';
 import {
   MCP_EVIDENCE_ACTION_LABEL,
   MCP_EVIDENCE_MANDATE_LABEL,
@@ -72,12 +79,26 @@ import {
   MCP_EVIDENCE_USER_MANDATE_LABEL,
 } from '../step-quote-provenance.js';
 
-export type ActionKind =
-  | 'informational'
-  | 'value_transfer'
-  | 'permission'
-  | 'deploy_ship'
-  | 'unknown';
+export const ACTION_KINDS = [
+  'informational',
+  'value_transfer',
+  'permission',
+  'deploy_ship',
+  'unknown',
+] as const;
+
+export type ActionKind = (typeof ACTION_KINDS)[number];
+
+/** Where a resolved kind came from (issue #51 receipt). */
+export type ActionKindSource = 'host' | 'prose';
+
+/** Present + valid host kind; invalid / omitted → undefined (prose fallback). */
+export function parseHostActionKind(raw: unknown): ActionKind | undefined {
+  if (typeof raw !== 'string') return undefined;
+  return (ACTION_KINDS as readonly string[]).includes(raw)
+    ? (raw as ActionKind)
+    : undefined;
+}
 
 export interface ActionAuthSections {
   mandate: string;
@@ -89,6 +110,10 @@ export interface ActionAuthSections {
 export interface ActionAuthClassification {
   action_kind: ActionKind;
   mandate_kind: ActionKind;
+  /** `host` when `mandate.action.kind` was present and valid. */
+  action_kind_source: ActionKindSource;
+  /** `host` when `mandate.kind` was present and valid. */
+  mandate_kind_source: ActionKindSource;
   value_transfer: boolean;
   permission_grant: boolean;
   named_recipient_in_mandate: boolean;
@@ -413,14 +438,60 @@ function firstSpendNotional(text: string): number | null {
 }
 
 /**
+ * Structured financial axes from `req.mandate` (issue #51). Null when
+ * the pair is not machine-readable — caller then uses prose fallback.
+ * Never invents a second regex; amounts/addresses are data.
+ */
+function structuredActionAmount(mandate?: AuthorizationMandate): number | null {
+  const amt = mandate?.action?.amount;
+  return typeof amt === 'number' && Number.isFinite(amt) ? amt : null;
+}
+
+function structuredGrantedMax(mandate?: AuthorizationMandate): number | null {
+  const max = mandate?.granted?.maxAmount;
+  return typeof max === 'number' && Number.isFinite(max) ? max : null;
+}
+
+function structuredAmountWithinGrant(mandate?: AuthorizationMandate): boolean | null {
+  const actionAmt = structuredActionAmount(mandate);
+  const mandateAmt = structuredGrantedMax(mandate);
+  if (actionAmt == null || mandateAmt == null) return null;
+  if (allowanceLooksUnlimited(mandate?.action?.allowance)) return false;
+  return actionAmt <= mandateAmt * (1 + AMOUNT_COMPAT_TOLERANCE);
+}
+
+function structuredRecipientMatch(mandate?: AuthorizationMandate): boolean | null {
+  const g = mandate?.granted?.recipient;
+  const a = mandate?.action?.recipient;
+  if (typeof g !== 'string' || !g.trim() || typeof a !== 'string' || !a.trim()) {
+    return null;
+  }
+  return g.trim().toLowerCase() === a.trim().toLowerCase();
+}
+
+function structuredPermissionUnbounded(mandate?: AuthorizationMandate): boolean | null {
+  if (!mandate?.action || mandate.action.allowance === undefined || mandate.action.allowance === null) {
+    return null;
+  }
+  return allowanceLooksUnlimited(mandate.action.allowance);
+}
+
+/**
  * Bounded permission × value_transfer mandate: not unbounded, and the
  * approved amount is exact / within the mandated spend notional.
- * Fail-closed when either side has no parseable amount.
+ * Prefer structured `granted.maxAmount` / `action.amount` / allowance
+ * when present (issue #51). Fail-closed when either side has no
+ * parseable amount.
  */
 export function boundedPermissionCompatibleWithMandate(
   actionText: string,
   mandateText: string,
+  mandate?: AuthorizationMandate,
 ): boolean {
+  const structuredUnbounded = structuredPermissionUnbounded(mandate);
+  if (structuredUnbounded === true) return false;
+  const structured = structuredAmountWithinGrant(mandate);
+  if (structured !== null) return structured;
   if (permissionIsUnbounded(actionText) || permissionIsUnbounded(mandateText)) {
     return false;
   }
@@ -448,12 +519,20 @@ function firstTokenSpendNotional(text: string): number | null {
 }
 
 /**
- * Amount at or below the granted figure. Prefers token notionals so a
- * limit-order price (`$4,000`) does not inflate the mandate spend (ok-03
- * 0.5 WETH vs drain-04 8 WETH). Fail-closed when either side has no
- * parseable amount, or the action is unbounded.
+ * Amount at or below the granted figure. Prefers structured
+ * `granted.maxAmount` / `action.amount` when both are present
+ * (issue #51). Else token notionals so a limit-order price (`$4,000`)
+ * does not inflate the mandate spend (ok-03 0.5 WETH vs drain-04
+ * 8 WETH). Fail-closed when either side has no parseable amount, or
+ * the action is unbounded.
  */
-export function amountAtOrBelowGranted(actionText: string, mandateText: string): boolean {
+export function amountAtOrBelowGranted(
+  actionText: string,
+  mandateText: string,
+  mandate?: AuthorizationMandate,
+): boolean {
+  const structured = structuredAmountWithinGrant(mandate);
+  if (structured !== null) return structured;
   if (!actionText || !mandateText) return false;
   if (permissionIsUnbounded(actionText)) return false;
   const mandateSpan = mandateSpendSpan(mandateText);
@@ -470,14 +549,22 @@ function oxTokens(text: string): string[] {
 }
 
 /**
- * Every 0x token named in the action also appears in the mandate.
- * Fail toward silence when the action names no 0x (named-payee-only
- * stays on gold-step prose; the live #55 hole is 0x+amount).
+ * Recipient authorized: structured `granted.recipient` /
+ * `action.recipient` when both present (issue #51). Else every 0x
+ * token named in the action also appears in the mandate. Fail toward
+ * silence when the action names no 0x (named-payee-only stays on
+ * gold-step prose; the live #55 hole is 0x+amount).
  */
-export function financialRecipientAuthorized(mandate: string, action: string): boolean {
-  const actionTokens = oxTokens(action);
+export function financialRecipientAuthorized(
+  mandateText: string,
+  actionText: string,
+  mandate?: AuthorizationMandate,
+): boolean {
+  const structured = structuredRecipientMatch(mandate);
+  if (structured !== null) return structured;
+  const actionTokens = oxTokens(actionText);
   if (actionTokens.length === 0) return false;
-  const mandateLc = mandateSpendSpan(mandate).toLowerCase();
+  const mandateLc = mandateSpendSpan(mandateText).toLowerCase();
   return actionTokens.every((t) => mandateLc.includes(t));
 }
 
@@ -486,6 +573,8 @@ export interface ActionAuthKindPairingContext {
   actionText?: string | null;
   mandateText?: string | null;
   boundedPermissionCompatible?: boolean | null;
+  /** Structured mandate — preferred for amount/recipient when present. */
+  mandate?: AuthorizationMandate | null;
 }
 
 export const UNCLASSIFIED_ABSTENTION_REASON =
@@ -536,7 +625,11 @@ export function mandatePositivelyMatchesAction(
       if (context?.boundedPermissionCompatible === true) return true;
       if (context?.boundedPermissionCompatible === false) return false;
       if (context?.actionText && context?.mandateText) {
-        return boundedPermissionCompatibleWithMandate(context.actionText, context.mandateText);
+        return boundedPermissionCompatibleWithMandate(
+          context.actionText,
+          context.mandateText,
+          context.mandate ?? undefined,
+        );
       }
       return false;
     }
@@ -665,30 +758,42 @@ export function classifyActionAuthKind(
     mixedTransfer ||
     (typeof mandate?.action?.amount === 'number' && Number.isFinite(mandate.action.amount));
 
-  let action_kind = classifyBlob(actionText);
-  let mandate_kind = classifyBlob(mandateText);
+  // Issue #51: host-declared kinds win when present and valid. Declared
+  // `unknown` is a host kind (fail-closed) — do not overwrite with prose.
+  const hostActionKind = parseHostActionKind(mandate?.action?.kind);
+  const hostMandateKind = parseHostActionKind(mandate?.kind);
+  const action_kind_source: ActionKindSource = hostActionKind ? 'host' : 'prose';
+  const mandate_kind_source: ActionKindSource = hostMandateKind ? 'host' : 'prose';
 
+  let action_kind = hostActionKind ?? classifyBlob(actionText);
+  let mandate_kind = hostMandateKind ?? classifyBlob(mandateText);
+
+  // Prose overrides only when the host did not declare that side.
   // Structured spend / approval / mixed transfer wins over a notify-shaped claim.
-  if (permission_grant && action_kind === 'informational') action_kind = 'permission';
-  if (value_transfer && action_kind === 'informational') action_kind = 'value_transfer';
-  if (permission_grant && action_kind === 'unknown') action_kind = 'permission';
-  if (value_transfer && action_kind === 'unknown') action_kind = 'value_transfer';
+  if (!hostActionKind) {
+    if (permission_grant && action_kind === 'informational') action_kind = 'permission';
+    if (value_transfer && action_kind === 'informational') action_kind = 'value_transfer';
+    if (permission_grant && action_kind === 'unknown') action_kind = 'permission';
+    if (value_transfer && action_kind === 'unknown') action_kind = 'value_transfer';
+  }
 
   // Positive ship/pin instruction only — do not flip "no deploy" / "kein
   // Deploy" FYI mandates just because the word "deploy" appears in a negation.
-  const mandateHasPositiveShip = hasPositiveShipInstruction(mandateText);
-  if (mandateHasPositiveShip && mandate_kind !== 'value_transfer' && mandate_kind !== 'permission') {
-    mandate_kind = 'deploy_ship';
-  } else if (mandate_kind === 'deploy_ship' && !mandateHasPositiveShip) {
-    // leadingKind saw a deploy head that was only a negated mention, or
-    // classifyBlob raced ahead of negation. Prefer informational when the
-    // mandate also has an info axis; otherwise unknown (allowlist fail-closed).
-    mandate_kind =
-      INFO_HEAD_RE.test(mandateText.trim()) || INFO_ANY_RE.test(mandateText)
-        ? 'informational'
-        : 'unknown';
-  } else if (mandate_kind === 'unknown' && DEPLOY_HEAD_RE.test(mandateText.trim())) {
-    if (mandateHasPositiveShip) mandate_kind = 'deploy_ship';
+  if (!hostMandateKind) {
+    const mandateHasPositiveShip = hasPositiveShipInstruction(mandateText);
+    if (mandateHasPositiveShip && mandate_kind !== 'value_transfer' && mandate_kind !== 'permission') {
+      mandate_kind = 'deploy_ship';
+    } else if (mandate_kind === 'deploy_ship' && !mandateHasPositiveShip) {
+      // leadingKind saw a deploy head that was only a negated mention, or
+      // classifyBlob raced ahead of negation. Prefer informational when the
+      // mandate also has an info axis; otherwise unknown (allowlist fail-closed).
+      mandate_kind =
+        INFO_HEAD_RE.test(mandateText.trim()) || INFO_ANY_RE.test(mandateText)
+          ? 'informational'
+          : 'unknown';
+    } else if (mandate_kind === 'unknown' && DEPLOY_HEAD_RE.test(mandateText.trim())) {
+      if (mandateHasPositiveShip) mandate_kind = 'deploy_ship';
+    }
   }
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
@@ -722,7 +827,7 @@ export function classifyActionAuthKind(
   const bounded_permission_compatible =
     action_kind === 'permission' &&
     mandateIsPositivelyValueTransfer(mandate_kind) &&
-    boundedPermissionCompatibleWithMandate(actionText, mandateText);
+    boundedPermissionCompatibleWithMandate(actionText, mandateText, mandate);
   const permissionVsNonMatchingMandate =
     action_kind === 'permission' &&
     !mandateIsPositivelyPermission(mandate_kind) &&
@@ -747,12 +852,13 @@ export function classifyActionAuthKind(
       actionText,
       mandateText,
       boundedPermissionCompatible: bounded_permission_compatible,
+      mandate,
     });
-  const amount_within_grant = amountAtOrBelowGranted(actionText, mandateText);
+  const amount_within_grant = amountAtOrBelowGranted(actionText, mandateText, mandate);
   const financialPassHint =
     financial_pair_match &&
     amount_within_grant &&
-    financialRecipientAuthorized(mandateText, actionText);
+    financialRecipientAuthorized(mandateText, actionText, mandate);
 
   const silent =
     ((mixedTransfer || action_kind === 'value_transfer') &&
@@ -805,6 +911,8 @@ export function classifyActionAuthKind(
   return {
     action_kind,
     mandate_kind,
+    action_kind_source,
+    mandate_kind_source,
     value_transfer,
     permission_grant,
     named_recipient_in_mandate,

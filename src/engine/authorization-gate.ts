@@ -34,6 +34,7 @@
  */
 
 import type { SentinelVerdict } from '../types.js';
+import type { ActionKind } from './action-auth-kind.js';
 
 /** Effectively-unlimited allowance threshold. MAX_UINT256 ≈ 1.16e77; any
  * allowance at or above this magnitude is an unlimited-approval in practice.
@@ -53,6 +54,12 @@ export type GateMode = 'shadow' | 'enforce';
  * requests. All fields optional — the gate checks only the pairs it can read
  * with confidence and stays silent otherwise. */
 export interface AuthorizationMandate {
+  /**
+   * Host-declared mandate kind (issue #51). When present and a valid
+   * `ActionKind`, classification prefers this over prose. Omitted →
+   * prose fallback. `unknown` is valid and fail-closed (no public ALLOW).
+   */
+  kind?: ActionKind;
   /** What the principal authorized. */
   granted?: {
     /** Maximum amount the principal authorized (in the asset's units). */
@@ -66,6 +73,13 @@ export interface AuthorizationMandate {
   };
   /** What the agent proposes to do. */
   action?: {
+    /**
+     * Host-declared action kind (issue #51). Sentinel contract for MCP
+     * `action.kind`: map onto `mandate.action.kind`. Same rules as
+     * `mandate.kind` — present+valid wins; omitted → prose; `unknown`
+     * fail-closed.
+     */
+    kind?: ActionKind;
     /** Amount the action moves/spends (in the asset's units). */
     amount?: number;
     /** Asset symbol or address the action touches. */
@@ -105,7 +119,7 @@ export interface AuthorizationGateResult {
 /** Parse an allowance value into a finite number, or detect the unlimited
  * sentinels. Returns Infinity for unlimited, a finite number when parseable,
  * or null on ambiguity (→ silence). */
-function parseAllowance(allowance: string | number | undefined): number | null {
+export function parseAllowance(allowance: string | number | undefined): number | null {
   if (allowance === undefined || allowance === null) return null;
   if (typeof allowance === 'number') {
     return Number.isFinite(allowance) ? allowance : null;
@@ -132,6 +146,14 @@ function parseAllowance(allowance: string | number | undefined): number | null {
   return null; // unparseable → silence
 }
 
+/** True when a structured allowance is unlimited / effectively unbounded. */
+export function allowanceLooksUnlimited(
+  allowance: string | number | undefined,
+): boolean {
+  const n = parseAllowance(allowance);
+  return n !== null && n >= UNLIMITED_ALLOWANCE_THRESHOLD;
+}
+
 /** Normalize an identity (address/handle) for comparison. */
 function normId(x: string | undefined): string | null {
   if (typeof x !== 'string') return null;
@@ -154,8 +176,25 @@ export function runAuthorizationGate(
     const granted = mandate?.granted;
     const action = mandate?.action;
 
-    // No machine-readable mandate → silent. LLM path handles everything.
-    if (!granted && !action) {
+    // No machine-readable financial fields → silent. Host-declared kinds
+    // alone do not engage the numeric/identity gate (issue #51).
+    const hasFinancialGranted = !!(
+      granted &&
+      (typeof granted.maxAmount === 'number' ||
+        (typeof granted.recipient === 'string' && granted.recipient.trim() !== '') ||
+        granted.allowUnlimited === true ||
+        (typeof granted.asset === 'string' && granted.asset.trim() !== ''))
+    );
+    const hasFinancialAction = !!(
+      action &&
+      (typeof action.amount === 'number' ||
+        (typeof action.recipient === 'string' && action.recipient.trim() !== '') ||
+        (action.allowance !== undefined &&
+          action.allowance !== null &&
+          String(action.allowance).trim() !== '') ||
+        (typeof action.asset === 'string' && action.asset.trim() !== ''))
+    );
+    if (!hasFinancialGranted && !hasFinancialAction) {
       return { mode, wouldBlock: false, enforcedVerdict: null, violations: [], silent: true };
     }
 

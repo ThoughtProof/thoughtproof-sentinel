@@ -15,6 +15,15 @@ describe('runAuthorizationGate — fail toward silence', () => {
     expect(r.wouldBlock).toBe(false);
   });
 
+  it('is silent when only host-declared kinds are present (issue #51)', () => {
+    const r = runAuthorizationGate(
+      { kind: 'value_transfer', action: { kind: 'value_transfer' } },
+      'enforce',
+    );
+    expect(r.silent).toBe(true);
+    expect(r.wouldBlock).toBe(false);
+  });
+
   it('is silent on a clean exact-scope action (no violation)', () => {
     const m: AuthorizationMandate = {
       granted: { maxAmount: 200, recipient: '0xACME', asset: 'USDC' },
