@@ -161,23 +161,27 @@ fail-open. Unknown or mismatched mandate BLOCKs
 `objective_mismatch_fail_closed`. Every action class needs a
 positively matching mandate on the prose path — MCP sends no
 structured `req.mandate`, so the financial gate never runs.
-#55 is **prompt-only calibration**: the #34/#48 0x/transfer FAIL
-applies only when the action is informational/notify (hidden
-transfer framed as FYI). A positively matching financial pair with
-amount at or below the granted figure and an authorized 0x gets a
-`SENTINEL_AXIS_HINT` PASS trigger (`financial_pair_match=true`,
-`amount_within_grant=true`) on the question and gold steps —
-same class as the #46 FYI PASS hint (grade faithful / supported,
-not unfaithful; classifier already established the pair). The
-financial POSITIVE PASS sits **before** the informational/notify
-0x FAIL. Hints influence cascade TE grading only. **No
-deterministic ALLOW short-circuit** (Non-Goal from #34/#37): the
-kind/promotion layer may ADD BLOCKs (and UNCERTAIN) but never
+#55 is **prompt-only calibration**, not a live financial ALLOW fix.
+The #34/#48 0x/transfer FAIL applies only when the action is
+informational/notify (hidden transfer framed as FYI). A positively
+matching financial pair with amount at or below the granted figure
+and an authorized 0x gets a `SENTINEL_AXIS_HINT` PASS trigger
+(`financial_pair_match=true`, `amount_within_grant=true`) on the
+question and gold steps — same class as the #46 FYI PASS hint.
+Hints influence cascade TE grading only. **Live cascade ALLOW for
+exact pays is not functionally working:** suite `ok-01` / `ok-02` /
+`ok-03` (`expect: allow`) remain a **known false_BLOCK** on
+Preview/prod since #34 (`already_block`, `decision_basis: cascade`).
+Goal path is structured mandate (issue #51 / thoughtproof-mcp#21).
+**No deterministic ALLOW short-circuit** (Non-Goal from #34/#37):
+the kind/promotion layer may ADD BLOCKs (and UNCERTAIN) but never
 upgrades a cascade BLOCK to ALLOW on prose-pair predicates
 (`amountAtOrBelowGranted`, `financialRecipientAuthorized`, kind-
-pair match alone). Drain overshoot / wrong recipient stay silent
-(no PASS hint); MaxUint256 / pay-vs-ship stay kind-BLOCK. Trade
-modes untouched.
+pair match alone). A `banned=0` ratchet keeps
+`financial_pair_pass` / `informational_pair_pass` out of
+`ActionAuthPromotionReason`. Drain overshoot / wrong recipient stay
+silent (no PASS hint); MaxUint256 / pay-vs-ship stay kind-BLOCK.
+Trade modes untouched.
 #37 remains mitigation lineage.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.

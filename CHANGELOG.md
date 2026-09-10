@@ -2,32 +2,31 @@
 
 ## Unreleased
 
-### Fixed
+### Changed
 
-- **Cascade 0x/transfer FAIL over-broad on in-mandate payments (issue #55):**
+- **Prompt-only #55: 0x FAIL scoped to informational/notify (not a financial ALLOW fix):**
   After #34/#48 the gold-step / question FAIL said roughly "FAIL if
   the action also sends/transfers/pays/wires/swaps/bridges a number
   or names a 0x address, even when framed as notify/FYI." Intent was
-  notify-framed hidden transfers; as written the live cascade
-  fail-closed every legitimate payment that named a 0x recipient
-  (`ok-01` / `ok-02` / `ok-03` → `already_block`, `decision_basis:
-  cascade`). Same class as #46 Fall 1. **Prompt-only calibration:**
-  the FAIL now applies only to an **informational/notify** action.
-  Matching financial pairs emit a positive PASS hint
-  (`financial_pair_match=true` + `amount_within_grant=true`, no
-  `objective_mismatch`) so cascade TE can grade amount and recipient
-  steps faithful / supported when the amount is at or below the
-  granted figure and every action 0x is in the mandate. Overshoot,
-  injected recipient, unbounded / MaxUint256, and pay-vs-ship stay
-  silent or kind-BLOCK. Financial POSITIVE PASS sits **before** FAIL
-  and states the classifier already established the matching pair /
-  amount ≤ grant / authorized 0x. Redundant "even when framed as
-  notify/FYI" dropped. Preview `7e41610` still false-BLOCKed
-  ok-01/02/03 (same 4×0.5 TE) — prompt churn cannot move serv-nano.
-  **No deterministic ALLOW short-circuit** (Non-Goal from #34/#37):
-  the kind/promotion layer may ADD BLOCKs (and UNCERTAIN) but never
-  upgrades a cascade BLOCK to ALLOW on prose-pair predicates. #53/#54
-  allowlist unchanged. Trade modes untouched.
+  notify-framed hidden transfers. This PR only narrows that FAIL to
+  an **informational/notify** action and keeps financial / FYI PASS
+  hints as cascade TE grading input (`financial_pair_match=true` +
+  `amount_within_grant=true`). Hints are **not** a promotion override.
+  **Live financial ALLOW via cascade for exact pays is not working.**
+  Suite `ok-01` / `ok-02` / `ok-03` (`expect: allow`) are a **known
+  false_BLOCK** on Preview/prod since #34 (`already_block`,
+  `decision_basis: cascade`; serv-nano 4×0.5 TE). Prompt churn cannot
+  move the live cascade. Goal path is structured mandate (issue #51 /
+  thoughtproof-mcp#21). **No deterministic ALLOW short-circuit**
+  (Non-Goal #34/#37): kind/promotion may ADD BLOCKs (and UNCERTAIN)
+  but never upgrades a cascade BLOCK to ALLOW on prose-pair
+  predicates. A `banned=0` ratchet locks
+  `financial_pair_pass` / `informational_pair_pass` out of
+  `ActionAuthPromotionReason`. #53/#54 allowlist unchanged. Trade
+  modes untouched.
+
+### Fixed
+
 - **value_transfer / permission vs non-matching mandate allowlist (issue #53):**
   After #49, `informationalActionMayPublicAllow('value_transfer', 'unknown')`
   and `('permission', 'unknown')` were still `true`. Prod receipt
