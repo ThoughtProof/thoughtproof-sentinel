@@ -33,7 +33,7 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash, randomBytes } from 'crypto';
-import { Redis } from '@upstash/redis';
+import type { Redis } from '@upstash/redis';
 import { TIER_CONFIGS } from '../tiers.js';
 import type { SentinelTier, PaymentPlatform } from '../types.js';
 import { buildBazaarExtensions } from './bazaar-extension.js';
@@ -54,6 +54,7 @@ import {
   getXrplConfig,
 } from './xrpl-x402.js';
 import { generateCdpJwt, hasCdpCredentials } from './cdp-jwt.js';
+import { getSharedUpstashRedis } from '../upstash-config.js';
 
 // ── Config ────────────────────────────────────────────────────────────────
 
@@ -72,16 +73,15 @@ const FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL ??
   (hasCdpCredentials() ? CDP_FACILITATOR_URL : 'https://x402.org/facilitator');
 
-// ── Redis (shared with rate limiting) ─────────────────────────────────────
+// ── Redis (shared with rate limiting; trim + fail-fast via upstash-config) ─
 
-let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (_redis) return _redis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  _redis = new Redis({ url, token });
-  return _redis;
+  try {
+    return getSharedUpstashRedis();
+  } catch {
+    // Invalid env: treat as unavailable for payment-intent storage.
+    return null;
+  }
 }
 
 // ── Pricing ───────────────────────────────────────────────────────────────

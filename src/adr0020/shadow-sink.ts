@@ -9,8 +9,9 @@
  * - Independent of SHADOW_ADR0020 flag enablement checks (caller decides when to emit)
  */
 
-import { Redis } from '@upstash/redis';
+import type { Redis } from '@upstash/redis';
 import type { ShadowEvent } from './shadow.js';
+import { getSharedUpstashRedis, isUpstashConfigured } from '../upstash-config.js';
 
 export const SHADOW_SINK_TTL_SECONDS = 30 * 24 * 60 * 60; // 30d
 export const SHADOW_SINK_WRITE_TIMEOUT_MS = 200;
@@ -63,7 +64,8 @@ export function resolveShadowSinkEnv(env: NodeJS.ProcessEnv = process.env): Shad
 }
 
 export function isShadowSinkConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN);
+  // Use resolved/trimmed config — raw env with only whitespace must not count.
+  return isUpstashConfigured(env);
 }
 
 export function shadowSinkKeyPrefix(envName: ShadowSinkEnvName): string {
@@ -89,15 +91,14 @@ function getRedis(env: NodeJS.ProcessEnv = process.env, deps?: ShadowSinkDeps): 
   if (deps?.redis) return deps.redis as Redis;
   if (_redisChecked) return _redis;
   _redisChecked = true;
-  if (!isShadowSinkConfigured(env)) {
+  try {
+    // Shadow sink stays fail-open: invalid env → null, never throw to callers.
+    _redis = getSharedUpstashRedis(env);
+    return _redis;
+  } catch {
     _redis = null;
     return null;
   }
-  _redis = new Redis({
-    url: env.UPSTASH_REDIS_REST_URL!,
-    token: env.UPSTASH_REDIS_REST_TOKEN!,
-  });
-  return _redis;
 }
 
 /** Strip anything that must never land in the sink (defense in depth). */

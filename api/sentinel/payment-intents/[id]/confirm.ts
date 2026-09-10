@@ -6,16 +6,15 @@
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { Redis } from '@upstash/redis';
+import type { Redis } from '@upstash/redis';
+import { getSharedUpstashRedis } from '../../../../src/upstash-config.js';
 
-let _redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (_redis) return _redis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  _redis = new Redis({ url, token });
-  return _redis;
+  try {
+    return getSharedUpstashRedis();
+  } catch {
+    return null;
+  }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
