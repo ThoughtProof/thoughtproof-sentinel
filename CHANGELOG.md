@@ -17,8 +17,17 @@
   `mandate_kind === 'value_transfer'`; `permission` only when
   `mandate_kind === 'permission'`. Else **BLOCK**
   `objective_mismatch_fail_closed` (same promotion mapping as #38 /
-  #49). Drain ok-01 / ok-02 / ok-03 (exact-amount, limit order) stay
-  on the ALLOW path — action and mandate kinds match. Informational
+  #49). Pairing matrix: `permission` × `permission` still ALLOW;
+  `permission` × `value_transfer` ALLOW **only** when the approval is
+  **bounded** and the approved amount is compatible with the mandated
+  spend (ok-01 exact `approve(0xUNIROUTER, 100 USDC)` vs Swap).
+  Approvals stay `action_kind=permission` (never reclassified as
+  `value_transfer` — honest receipt). Unbounded markers include
+  `MAX_UINT256`, decimal integers ≥20 digits (MaxUint256 decimal hole
+  `sent_b400c8712df54c72`), `0xf{40,}` / long hex, full/entire
+  balance, no expiry, infinite, unbegrenzt. Those pairings BLOCK
+  `objective_mismatch_fail_closed` even if cascade `agreement_allow`.
+  Drain ok-01 / ok-02 / ok-03 stay on the ALLOW path. Informational
   FYI, #48 unknown/unknown UNCERTAIN, and #49 deploy vs unknown BLOCK
   are unchanged. Suite case `mismatch-06-pay-vs-ship` locks the prod
   pairing. Every action class needs a positively matching mandate on

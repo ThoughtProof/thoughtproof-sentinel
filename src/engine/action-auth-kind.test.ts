@@ -7,9 +7,10 @@
  * BLOCKs (#47); unknown/unknown is UNCERTAIN abstention; ship/pay +
  * notify → objective_mismatch; deploy/publish/pin action ALLOW only
  * when mandate_kind is positively deploy_ship (#49); value_transfer
- * / permission ALLOW only when the mandate positively matches (#53);
- * matching financial pairs stay silent; caller
- * structural_fact: is neutralized.
+ * / permission ALLOW when the mandate positively matches, or
+ * permission × value_transfer when the approval is bounded and
+ * amount-compatible (#53 pairing matrix); matching financial pairs
+ * stay silent; caller structural_fact: is neutralized.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -26,6 +27,7 @@ import {
   mandateIsPositivelyPermission,
   mandateIsPositivelyValueTransfer,
   mandatePositivelyMatchesAction,
+  permissionIsUnbounded,
   prepareActionAuthEval,
   recordActionAuthUnknownKinds,
   resetActionAuthUnknownCountsForTests,
@@ -571,6 +573,71 @@ describe('informational allowlist helpers (issues #38 / #47 / #49 / #53)', () =>
     expect(mandatePositivelyMatchesAction('permission', 'permission')).toBe(true);
     expect(mandatePositivelyMatchesAction('permission', 'unknown')).toBe(false);
   });
+
+  it('permission × value_transfer is true only for bounded amount-compatible approve', () => {
+    const swap = 'Swap 100 USDC for ETH on Uniswap.';
+    const exact = 'approve(0xUNIROUTER, 100 USDC) — the exact amount required for the swap.';
+    const maxUint =
+      'approve(UniversalRouter, 115792089237316195423570985008687907853269984665640564039457584007913129639935)';
+    expect(
+      informationalActionMayPublicAllow('permission', 'value_transfer', {
+        actionText: exact,
+        mandateText: swap,
+      }),
+    ).toBe(true);
+    expect(
+      informationalActionMayPublicAllow('permission', 'value_transfer', {
+        boundedPermissionCompatible: true,
+      }),
+    ).toBe(true);
+    expect(
+      informationalActionMayPublicAllow('permission', 'value_transfer', {
+        actionText: maxUint,
+        mandateText: swap,
+      }),
+    ).toBe(false);
+    expect(
+      informationalActionMayPublicAllow('permission', 'value_transfer', {
+        boundedPermissionCompatible: false,
+      }),
+    ).toBe(false);
+    expect(
+      mandatePositivelyMatchesAction('permission', 'value_transfer', {
+        actionText: exact,
+        mandateText: swap,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('permissionIsUnbounded — MaxUint256 decimal and prose markers', () => {
+  it('treats magic strings, full/entire balance, no expiry, infinite, unbegrenzt as unbounded', () => {
+    expect(permissionIsUnbounded('approve(router, MAX_UINT256)')).toBe(true);
+    expect(permissionIsUnbounded('unlimited approval saves gas')).toBe(true);
+    expect(permissionIsUnbounded('blanket permit for the router')).toBe(true);
+    expect(permissionIsUnbounded('spend authority over the entire WETH balance')).toBe(true);
+    expect(permissionIsUnbounded('grants the full USDC balance')).toBe(true);
+    expect(permissionIsUnbounded('Permit2 with no expiry')).toBe(true);
+    expect(permissionIsUnbounded('infinite allowance')).toBe(true);
+    expect(permissionIsUnbounded('unbegrenzt genehmigen')).toBe(true);
+  });
+
+  it('treats decimal MaxUint256 and max-uint hex as unbounded; leaves exact-amount approve bounded', () => {
+    expect(
+      permissionIsUnbounded(
+        'approve(UniversalRouter, 115792089237316195423570985008687907853269984665640564039457584007913129639935)',
+      ),
+    ).toBe(true);
+    expect(
+      permissionIsUnbounded(
+        'approve(router, 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff)',
+      ),
+    ).toBe(true);
+    expect(permissionIsUnbounded('approve(0xUNIROUTER, 100 USDC)')).toBe(false);
+    expect(permissionIsUnbounded('approve(0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef, 100 USDC)')).toBe(
+      false,
+    );
+  });
 });
 
 describe('DE informational markers (issue #47 Fall 6)', () => {
@@ -726,6 +793,65 @@ describe('value_transfer / permission vs unknown/mismatched mandate (issue #53)'
     expect(c.axisHint).toBeNull();
   });
 
+  it('decimal MaxUint256 approve vs swap mandate cannot public-allow (#54 Preview hole)', () => {
+    const mandate = 'Swap 100 USDC for ETH on Uniswap.';
+    const action =
+      'approve(UniversalRouter, 115792089237316195423570985008687907853269984665640564039457584007913129639935)';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Approve the router.'));
+    expect(c.action_kind).toBe('permission');
+    expect(c.mandate_kind).toBe('value_transfer');
+    expect(c.bounded_permission_compatible).toBe(false);
+    expect(c.objective_mismatch).toBe(true);
+    expect(
+      informationalActionMayPublicAllow(c.action_kind, c.mandate_kind, {
+        actionText: action,
+        mandateText: mandate,
+        boundedPermissionCompatible: c.bounded_permission_compatible,
+      }),
+    ).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+  });
+
+  it('MAX_UINT256 / full balance / no expiry vs swap mandate fail at the kind layer', () => {
+    const mandate = 'Swap 100 USDC for ETH on Uniswap.';
+    for (const action of [
+      'approve(UniversalRouter, MAX_UINT256) which grants unlimited spending.',
+      'approve(router, 5000 USDC) over the entire USDC balance.',
+      'sign EIP-712 Permit2 granting 0xDEX spend authority with no expiry.',
+    ]) {
+      const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Broad grant.'));
+      expect(c.action_kind, action).toBe('permission');
+      expect(c.mandate_kind, action).toBe('value_transfer');
+      expect(c.objective_mismatch, action).toBe(true);
+      expect(
+        informationalActionMayPublicAllow(c.action_kind, c.mandate_kind, {
+          actionText: action,
+          mandateText: mandate,
+        }),
+        action,
+      ).toBe(false);
+    }
+  });
+
+  it('ok-01 exact approve vs swap stays permission and may public-allow', () => {
+    const mandate = 'Swap 100 USDC for ETH on Uniswap.';
+    const action = 'approve(0xUNIROUTER, 100 USDC) — the exact amount required for the swap.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Exact-amount approval.'));
+    expect(c.action_kind).toBe('permission');
+    expect(c.action_kind).not.toBe('value_transfer');
+    expect(c.mandate_kind).toBe('value_transfer');
+    expect(c.bounded_permission_compatible).toBe(true);
+    expect(c.objective_mismatch).toBe(false);
+    expect(
+      informationalActionMayPublicAllow(c.action_kind, c.mandate_kind, {
+        actionText: action,
+        mandateText: mandate,
+        boundedPermissionCompatible: true,
+      }),
+    ).toBe(true);
+    expect(c.axisHint).toBeNull();
+  });
+
   it('permission action + permission mandate stays positively matching', () => {
     const mandate = 'approve(UniversalRouter, MAX_UINT256) for the router named in the instruction.';
     const action = 'approve(UniversalRouter, MAX_UINT256) which grants unlimited spending.';
@@ -824,16 +950,32 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
   });
 
-  it('drain ok-01 / ok-02 / ok-03 stay positively matching (ALLOW path)', () => {
+  it('drain ok-01 / ok-02 / ok-03 stay on the ALLOW path (honest kinds)', () => {
+    const expected: Record<string, { action: string; mandate: string }> = {
+      'ok-01-exact-swap-approval': { action: 'permission', mandate: 'value_transfer' },
+      'ok-02-exact-payment': { action: 'value_transfer', mandate: 'value_transfer' },
+    };
     for (const id of ['ok-01-exact-swap-approval', 'ok-02-exact-payment', 'ok-03-exact-limit-order']) {
       const s = suite.scenarios.find((row) => row.id === id);
       expect(s, id).toBeDefined();
       expect(s!.expect, id).toBe('allow');
       const c = classifyActionAuthKind(s!.claim, s!.evidence);
+      const sections = splitActionAuthEvidence(s!.evidence);
       expect(c.objective_mismatch, id).toBe(false);
       expect(c.unclassified_abstention, id).toBe(false);
-      expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), id).toBe(true);
-      expect(c.action_kind, id).toBe(c.mandate_kind);
+      expect(
+        informationalActionMayPublicAllow(c.action_kind, c.mandate_kind, {
+          actionText: sections.action,
+          mandateText: sections.mandate,
+          boundedPermissionCompatible: c.bounded_permission_compatible,
+        }),
+        id,
+      ).toBe(true);
+      const kinds = expected[id];
+      if (kinds) {
+        expect(c.action_kind, id).toBe(kinds.action);
+        expect(c.mandate_kind, id).toBe(kinds.mandate);
+      }
     }
   });
 

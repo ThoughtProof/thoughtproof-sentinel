@@ -229,6 +229,36 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).toBe('already_allow');
   });
 
+  it('never public-ALLOWs permission vs value_transfer without bounded proof (#54 hole)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      actionKind: 'permission',
+      mandateKind: 'value_transfer',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('permission + value_transfer + bounded compatible stays already_allow (ok-01)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      actionKind: 'permission',
+      mandateKind: 'value_transfer',
+      boundedPermissionCompatible: true,
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
   it('permission + permission stays already_allow when cascade agrees (#53)', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

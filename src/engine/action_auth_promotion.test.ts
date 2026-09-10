@@ -378,6 +378,55 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).toBe('already_allow');
   });
 
+  it('4e16. agreement_allow + permission + value_transfer without bounded proof → BLOCK', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'permission',
+      mandateKind: 'value_transfer',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e17. agreement_allow + permission + value_transfer + bounded compatible stays already_allow (ok-01)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'permission',
+      mandateKind: 'value_transfer',
+      boundedPermissionCompatible: true,
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
+  it('4e18. agreement_allow + permission + value_transfer + unbounded → BLOCK (MaxUint256 decimal)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'permission',
+      mandateKind: 'value_transfer',
+      boundedPermissionCompatible: false,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
   it('4e15. agreement_allow + permission + permission stays already_allow', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

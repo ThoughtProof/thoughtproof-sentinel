@@ -162,12 +162,20 @@ export interface ActionAuthPromotionInput {
    * — still no public ALLOW. `deploy_ship` requires
    * `mandateKind === 'deploy_ship'` (#49); `value_transfer` requires
    * `mandateKind === 'value_transfer'`; `permission` requires
-   * `mandateKind === 'permission'` (#53). Unknown or mismatched
+   * `mandateKind === 'permission'`, or `value_transfer` plus a bounded
+   * amount-compatible approval (#53 pairing matrix). Kind-only
+   * permission × value_transfer is fail-closed. Unknown or mismatched
    * mandate BLOCKs `objective_mismatch_fail_closed` (same mapping as
    * #38). Omitted kinds do not apply this extra check.
    */
   actionKind?: string | null;
   mandateKind?: string | null;
+  /**
+   * Classifier: permission × value_transfer is a bounded, amount-
+   * compatible approval (ok-01). When omitted, that pairing cannot
+   * already_allow (decimal MaxUint256 hole).
+   */
+  boundedPermissionCompatible?: boolean | null;
 }
 
 /**
@@ -277,7 +285,8 @@ export function resolveActionAuthPromotion(
   // (ship/pay/permission) BLOCKs. Unknown/unknown is UNCERTAIN
   // unclassified_abstention — no ALLOW, but the receipt is not a named
   // objective mismatch. deploy_ship / value_transfer / permission may
-  // ALLOW only when the mandate positively matches that class;
+  // ALLOW only when the mandate positively matches that class
+  // (permission × value_transfer only when bounded + compatible).
   // unknown/mismatched → BLOCK objective_mismatch_fail_closed.
   // Cascade agreement_allow must not fail-open. Omitted kinds skip
   // this check.
@@ -296,6 +305,7 @@ export function resolveActionAuthPromotion(
     !informationalActionMayPublicAllow(
       input.actionKind as ActionKind,
       input.mandateKind as ActionKind,
+      { boundedPermissionCompatible: input.boundedPermissionCompatible },
     );
   if (input.objectiveMismatch === true || informationalAllowlistBlocked) {
     return finish('BLOCK', false, 'objective_mismatch_fail_closed');

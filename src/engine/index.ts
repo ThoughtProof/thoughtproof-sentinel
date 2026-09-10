@@ -77,8 +77,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   // Deterministic kind allowlist (issues #38 / #47 / #49 / #53): notify/FYI
   // may public-ALLOW only when mandate_kind is positively informational;
   // deploy/publish/pin only when positively deploy_ship; value_transfer
-  // only when positively value_transfer; permission only when positively
-  // permission.
+  // only when positively value_transfer; permission when positively
+  // permission, or value_transfer + bounded amount-compatible approval.
   // Computed before the cascade so budget-exhaust and agreement_allow cannot
   // fail-open. Same classifier the mode handler uses for SENTINEL_AXIS_HINT.
   const actionAuthKind =
@@ -286,6 +286,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       objectiveMismatch,
       actionKind: actionAuthKind?.action_kind ?? null,
       mandateKind: actionAuthKind?.mandate_kind ?? null,
+      boundedPermissionCompatible: actionAuthKind?.bounded_permission_compatible === true,
     });
     verdict = decision.publicVerdict;
     promotionMeta = {
