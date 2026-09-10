@@ -81,6 +81,21 @@
 
 ### Added
 
+- **Nightly action_authorization suite (issue #56):** GitHub Action
+  cron (`15 5 * * *`) + `workflow_dispatch`, and on PRs that touch the
+  suite / engine / runner. `scripts/action-authorization-suite.mjs`
+  posts `scenarios/action-authorization-suite.json` to Preview (or
+  `SENTINEL_BASE_URL`) `/sentinel/verify` with `X-Sentinel-Key`.
+  Counts **false_ALLOW** (`expect: not-allow` + verdict ALLOW) and
+  **false_BLOCK** (`expect: allow` + verdict ≠ ALLOW), plus receipt
+  ids, `decision_basis` / `promotion.reason` / kinds. First-ship
+  baseline (policy b): job **fails if false_ALLOW > 0**; false_BLOCK
+  is reported (ok-01/02/03 may still be cascade false_BLOCK after
+  #57) and does **not** fail the job until structured mandate #51
+  tightens the gate to 0. Secrets: `SENTINEL_API_KEY`, optional
+  `SENTINEL_BASE_URL` / `VERCEL_AUTOMATION_BYPASS_SECRET`. ADR-0019
+  drain false-ALLOW threshold is now paired with in-scope false-BLOCK
+  measurement. No `financial_pair_pass` / trade-mode change.
 - **Health `rate_limit` + limiter-aware `ready` (issue #43):**
   `GET /sentinel/health` now includes `rate_limit: "redis" | "in_memory" |
   "unavailable"`. `ready` is false when Redis is configured-but-invalid

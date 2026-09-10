@@ -196,6 +196,23 @@ declares `mandate.kind` / `action.kind`; prose classifiers are a fallback;
 - Shadow-mode parity check on existing `handoff`/`trade_execution` traffic: the
   new mode must not be silently invoked for them.
 
+**Dual threshold measurement (issue #56).** The drain-class **0 false
+ALLOWs** bar is paired with in-scope **false-BLOCK measurement** on
+suite `ok-*` (verdict ∉ {ALLOW} when `expect: allow`). Nightly GitHub
+Action `action-authorization-suite.yml` hits Preview (or
+`SENTINEL_BASE_URL`) `/sentinel/verify` and emits both counters plus
+failing scenario ids and receipt ids.
+
+First-ship gate (policy b — Founder: measure before structured mandate
+#51; after prompt-only #57, `ok-01`/`ok-02`/`ok-03` may still be
+cascade false_BLOCK and must be reported honestly, not quarantined):
+
+- **Fail** if `false_ALLOW > 0` (or transport/parse errors).
+- **Inform** `false_BLOCK` (warn in logs / job summary). Job stays
+  green so the pipeline is useful immediately.
+- **Tighten after #51:** `FAIL_ON_FALSE_BLOCK=1` so in-scope
+  false-BLOCK = 0 as well (strict ADR dual threshold).
+
 ---
 
 ## Validation results (2026-06-20, live API, `standard` tier)

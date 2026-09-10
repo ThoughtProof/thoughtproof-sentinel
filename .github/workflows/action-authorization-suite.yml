@@ -1,0 +1,83 @@
+# Nightly (and on-demand) labeled action_authorization suite vs live /sentinel/verify.
+# Issue #56 — dual counters: false_ALLOW (drain / mismatch) + false_BLOCK (ok-*).
+#
+# Required repository secrets / variables (do not hardcode keys):
+#   SENTINEL_API_KEY                 X-Sentinel-Key for Preview or prod
+#   SENTINEL_BASE_URL                repo variable (preferred) or secret.
+#                                    Preview URL, e.g. https://<preview>.vercel.app
+#                                    or https://sentinel.thoughtproof.ai
+#   VERCEL_AUTOMATION_BYPASS_SECRET  optional; set if the target has
+#                                    Vercel Deployment Protection
+#
+# First-ship gate (policy b, founder: measure before #51):
+#   fail if false_ALLOW > 0 or transport/parse errors > 0
+#   report false_BLOCK + receipt ids; do not fail the job
+#   After structured mandate (#51) set FAIL_ON_FALSE_BLOCK=1 (or dispatch
+#   fail_on_false_block) so the ADR-0019 dual threshold is both = 0.
+#
+# After #57 (prompt-only) ok-01/ok-02/ok-03 may still be cascade false_BLOCK.
+# The job reports them honestly — no quarantine / expected-fail skip.
+
+name: Action-authorization suite
+
+on:
+  schedule:
+    - cron: '15 5 * * *'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Override SENTINEL_BASE_URL (Preview or prod)
+        required: false
+        type: string
+      fail_on_false_block:
+        description: Fail when false_BLOCK > 0 (strict dual threshold)
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - 'scenarios/action-authorization-suite.json'
+      - 'scripts/action-authorization-suite.mjs'
+      - 'scripts/lib/action-auth-suite-metrics.mjs'
+      - '.github/workflows/action-authorization-suite.yml'
+      - 'src/engine/**'
+
+concurrency:
+  group: action-auth-suite-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  suite:
+    name: Live suite (false_ALLOW / false_BLOCK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Require SENTINEL_API_KEY (cron / dispatch)
+        if: github.event_name != 'pull_request' && secrets.SENTINEL_API_KEY == ''
+        run: |
+          echo "::error::Set repository secret SENTINEL_API_KEY (X-Sentinel-Key). Optional: SENTINEL_BASE_URL, VERCEL_AUTOMATION_BYPASS_SECRET."
+          exit 1
+
+      - name: Skip live suite (PR without API key)
+        if: github.event_name == 'pull_request' && secrets.SENTINEL_API_KEY == ''
+        run: |
+          echo "No SENTINEL_API_KEY on this PR (forks / unset). Scoring is covered by npm test."
+          echo "Nightly / workflow_dispatch still require the secret."
+
+      - name: Run action-authorization suite
+        if: secrets.SENTINEL_API_KEY != ''
+        env:
+          SENTINEL_API_KEY: ${{ secrets.SENTINEL_API_KEY }}
+          SENTINEL_BASE_URL: ${{ github.event.inputs.base_url || vars.SENTINEL_BASE_URL || secrets.SENTINEL_BASE_URL }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          FAIL_ON_FALSE_BLOCK: ${{ github.event.inputs.fail_on_false_block == 'true' && '1' || '0' }}
+          SENTINEL_TIER: standard
+        run: node scripts/action-authorization-suite.mjs
