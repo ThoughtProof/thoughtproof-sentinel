@@ -170,9 +170,14 @@ PASS trigger (`financial_pair_match=true`,
 same class as the #46 FYI PASS hint (grade faithful / supported,
 not unfaithful; classifier already established the pair). The
 financial POSITIVE PASS sits **before** the informational/notify
-0x FAIL. Drain overshoot / wrong recipient stay silent (no
-PASS hint); MaxUint256 / pay-vs-ship stay kind-BLOCK. Trade modes
-untouched.
+0x FAIL. Preview dogfood showed prompt-only PASS cannot move
+serv-nano off cascade BLOCK. Promotion therefore has the dual of
+`objective_mismatch_fail_closed`: `positive_financial_pass` →
+public ALLOW `financial_pair_pass` (`decision_basis=deterministic`)
+even when cascade TE scores BLOCK. Drain overshoot / wrong
+recipient stay silent (no pass flag); MaxUint256 / pay-vs-ship stay
+kind-BLOCK. Notify-only vs informational mandate may similarly
+`informational_pair_pass`. Trade modes untouched.
 #37 remains mitigation lineage.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.

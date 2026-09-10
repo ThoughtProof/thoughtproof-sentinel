@@ -363,6 +363,43 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).not.toBe('already_allow');
   });
 
+  it('4e19. cascade BLOCK + positiveFinancialPass → financial_pair_pass ALLOW', () => {
+    const weak: StepLite[] = [
+      { step_id: 'step_0', score: 0.5, predicate: 'unfaithful' },
+      { step_id: 'step_1', score: 0.5, predicate: 'unfaithful' },
+      { step_id: 'step_2', score: 0.5, predicate: 'unfaithful' },
+      { step_id: 'step_3', score: 0.5, predicate: 'unfaithful' },
+    ];
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: weak,
+      actionKind: 'value_transfer',
+      mandateKind: 'value_transfer',
+      positiveFinancialPass: true,
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('financial_pair_pass');
+    expect(d.decision_basis).toBe('deterministic');
+  });
+
+  it('4e20. cascade BLOCK + no financial pass stays already_block', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      actionKind: 'value_transfer',
+      mandateKind: 'value_transfer',
+      positiveFinancialPass: false,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('already_block');
+  });
+
   it('4e14. agreement_allow + value_transfer + value_transfer stays already_allow', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

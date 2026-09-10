@@ -25,9 +25,14 @@
   financial POSITIVE PASS now sits **before** FAIL, says grade
   faithful / supported (not unfaithful), and states the classifier
   already established the matching pair / amount ≤ grant / authorized
-  0x. Redundant "even when framed as notify/FYI" dropped. #53/#54
-  allowlist unchanged. FYI informational ALLOW unchanged. Trade modes
-  untouched.
+  0x. Redundant "even when framed as notify/FYI" dropped. Preview
+  `7e41610` still false-BLOCKed ok-01/02/03 (same 4×0.5 TE) — prompt
+  churn cannot move serv-nano. Dual of `objective_mismatch_fail_closed`:
+  when the classifier proves `positive_financial_pass`, promotion
+  public-ALLOWs as `financial_pair_pass` (`decision_basis=deterministic`)
+  even if cascade BLOCKs. Drain / mismatch stay BLOCK (no pass flag).
+  ok-06 DE FYI gets the same dual as `informational_pair_pass` (ok-04/05
+  unchanged). #53/#54 allowlist unchanged. Trade modes untouched.
 - **value_transfer / permission vs non-matching mandate allowlist (issue #53):**
   After #49, `informationalActionMayPublicAllow('value_transfer', 'unknown')`
   and `('permission', 'unknown')` were still `true`. Prod receipt

@@ -111,7 +111,9 @@ export type ActionAuthPromotionReason =
   | 'promoted_all_steps_pass'
   | 'no_promote_path'
   | 'objective_mismatch_fail_closed'
-  | 'unclassified_abstention_fail_closed';
+  | 'unclassified_abstention_fail_closed'
+  | 'financial_pair_pass'
+  | 'informational_pair_pass';
 
 /** Receipt-level origin of the public verdict (issue #43). */
 export type ActionAuthDecisionBasis = 'deterministic' | 'cascade';
@@ -119,6 +121,8 @@ export type ActionAuthDecisionBasis = 'deterministic' | 'cascade';
 const DETERMINISTIC_PROMOTION_REASONS = new Set<string>([
   'objective_mismatch_fail_closed',
   'unclassified_abstention_fail_closed',
+  'financial_pair_pass',
+  'informational_pair_pass',
 ]);
 
 export function decisionBasisForPromotionReason(
@@ -176,6 +180,18 @@ export interface ActionAuthPromotionInput {
    * already_allow (decimal MaxUint256 hole).
    */
   boundedPermissionCompatible?: boolean | null;
+  /**
+   * Classifier: matching financial pair + amount ≤ grant + authorized 0x
+   * (#55). When true, cascade BLOCK / UNCERTAIN from TE scores cannot
+   * keep the public verdict at BLOCK (`financial_pair_pass`).
+   */
+  positiveFinancialPass?: boolean | null;
+  /**
+   * Classifier: notify-only vs positively informational mandate (#55
+   * ok-06). When true, cascade TE BLOCK cannot keep public BLOCK
+   * (`informational_pair_pass`).
+   */
+  positiveInformationalPass?: boolean | null;
 }
 
 /**
@@ -311,6 +327,29 @@ export function resolveActionAuthPromotion(
     return finish('BLOCK', false, 'objective_mismatch_fail_closed');
   }
 
+  // Dual of objective_mismatch_fail_closed (#55): a machine-proven
+  // in-mandate financial (or informational) pair may public-ALLOW even
+  // when cascade TE scores BLOCK. Applied after mismatch / abstention
+  // so drain and pay-vs-ship stay BLOCK. Error / degraded cascade is
+  // still fail-closed below (never ALLOW on a broken evaluator).
+  const classifierPairPass = (): ActionAuthPromotionDecision | null => {
+    if (input.positiveFinancialPass === true) {
+      return finish(
+        'ALLOW',
+        false,
+        input.mappedVerdict === 'ALLOW' ? 'already_allow' : 'financial_pair_pass',
+      );
+    }
+    if (input.positiveInformationalPass === true) {
+      return finish(
+        'ALLOW',
+        false,
+        input.mappedVerdict === 'ALLOW' ? 'already_allow' : 'informational_pair_pass',
+      );
+    }
+    return null;
+  };
+
   // Hard stop: primary BLOCK disagreement must never promote to ALLOW.
   // Cascade already maps this to HOLD → UNCERTAIN; do not lift it.
   // Exact reason-set only — no free-string / substring prefixes in a safety gate.
@@ -333,11 +372,16 @@ export function resolveActionAuthPromotion(
     return finish('UNCERTAIN', false, 'primary_error_fail_closed');
   }
 
-  // CONDITIONAL_ALLOW must be gated BEFORE any mapped-ALLOW passthrough.
-  // A mis-mapped CONDITIONAL_ALLOW→ALLOW must not escape as already_allow.
+  // CONDITIONAL_ALLOW must stay REVIEW without machine proof (addendum).
+  // Pair-pass does not lift that path.
   const isConditionalAllow =
     input.internalVerdict === 'CONDITIONAL_ALLOW' ||
     cascadeReason === 'agreement_conditional_allow';
+
+  if (!isConditionalAllow) {
+    const pairPass = classifierPairPass();
+    if (pairPass) return pairPass;
+  }
 
   if (isConditionalAllow && !proofAccepted) {
     // No structured machine proof yet → stay REVIEW. Exception not implemented.

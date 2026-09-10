@@ -29,6 +29,8 @@ import {
 import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import {
   classifyActionAuthKind,
+  FINANCIAL_PAIR_PASS_REASON,
+  INFORMATIONAL_PAIR_PASS_REASON,
   OBJECTIVE_MISMATCH_BLOCK_REASON,
   UNCLASSIFIED_ABSTENTION_REASON,
   recordActionAuthUnknownKinds,
@@ -287,6 +289,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       actionKind: actionAuthKind?.action_kind ?? null,
       mandateKind: actionAuthKind?.mandate_kind ?? null,
       boundedPermissionCompatible: actionAuthKind?.bounded_permission_compatible === true,
+      positiveFinancialPass: actionAuthKind?.positive_financial_pass === true,
+      positiveInformationalPass: actionAuthKind?.positive_informational_pass === true,
     });
     verdict = decision.publicVerdict;
     promotionMeta = {
@@ -316,7 +320,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         process.env.RELEASE_ID ||
         undefined,
       policy:
-        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain',
+        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-financial-pair-pass',
     };
   }
 
@@ -389,7 +393,11 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     ? UNCLASSIFIED_ABSTENTION_REASON
     : objectiveMismatch && internalVerdict !== 'BLOCK'
       ? OBJECTIVE_MISMATCH_BLOCK_REASON
-      : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
+      : promotionMeta?.reason === 'financial_pair_pass'
+        ? FINANCIAL_PAIR_PASS_REASON
+        : promotionMeta?.reason === 'informational_pair_pass'
+          ? INFORMATIONAL_PAIR_PASS_REASON
+          : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
 
   return {
     id,

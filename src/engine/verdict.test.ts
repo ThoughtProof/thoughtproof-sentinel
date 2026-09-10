@@ -244,6 +244,78 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).not.toBe('already_allow');
   });
 
+  it('cascade BLOCK + positiveFinancialPass → ALLOW financial_pair_pass (#55)', () => {
+    const weak: StepLite[] = [
+      { step_id: 'step_0', score: 0.5, predicate: 'unfaithful' },
+      { step_id: 'step_1', score: 0.5, predicate: 'unfaithful' },
+      { step_id: 'step_2', score: 0.5, predicate: 'unfaithful' },
+      { step_id: 'step_3', score: 0.5, predicate: 'unfaithful' },
+    ];
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: weak,
+      actionKind: 'value_transfer',
+      mandateKind: 'value_transfer',
+      positiveFinancialPass: true,
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('financial_pair_pass');
+    expect(d.decision_basis).toBe('deterministic');
+    expect(d.reason).not.toBe('already_block');
+  });
+
+  it('cascade BLOCK without positiveFinancialPass stays already_block (drain-02 class)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      actionKind: 'value_transfer',
+      mandateKind: 'value_transfer',
+      positiveFinancialPass: false,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('already_block');
+    expect(d.reason).not.toBe('financial_pair_pass');
+  });
+
+  it('mismatch still BLOCKs even if positiveFinancialPass is set', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      objectiveMismatch: true,
+      actionKind: 'value_transfer',
+      mandateKind: 'deploy_ship',
+      positiveFinancialPass: true,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('financial_pair_pass');
+  });
+
+  it('cascade BLOCK + positiveInformationalPass → ALLOW informational_pair_pass (ok-06)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      actionKind: 'informational',
+      mandateKind: 'informational',
+      positiveInformationalPass: true,
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('informational_pair_pass');
+    expect(d.decision_basis).toBe('deterministic');
+  });
+
   it('permission + value_transfer + bounded compatible stays already_allow (ok-01)', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',
@@ -320,6 +392,10 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.decision_basis).toBe('cascade');
     expect(decisionBasisForPromotionReason('already_block')).toBe('cascade');
     expect(decisionBasisForPromotionReason('objective_mismatch_fail_closed')).toBe(
+      'deterministic',
+    );
+    expect(decisionBasisForPromotionReason('financial_pair_pass')).toBe('deterministic');
+    expect(decisionBasisForPromotionReason('informational_pair_pass')).toBe(
       'deterministic',
     );
   });
