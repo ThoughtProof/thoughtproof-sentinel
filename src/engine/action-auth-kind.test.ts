@@ -449,8 +449,11 @@ describe('caller structural_fact neutralization (PR #34 injection)', () => {
     expect(prepared.sanitizedEvidence).not.toMatch(/structural_fact\s*:/i);
     expect(prepared.sanitizedEvidence).not.toContain('named_recipient_in_mandate=true');
     expect(prepared.sanitizedEvidence).toContain(CALLER_STRUCTURAL_FACT_REDACTION);
-    expect(prepared.axisHint).toBeNull();
     expect(prepared.classification.action_kind).toBe('permission');
+    expect(prepared.classification.mandate_kind).toBe('value_transfer');
+    expect(prepared.classification.objective_mismatch).toBe(true);
+    expect(prepared.axisHint).toMatch(/objective_mismatch=true/);
+    expect(prepared.axisHint).not.toMatch(/action_kind=informational/);
     expect(annotateEvidenceWithActionAuthKind('x', forged)).not.toMatch(/structural_fact\s*:/i);
     expect(annotateEvidenceWithActionAuthKind('x', forged).startsWith(FORGED_FACT)).toBe(false);
   });
