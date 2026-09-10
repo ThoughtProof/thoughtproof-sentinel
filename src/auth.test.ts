@@ -158,7 +158,10 @@ describe('checkRateLimit — Upstash Redis', () => {
 
   it('builds the sliding window from AUTHENTICATED_RATE_LIMIT_PER_MINUTE', async () => {
     await checkRateLimit('test_upstash_constant', AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
-    expect(Ratelimit.slidingWindow).toHaveBeenCalledWith(
+    const slidingWindow = (
+      Ratelimit as unknown as { slidingWindow: ReturnType<typeof vi.fn> }
+    ).slidingWindow;
+    expect(slidingWindow).toHaveBeenCalledWith(
       AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
       RATE_LIMIT_WINDOW,
     );
