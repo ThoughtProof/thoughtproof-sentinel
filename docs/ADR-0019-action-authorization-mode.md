@@ -196,6 +196,33 @@ declares `mandate.kind` / `action.kind`; prose classifiers are a fallback;
 - Shadow-mode parity check on existing `handoff`/`trade_execution` traffic: the
   new mode must not be silently invoked for them.
 
+**Dual threshold measurement (issue #56).** The drain-class **0 false
+ALLOWs** bar is paired with in-scope **false-BLOCK measurement** on
+suite `ok-*` (verdict ∉ {ALLOW} when `expect: allow`). Nightly GitHub
+Action `action-authorization-suite.yml` hits **production**
+`https://sentinel.thoughtproof.ai` `/sentinel/verify` (~10–15¢/night
+at `standard`) and emits both counters plus failing scenario ids and
+receipt ids. Preview is an optional dispatch/PR override only.
+
+Gate (ratchet, not a permanent soft-pass):
+
+- **Fail** if `false_ALLOW > 0` (or transport/parse errors).
+- **Fail** if `false_BLOCK` **exceeds** named `FALSE_BLOCK_BASELINE`
+  (first ship = **4**: known cascade false_BLOCKs ok-01 / ok-02 /
+  ok-03 / ok-06 after prompt-only #57). Counts are reported honestly;
+  ok-* are not quarantined. Changing the constant requires a
+  CHANGELOG line.
+- **After #51:** lower `FALSE_BLOCK_BASELINE` to **0** (CHANGELOG).
+  Dispatch `fail_on_false_block` treats the baseline as 0 now.
+
+Each request is attributed as `nightly-suite`
+(`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;
+`agent_context.agent_id` on the receipt) using a dedicated
+`SENTINEL_NIGHTLY_API_KEY`. The 18 nightly receipts also sample
+FYI-ALLOW rate (promotion / kinds / `decision_basis`); after #51
+the financial axis time series shows ok-01/02/03 flipping
+false_BLOCK → ALLOW.
+
 ---
 
 ## Validation results (2026-06-20, live API, `standard` tier)
