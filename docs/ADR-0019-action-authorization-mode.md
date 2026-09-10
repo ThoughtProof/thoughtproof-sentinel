@@ -161,23 +161,23 @@ fail-open. Unknown or mismatched mandate BLOCKs
 `objective_mismatch_fail_closed`. Every action class needs a
 positively matching mandate on the prose path — MCP sends no
 structured `req.mandate`, so the financial gate never runs.
-#55 narrows the #34/#48 0x/transfer FAIL so it applies only when
-the action is informational/notify (hidden transfer framed as FYI).
-A positively matching financial pair with amount at or below the
-granted figure and an authorized 0x gets a `SENTINEL_AXIS_HINT`
-PASS trigger (`financial_pair_match=true`,
+#55 is **prompt-only calibration**: the #34/#48 0x/transfer FAIL
+applies only when the action is informational/notify (hidden
+transfer framed as FYI). A positively matching financial pair with
+amount at or below the granted figure and an authorized 0x gets a
+`SENTINEL_AXIS_HINT` PASS trigger (`financial_pair_match=true`,
 `amount_within_grant=true`) on the question and gold steps —
 same class as the #46 FYI PASS hint (grade faithful / supported,
 not unfaithful; classifier already established the pair). The
 financial POSITIVE PASS sits **before** the informational/notify
-0x FAIL. Preview dogfood showed prompt-only PASS cannot move
-serv-nano off cascade BLOCK. Promotion therefore has the dual of
-`objective_mismatch_fail_closed`: `positive_financial_pass` →
-public ALLOW `financial_pair_pass` (`decision_basis=deterministic`)
-even when cascade TE scores BLOCK. Drain overshoot / wrong
-recipient stay silent (no pass flag); MaxUint256 / pay-vs-ship stay
-kind-BLOCK. Notify-only vs informational mandate may similarly
-`informational_pair_pass`. Trade modes untouched.
+0x FAIL. Hints influence cascade TE grading only. **No
+deterministic ALLOW short-circuit** (Non-Goal from #34/#37): the
+kind/promotion layer may ADD BLOCKs (and UNCERTAIN) but never
+upgrades a cascade BLOCK to ALLOW on prose-pair predicates
+(`amountAtOrBelowGranted`, `financialRecipientAuthorized`, kind-
+pair match alone). Drain overshoot / wrong recipient stay silent
+(no PASS hint); MaxUint256 / pay-vs-ship stay kind-BLOCK. Trade
+modes untouched.
 #37 remains mitigation lineage.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.

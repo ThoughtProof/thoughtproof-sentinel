@@ -11,28 +11,23 @@
   notify-framed hidden transfers; as written the live cascade
   fail-closed every legitimate payment that named a 0x recipient
   (`ok-01` / `ok-02` / `ok-03` → `already_block`, `decision_basis:
-  cascade`). Same class as #46 Fall 1. The FAIL now applies only to
-  an **informational/notify** action. Matching financial pairs emit a
-  positive PASS hint (`financial_pair_match=true` +
-  `amount_within_grant=true`, no `objective_mismatch`) so amount and
-  recipient steps PASS when the amount is at or below the granted
-  figure and every action 0x is in the mandate. Overshoot, injected
-  recipient, unbounded / MaxUint256, and pay-vs-ship stay silent or
-  kind-BLOCK. Preview `39f93b7e` still false-BLOCKed ok-01/02/03
-  (`already_block` cascade; ok-02 failScore=2, 4×0.5 TE) because
-  POSITIVE PASS sat after a FAIL paragraph that still said "even
-  when framed as notify/FYI" and lacked #46 grade language. Follow-up:
-  financial POSITIVE PASS now sits **before** FAIL, says grade
-  faithful / supported (not unfaithful), and states the classifier
-  already established the matching pair / amount ≤ grant / authorized
-  0x. Redundant "even when framed as notify/FYI" dropped. Preview
-  `7e41610` still false-BLOCKed ok-01/02/03 (same 4×0.5 TE) — prompt
-  churn cannot move serv-nano. Dual of `objective_mismatch_fail_closed`:
-  when the classifier proves `positive_financial_pass`, promotion
-  public-ALLOWs as `financial_pair_pass` (`decision_basis=deterministic`)
-  even if cascade BLOCKs. Drain / mismatch stay BLOCK (no pass flag).
-  ok-06 DE FYI gets the same dual as `informational_pair_pass` (ok-04/05
-  unchanged). #53/#54 allowlist unchanged. Trade modes untouched.
+  cascade`). Same class as #46 Fall 1. **Prompt-only calibration:**
+  the FAIL now applies only to an **informational/notify** action.
+  Matching financial pairs emit a positive PASS hint
+  (`financial_pair_match=true` + `amount_within_grant=true`, no
+  `objective_mismatch`) so cascade TE can grade amount and recipient
+  steps faithful / supported when the amount is at or below the
+  granted figure and every action 0x is in the mandate. Overshoot,
+  injected recipient, unbounded / MaxUint256, and pay-vs-ship stay
+  silent or kind-BLOCK. Financial POSITIVE PASS sits **before** FAIL
+  and states the classifier already established the matching pair /
+  amount ≤ grant / authorized 0x. Redundant "even when framed as
+  notify/FYI" dropped. Preview `7e41610` still false-BLOCKed
+  ok-01/02/03 (same 4×0.5 TE) — prompt churn cannot move serv-nano.
+  **No deterministic ALLOW short-circuit** (Non-Goal from #34/#37):
+  the kind/promotion layer may ADD BLOCKs (and UNCERTAIN) but never
+  upgrades a cascade BLOCK to ALLOW on prose-pair predicates. #53/#54
+  allowlist unchanged. Trade modes untouched.
 - **value_transfer / permission vs non-matching mandate allowlist (issue #53):**
   After #49, `informationalActionMayPublicAllow('value_transfer', 'unknown')`
   and `('permission', 'unknown')` were still `true`. Prod receipt

@@ -364,10 +364,9 @@ export interface SentinelVerifyResponse {
       /** Both kinds unknown — UNCERTAIN abstention, not named mismatch. */
       unclassified_abstention?: boolean;
       /**
-       * `deterministic` = allowlist / abstention / mismatch gate or
-       * financial/informational pair-pass decided the verdict (not
-       * cascade confidence). `cascade` = promotion followed the
-       * cascade-derived path (issue #43 / Raul / #55).
+       * `deterministic` = allowlist / abstention / mismatch gate decided
+       * BLOCK|UNCERTAIN (not cascade confidence). `cascade` = promotion
+       * followed the cascade-derived path (issue #43 / Raul).
        */
       decision_basis?: ActionAuthDecisionBasis;
       /** Git commit SHA (short or full) baked at build/runtime for deploy provenance. */

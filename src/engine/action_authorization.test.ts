@@ -1200,8 +1200,9 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     'ok-01-exact-swap-approval',
     'ok-02-exact-payment',
     'ok-03-exact-limit-order',
+    'ok-06-de-fyi-informiere',
   ]) {
-    it(`${id}: cascade BLOCK + 4×0.5 TE → public ALLOW financial_pair_pass`, async () => {
+    it(`${id}: cascade BLOCK stays already_block (no prose-pair ALLOW upgrade)`, async () => {
       const s = suiteRow(id);
       mockRunCascade.mockResolvedValueOnce(
         cascade('BLOCK', 'agreement_block', weakTeSteps(s.claim)) as never,
@@ -1214,69 +1215,10 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
         tier: 'standard',
       });
 
-      expect(res.verdict).toBe('ALLOW');
-      expect(res.meta.promotion?.reason).toBe('financial_pair_pass');
-      expect(res.meta.promotion?.decision_basis).toBe('deterministic');
-      expect(res.meta.promotion?.reason).not.toBe('already_block');
-      expect(res.reasoning).toMatch(/financial pair pass|authorized 0x/i);
+      expect(res.verdict).toBe('BLOCK');
+      expect(res.verdict).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason).toBe('already_block');
+      expect(res.meta.promotion?.decision_basis).toBe('cascade');
     });
   }
-
-  it('drain-02 cascade BLOCK stays BLOCK (no financial_pair_pass)', async () => {
-    const s = suiteRow('drain-02-injected-recipient');
-    mockRunCascade.mockResolvedValueOnce(
-      cascade('BLOCK', 'agreement_block', weakTeSteps(s.claim)) as never,
-    );
-
-    const res = await verify({
-      claim: s.claim,
-      evidence: s.evidence,
-      mode: 'action_authorization',
-      tier: 'standard',
-    });
-
-    expect(res.verdict).toBe('BLOCK');
-    expect(res.verdict).not.toBe('ALLOW');
-    expect(res.meta.promotion?.reason).not.toBe('financial_pair_pass');
-    expect(res.meta.promotion?.reason).toBe('already_block');
-  });
-
-  it('drain-01 cascade ALLOW → BLOCK (kind allowlist, no financial_pair_pass)', async () => {
-    const s = suiteRow('drain-01-unlimited-approval');
-    mockRunCascade.mockResolvedValueOnce(
-      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
-    );
-
-    const res = await verify({
-      claim: s.claim,
-      evidence: s.evidence,
-      mode: 'action_authorization',
-      tier: 'standard',
-    });
-
-    expect(res.verdict).toBe('BLOCK');
-    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
-    expect(res.meta.promotion?.reason).not.toBe('financial_pair_pass');
-  });
-
-  it('ok-06 DE FYI: cascade BLOCK → informational_pair_pass (ok-04/05 path intact)', async () => {
-    const s = suiteRow('ok-06-de-fyi-informiere');
-    mockRunCascade.mockResolvedValueOnce(
-      cascade('BLOCK', 'agreement_block', weakTeSteps(s.claim)) as never,
-    );
-
-    const res = await verify({
-      claim: s.claim,
-      evidence: s.evidence,
-      mode: 'action_authorization',
-      tier: 'standard',
-    });
-
-    expect(res.verdict).toBe('ALLOW');
-    expect(res.meta.promotion?.reason).toBe('informational_pair_pass');
-    expect(res.meta.promotion?.decision_basis).toBe('deterministic');
-    expect(res.meta.promotion?.action_kind).toBe('informational');
-    expect(res.meta.promotion?.mandate_kind).toBe('informational');
-    expect(res.meta.promotion?.reason).not.toBe('financial_pair_pass');
-  });
 });

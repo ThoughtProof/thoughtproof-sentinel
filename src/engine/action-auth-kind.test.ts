@@ -1005,8 +1005,6 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       ).toBe(true);
       expect(c.financial_pair_match, id).toBe(true);
       expect(c.amount_within_grant, id).toBe(true);
-      expect(c.positive_financial_pass, id).toBe(true);
-      expect(c.positive_informational_pass, id).toBe(false);
       expect(c.axisHint, id).toContain(SENTINEL_AXIS_HINT_LABEL);
       expect(c.axisHint, id).toMatch(/financial_pair_match=true/);
       expect(c.axisHint, id).toMatch(/amount_within_grant=true/);
@@ -1035,8 +1033,6 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       expect(c.axisHint ?? '', id).not.toMatch(/financial_pair_match=true/);
       expect(c.axisHint ?? '', id).not.toMatch(/amount_within_grant=true/);
       expect(c.amount_within_grant, id).toBe(false);
-      expect(c.positive_financial_pass, id).toBe(false);
-      expect(c.positive_informational_pass, id).toBe(false);
       if (id === 'drain-01-unlimited-approval') {
         expect(c.objective_mismatch, id).toBe(true);
         expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), id).toBe(false);
@@ -1060,8 +1056,6 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       expect(c.action_kind, id).toBe('informational');
       expect(c.objective_mismatch, id).toBe(false);
       expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), id).toBe(true);
-      expect(c.positive_informational_pass, id).toBe(true);
-      expect(c.positive_financial_pass, id).toBe(false);
     }
   });
 });

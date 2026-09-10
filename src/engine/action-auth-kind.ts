@@ -104,25 +104,15 @@ export interface ActionAuthClassification {
   /**
    * Kind pair is a positively matching financial pair (value_transfer
    * or permission allowlist, including bounded permission × spend).
+   * Used only to emit a cascade PASS hint — never a public-ALLOW (#55).
    */
   financial_pair_match: boolean;
   /**
    * Parseable action amount is at or below the mandated spend notional.
    * Token amounts (USDC/ETH/WETH) preferred over bare $ prices (#55).
+   * Hint-only — never a promotion ALLOW.
    */
   amount_within_grant: boolean;
-  /**
-   * Machine-proven in-mandate financial action: matching pair + amount
-   * ≤ grant + authorized 0x. Promotion may public-ALLOW even when
-   * cascade TE scores BLOCK (`financial_pair_pass`, #55).
-   */
-  positive_financial_pass: boolean;
-  /**
-   * Notify-only action vs a positively informational mandate.
-   * Promotion may public-ALLOW when cascade TE scores BLOCK
-   * (`informational_pair_pass`, #55 ok-06).
-   */
-  positive_informational_pass: boolean;
   /**
    * Sentinel-authored axis hint for the verification question.
    * Null when we have nothing confident to tell the cascade.
@@ -364,12 +354,6 @@ export function hasPositiveShipInstruction(text: string): boolean {
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
   'Deterministic objective mismatch: public ALLOW requires positively derived kind fit. Informational/notify or unknown actions may ALLOW only when mandate_kind is informational; deploy/publish/pin only when mandate_kind is deploy_ship; value_transfer only when mandate_kind is value_transfer; permission when mandate_kind is permission, or when mandate_kind is value_transfer and the approval is bounded and amount-compatible with the mandated spend. Unbounded / MaxUint256 / full-balance / no-expiry permission vs a spend mandate is objective_mismatch.';
-
-export const FINANCIAL_PAIR_PASS_REASON =
-  'Deterministic financial pair pass: positively matching value_transfer/permission pair, amount at or below the granted figure, authorized 0x. Public ALLOW — cascade TE scores on amount/recipient do not fail-close.';
-
-export const INFORMATIONAL_PAIR_PASS_REASON =
-  'Deterministic informational pair pass: notify/FYI action vs a positively informational mandate. Public ALLOW — cascade TE scores do not fail-close.';
 
 /**
  * Unbounded / unlimited permission markers. Used for the
@@ -765,22 +749,18 @@ export function classifyActionAuthKind(
       boundedPermissionCompatible: bounded_permission_compatible,
     });
   const amount_within_grant = amountAtOrBelowGranted(actionText, mandateText);
-  const positive_financial_pass =
+  const financialPassHint =
     financial_pair_match &&
     amount_within_grant &&
     financialRecipientAuthorized(mandateText, actionText);
-  const positive_informational_pass =
-    actionIsNotifyOnly &&
-    mandateIsPositivelyInformational(mandate_kind) &&
-    !objective_mismatch;
 
   const silent =
     ((mixedTransfer || action_kind === 'value_transfer') &&
       !valueTransferVsNonMatchingMandate &&
-      !positive_financial_pass) ||
+      !financialPassHint) ||
     (action_kind === 'permission' &&
       !permissionVsNonMatchingMandate &&
-      !positive_financial_pass) ||
+      !financialPassHint) ||
     (action_kind === 'unknown' && !unknownActionVsNamedMandate && !unclassified_abstention);
 
   let axisHint: string | null = null;
@@ -792,7 +772,7 @@ export function classifyActionAuthKind(
       deployVsNonMatchingMandate ||
       valueTransferVsNonMatchingMandate ||
       permissionVsNonMatchingMandate ||
-      positive_financial_pass)
+      financialPassHint)
   ) {
     const parts = [
       `action_kind=${action_kind}`,
@@ -812,7 +792,7 @@ export function classifyActionAuthKind(
     if (unclassified_abstention) {
       parts.push('unclassified_abstention=true');
     }
-    if (positive_financial_pass) {
+    if (financialPassHint) {
       parts.push('financial_pair_match=true');
       parts.push('amount_within_grant=true');
       if (bounded_permission_compatible) {
@@ -834,8 +814,6 @@ export function classifyActionAuthKind(
     bounded_permission_compatible,
     financial_pair_match,
     amount_within_grant,
-    positive_financial_pass,
-    positive_informational_pass,
     axisHint,
   };
 }
