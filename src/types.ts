@@ -352,9 +352,14 @@ export interface SentinelVerifyResponse {
       steps_all_pass: boolean;
       machine_condition_proof_present: boolean;
       machine_condition_proof_accepted: boolean;
-      /** Classifier kinds (issue #38 allowlist). Present on action_authorization. */
+      /** Classifier kinds (issues #38 / #47 allowlist). Present on action_authorization. */
       action_kind?: string;
       mandate_kind?: string;
+      /** Per-request unknown-kind flags (issue #47 abstention counters). */
+      unknown_action?: boolean;
+      unknown_mandate?: boolean;
+      /** Both kinds unknown — UNCERTAIN abstention, not named mismatch. */
+      unclassified_abstention?: boolean;
       /** Git commit SHA (short or full) baked at build/runtime for deploy provenance. */
       release_id?: string;
       /** Policy id for this promotion layer revision. */

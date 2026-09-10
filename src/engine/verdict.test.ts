@@ -133,6 +133,39 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).toBe('objective_mismatch_fail_closed');
   });
 
+  it('never public-ALLOWs unknown action vs deploy_ship (Fall 7c, not already_block)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      actionKind: 'unknown',
+      mandateKind: 'deploy_ship',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_block');
+  });
+
+  it('unknown/unknown is UNCERTAIN unclassified_abstention (not BLOCK)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      actionKind: 'unknown',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+    expect(d.publicVerdict).not.toBe('BLOCK');
+    expect(d.reason).toBe('unclassified_abstention_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+    expect(d.reason).not.toBe('objective_mismatch_fail_closed');
+  });
+
   it('acceptsMachineConditionProof is fail-closed', () => {
     expect(acceptsMachineConditionProof({ kind: 'x', fulfilled: true })).toBe(false);
   });

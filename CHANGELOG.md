@@ -4,6 +4,35 @@
 
 ### Fixed
 
+- **Unknown-action abstention + DE informational markers (issue #47):**
+  After #46, `informationalActionMayPublicAllow` returned true whenever
+  `action_kind !== 'informational'`, so `unknown` actions abstained and
+  could fail-open via cascade `agreement_allow` (dogfood
+  `sent_a3ae25f9e68d4234` ALLOW unknown/unknown; Fall 7c BLOCKed via
+  `already_block`, not the allowlist). Two-tier fail-closed, no public
+  ALLOW either way:
+  - `unknown` action vs a **named** non-informational mandate
+    (`deploy_ship` / `value_transfer` / `permission`) → **BLOCK**
+    `objective_mismatch_fail_closed` (real named conflict; Fall 7c /
+    mismatch-05).
+  - `unknown` / `unknown` → public **UNCERTAIN**
+    `unclassified_abstention_fail_closed` (not BLOCK). Safety-equivalent
+    (MCP execute stays false) but the receipt says "classify better",
+    not "action exceeds mandate".
+  A small DE informational set (Informiere, Info an, Bescheid geben,
+  Rückmeldung, Status an) so Fall 6 classifies
+  `informational`/`informational`. Per-request `unknown_action` /
+  `unknown_mandate` / `unclassified_abstention` flags on promotion meta
+  and the verify log line (plus process counters) so prod abstention
+  rate is measurable. Target: host-declared `mandate.kind` /
+  `action.kind` with prose as fallback and `unknown → fail-closed`
+  (companion thoughtproof-mcp#21); this change does not invent that
+  host API. #38 informational allowlist is unchanged (informational
+  action + non-informational mandate still BLOCK). FYI-aligned English
+  informational ALLOW is unchanged. The #46 known limitation is closed.
+  Follow-up (not this change): deploy-action vs unknown-mandate
+  allowlist asymmetry (`informationalActionMayPublicAllow('deploy_ship',
+  'unknown') === true`).
 - **FYI PASS-hint + DE ship negation (issue #38 dogfood):**
   Preview FYI (case 1) was UNCERTAIN with `mandate_kind=informational`
   (gate OK) but cascade `disagreement_hold` / `steps_not_all_pass`: all
@@ -29,13 +58,11 @@
   ship hard-BLOCK from #37 is preserved. Verify log line now includes
   `promotion=` (and `mandate_kind` / `action_kind` when present) so
   Runtime Logs answer dogfood without receipt dumps.
-  **Known limitation (merge protocol):** aligned FYI is positively
+  **Known limitation (closed by #47):** aligned FYI is positively
   allowlisted only when the mandate is recognizably `informational`.
-  Unrecognized mandates and unrecognized actions (`action_kind !==
-  informational`) fall through to the cascade —
-  `informationalActionMayPublicAllow` returns true for non-informational
-  actions, so `unknown` abstains rather than fail-closes. Follow-up:
-  [#47](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/47).
+  Unrecognized actions (`action_kind === unknown`) previously fell
+  through to the cascade. Closed by the #47 unknown-action fail-closed
+  fix above.
 - **Finite receipt confidence (issue #39):**
   Averaging step scores now coerces missing / NaN / Infinity `score` to
   `0` (`Number.isFinite(s.score) ? s.score : 0`). Response `confidence`

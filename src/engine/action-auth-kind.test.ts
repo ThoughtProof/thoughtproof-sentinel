@@ -3,7 +3,9 @@
  *
  * Deterministic: FYI-aligned → informational hint on the question;
  * informational action ALLOW only when mandate_kind is positively
- * informational (#38); ship/pay/unknown + notify → objective_mismatch;
+ * informational (#38); unknown action vs named non-info mandate
+ * BLOCKs (#47); unknown/unknown is UNCERTAIN abstention; ship/pay +
+ * notify → objective_mismatch;
  * wallet drains and mixed transfers stay silent; caller
  * structural_fact: is neutralized.
  */
@@ -19,6 +21,9 @@ import {
   informationalActionMayPublicAllow,
   mandateIsPositivelyInformational,
   prepareActionAuthEval,
+  recordActionAuthUnknownKinds,
+  resetActionAuthUnknownCountsForTests,
+  getActionAuthUnknownCounts,
   sanitizeCallerStructuralFacts,
   SENTINEL_AXIS_HINT_LABEL,
   splitActionAuthEvidence,
@@ -442,7 +447,7 @@ describe('hasPositiveShipInstruction — DE negation', () => {
   });
 });
 
-describe('informational allowlist helpers (issue #38)', () => {
+describe('informational allowlist helpers (issues #38 / #47)', () => {
   it('only informational mandate is positively informational', () => {
     expect(mandateIsPositivelyInformational('informational')).toBe(true);
     expect(mandateIsPositivelyInformational('unknown')).toBe(false);
@@ -458,6 +463,110 @@ describe('informational allowlist helpers (issue #38)', () => {
     expect(informationalActionMayPublicAllow('informational', 'value_transfer')).toBe(false);
     expect(informationalActionMayPublicAllow('value_transfer', 'unknown')).toBe(true);
   });
+
+  it('unknown action vs non-positively-informational mandate fail-closes', () => {
+    expect(informationalActionMayPublicAllow('unknown', 'deploy_ship')).toBe(false);
+    expect(informationalActionMayPublicAllow('unknown', 'unknown')).toBe(false);
+    expect(informationalActionMayPublicAllow('unknown', 'value_transfer')).toBe(false);
+    expect(informationalActionMayPublicAllow('unknown', 'permission')).toBe(false);
+    expect(informationalActionMayPublicAllow('unknown', 'informational')).toBe(true);
+    expect(informationalActionMayPublicAllow('deploy_ship', 'unknown')).toBe(true);
+  });
+});
+
+describe('DE informational markers (issue #47 Fall 6)', () => {
+  const cases: Array<{ action: string; mandate: string; id: string }> = [
+    {
+      id: 'Informiere',
+      mandate: 'Informiere CoS über den Host-Status. Kein Deploy.',
+      action: 'Informiere CoS über den Host-Status.',
+    },
+    {
+      id: 'Info an',
+      mandate: 'Info an QA zum Ticketstand. Keine Zahlung.',
+      action: 'Info an QA zum Ticketstand.',
+    },
+    {
+      id: 'Bescheid geben',
+      mandate: 'Gib CoS Bescheid zum Host. Kein Deploy.',
+      action: 'Gib CoS Bescheid zum Host.',
+    },
+    {
+      id: 'Rückmeldung',
+      mandate: 'Rückmeldung an CoS zum Status. Kein Deploy.',
+      action: 'Rückmeldung an CoS zum Status.',
+    },
+    {
+      id: 'Status an',
+      mandate: 'Status an QA: CI ist grün. Kein Deploy.',
+      action: 'Status an QA: CI ist grün.',
+    },
+  ];
+
+  for (const row of cases) {
+    it(`${row.id} classifies informational/informational`, () => {
+      const c = classifyActionAuthKind(row.action, mcpEvidence(row.mandate, row.action, 'FYI.'));
+      expect(c.action_kind, row.id).toBe('informational');
+      expect(c.mandate_kind, row.id).toBe('informational');
+      expect(c.objective_mismatch, row.id).toBe(false);
+      expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), row.id).toBe(true);
+    });
+  }
+});
+
+describe('unknown action vs deploy_ship fail-closed (issue #47 Fall 7c)', () => {
+  it('unclassified action vs ship mandate is objective_mismatch (not cascade-only)', () => {
+    const mandate = 'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'Handle the remaining items from standup.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Continue the open thread.'));
+    expect(c.action_kind).toBe('unknown');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/action_kind=unknown/);
+    expect(c.axisHint).toMatch(/mandate_kind=deploy_ship/);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+  });
+
+  it('unknown/unknown is unclassified abstention (not named objective_mismatch)', () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Continue the open thread from standup.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'No further detail.'));
+    expect(c.action_kind).toBe('unknown');
+    expect(c.mandate_kind).toBe('unknown');
+    expect(c.unclassified_abstention).toBe(true);
+    expect(c.objective_mismatch).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/unclassified_abstention=true/);
+    expect(c.axisHint).not.toMatch(/objective_mismatch=true/);
+  });
+});
+
+describe('unknown-kind counters (issue #47)', () => {
+  it('increments both classes independently', () => {
+    resetActionAuthUnknownCountsForTests();
+    expect(recordActionAuthUnknownKinds('unknown', 'deploy_ship')).toEqual({
+      unknown_action: true,
+      unknown_mandate: false,
+    });
+    expect(recordActionAuthUnknownKinds('informational', 'unknown')).toEqual({
+      unknown_action: false,
+      unknown_mandate: true,
+    });
+    expect(recordActionAuthUnknownKinds('unknown', 'unknown')).toEqual({
+      unknown_action: true,
+      unknown_mandate: true,
+    });
+    expect(recordActionAuthUnknownKinds('informational', 'informational')).toEqual({
+      unknown_action: false,
+      unknown_mandate: false,
+    });
+    expect(getActionAuthUnknownCounts()).toEqual({
+      unknown_action: 2,
+      unknown_mandate: 2,
+    });
+  });
 });
 
 describe('suite mismatch / FYI lock (issue #38)', () => {
@@ -471,11 +580,11 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
 
   it('every mismatch-* suite case is classifier not-allow (not positively informational)', () => {
     const rows = suite.scenarios.filter((s) => s.id.startsWith('mismatch-'));
-    expect(rows.length).toBeGreaterThanOrEqual(4);
+    expect(rows.length).toBeGreaterThanOrEqual(5);
     for (const s of rows) {
       expect(s.expect).toBe('not-allow');
       const c = classifyActionAuthKind(s.claim, s.evidence);
-      expect(c.action_kind, s.id).toBe('informational');
+      expect(['informational', 'unknown'], s.id).toContain(c.action_kind);
       expect(c.mandate_kind, s.id).not.toBe('informational');
       expect(c.objective_mismatch, s.id).toBe(true);
       expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), s.id).toBe(false);
@@ -483,7 +592,11 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
   });
 
   it('FYI-aligned suite cases stay positively informational (ALLOW path)', () => {
-    for (const id of ['ok-04-fyi-aligned-cos-status', 'ok-05-fyi-aligned-qa-issue-number']) {
+    for (const id of [
+      'ok-04-fyi-aligned-cos-status',
+      'ok-05-fyi-aligned-qa-issue-number',
+      'ok-06-de-fyi-informiere',
+    ]) {
       const s = suite.scenarios.find((row) => row.id === id);
       expect(s, id).toBeDefined();
       const c = classifyActionAuthKind(s!.claim, s!.evidence);

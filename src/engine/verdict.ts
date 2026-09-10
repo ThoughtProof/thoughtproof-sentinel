@@ -9,6 +9,11 @@
 
 import { toPublicVerdict, type InternalVerdict } from 'pot-cli/verdict';
 import type { SentinelVerdict, SentinelMode } from '../types.js';
+import {
+  informationalActionMayPublicAllow,
+  isUnclassifiedAbstention,
+  type ActionKind,
+} from './action-auth-kind.js';
 
 /**
  * Mode-specific verdict overrides.
@@ -105,7 +110,8 @@ export type ActionAuthPromotionReason =
   | 'steps_not_all_pass'
   | 'promoted_all_steps_pass'
   | 'no_promote_path'
-  | 'objective_mismatch_fail_closed';
+  | 'objective_mismatch_fail_closed'
+  | 'unclassified_abstention_fail_closed';
 
 export interface ActionAuthPromotionInput {
   mode: SentinelMode | string;
@@ -134,8 +140,11 @@ export interface ActionAuthPromotionInput {
    */
   objectiveMismatch?: boolean | null;
   /**
-   * Classifier kinds (issue #38 allowlist). When `actionKind` is
+   * Classifier kinds (issues #38 / #47 allowlist). When `actionKind` is
    * informational, public ALLOW requires `mandateKind === 'informational'`.
+   * Unknown vs a named non-informational mandate BLOCKs
+   * (`objective_mismatch_fail_closed`). Unknown/unknown is UNCERTAIN
+   * (`unclassified_abstention_fail_closed`) — still no public ALLOW.
    * Omitted kinds do not apply this extra check (tests / other callers).
    */
   actionKind?: string | null;
@@ -240,14 +249,28 @@ export function resolveActionAuthPromotion(
     return finish(input.mappedVerdict, false, 'not_action_authorization');
   }
 
-  // P0 2026-09-10 / #38: informational action may public-ALLOW only when
-  // the mandate is positively informational. Cascade agreement_allow
-  // (and MCP claim=proposed_action faithfulness) must not fail-open.
-  // #37 blacklist (English/DE ship + pay) is subsumed by this invert.
+  // P0 2026-09-10 / #38 + #47: informational action may public-ALLOW
+  // only when the mandate is positively informational. Unknown action
+  // vs a named non-informational mandate (ship/pay/permission) BLOCKs.
+  // Unknown/unknown is UNCERTAIN unclassified_abstention — no ALLOW,
+  // but the receipt is not a named objective mismatch. Cascade
+  // agreement_allow must not fail-open. Omitted kinds skip this check.
+  const kindsPresent = input.actionKind != null && input.mandateKind != null;
+  const unclassifiedAbstention =
+    kindsPresent &&
+    isUnclassifiedAbstention(
+      input.actionKind as ActionKind,
+      input.mandateKind as ActionKind,
+    );
+  if (unclassifiedAbstention) {
+    return finish('UNCERTAIN', false, 'unclassified_abstention_fail_closed');
+  }
   const informationalAllowlistBlocked =
-    input.actionKind === 'informational' &&
-    input.mandateKind != null &&
-    input.mandateKind !== 'informational';
+    kindsPresent &&
+    !informationalActionMayPublicAllow(
+      input.actionKind as ActionKind,
+      input.mandateKind as ActionKind,
+    );
   if (input.objectiveMismatch === true || informationalAllowlistBlocked) {
     return finish('BLOCK', false, 'objective_mismatch_fail_closed');
   }

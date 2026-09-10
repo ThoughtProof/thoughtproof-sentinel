@@ -198,6 +198,87 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).not.toBe('already_allow');
   });
 
+  it('4e2. agreement_allow + unknown action + deploy_ship → BLOCK (Fall 7c allowlist)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'unknown',
+      mandateKind: 'deploy_ship',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e3. cascade BLOCK + unknown action + deploy_ship → objective_mismatch_fail_closed not already_block', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'unknown',
+      mandateKind: 'deploy_ship',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_block');
+  });
+
+  it('4e6. agreement_allow + unknown action + value_transfer → BLOCK named conflict', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'unknown',
+      mandateKind: 'value_transfer',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('4e5. agreement_allow + unknown/unknown → UNCERTAIN unclassified_abstention (not BLOCK)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'unknown',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+    expect(d.publicVerdict).not.toBe('BLOCK');
+    expect(d.reason).toBe('unclassified_abstention_fail_closed');
+    expect(d.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e4. agreement_allow + unknown action + informational mandate stays already_allow', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'unknown',
+      mandateKind: 'informational',
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
   it('4e. agreement_allow + positively informational mandate stays already_allow', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',
@@ -286,9 +367,14 @@ describe('ADR-0019 engine wiring (action_authorization only)', () => {
     vi.clearAllMocks();
   });
 
+  // FYI-aligned so the #47 unknown-action fail-closed gate does not
+  // swallow promotion-layer cases (those are tested separately).
   const baseReq: SentinelVerifyRequest = {
-    claim: 'Proposed action: do X\nAgent reasoning: because Y',
-    evidence: 'Mandate: only Z\nContext: c\nEvidence:\n- src: obs',
+    claim: 'Tell CoS host runs git main',
+    evidence:
+      'USER INSTRUCTION: Tell CoS host runs git main\n' +
+      'AGENT PROPOSED ACTION: Tell CoS host runs git main\n' +
+      'AGENT REASONING: FYI only; no spend, no deploy.',
     mode: 'action_authorization',
     tier: 'standard',
   };
