@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- **trade_reasoning 3b promotion receipt (ADR-0018):** step_2-only UNCERTAIN→ALLOW
+  was invisible in prod logs (`promotion=` only when `meta.promotion` exists).
+  When 3b fires, emit `reason=inferential_step_promoted`, `decision_basis=cascade`.
+  No gate change. Native ALLOW / non-promote still omit the field.
 - **value_transfer / permission vs non-matching mandate allowlist (issue #53):**
   After #49, `informationalActionMayPublicAllow('value_transfer', 'unknown')`
   and `('permission', 'unknown')` were still `true`. Prod receipt

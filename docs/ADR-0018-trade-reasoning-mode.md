@@ -181,3 +181,8 @@ fact-checking + AI reasoning verification"** (no paper context needed).
 - **Risk:** a coherent thesis on a fabricated number that the deterministic
   layer fails to parse passes through. Accepted: it is rare, and the alternative
   (strict grounding) is empirically worse.
+- **Receipt (2026-09-10):** when Layer-3 step_2-only promotion fires, the
+  verify response MUST set `meta.promotion` (`reason=inferential_step_promoted`,
+  `promoted=true`, `decision_basis=cascade`, `policy=adr-0018-trade-reasoning-step2-promotion`).
+  Gate unchanged; without the field, prod logs cannot distinguish 3b ALLOW from
+  native cascade ALLOW.

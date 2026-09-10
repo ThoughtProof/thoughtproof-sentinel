@@ -341,9 +341,9 @@ export interface SentinelVerifyResponse {
      */
     proof_strength?: 'recomputed' | 'unverified';
     /**
-     * ADR-0019 promotion-layer trace (action_authorization). Keeps cascade
-     * reason, internal verdict, and public verdict separable. Optional so
-     * other modes stay unchanged.
+     * Promotion-layer trace. action_authorization: ADR-0019. trade_reasoning
+     * 3b (ADR-0018): present only when step_2-only promotion lifted UNCERTAIN
+     * → ALLOW (`reason=inferential_step_promoted`). Other modes omit.
      */
     promotion?: {
       cascade_reason: string | null;
