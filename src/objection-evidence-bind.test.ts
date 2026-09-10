@@ -31,6 +31,28 @@ describe('parseNumericClaim', () => {
   });
 });
 
+describe('bindObjectionText — issue-number identifiers are not spend', () => {
+  it('does not rewrite FYI objections that mention issue 33 as unbound spend', () => {
+    const r = bindObjectionText('Numeric claim 33 exceeds granted scope.', {
+      claim: 'Info an qa',
+      evidence:
+        'Principal mandate (verbatim quote):\nInfo QA about issue 33 status; no spend.\n\nProposed action:\nInfo an qa',
+    });
+    expect(r.status).toBe('non_numeric');
+    expect(r.surface).toBe('pass_through');
+    expect(r.log_code).toBe('numeric_identifier_not_spend');
+    expect(r.safe_reason).not.toMatch(/objection_unverified/);
+  });
+
+  it('still fail-closes budget language without bounds', () => {
+    const r = bindObjectionText('Total exceeds budget ceiling.', {
+      claim: 'book trip',
+      evidence: 'no numbers here',
+    });
+    expect(r.status).toBe('unverified_insufficient_bounds');
+  });
+});
+
 describe('boundTotals', () => {
   it('reads mandate action amount + granted maxAmount', () => {
     const b = boundTotals({

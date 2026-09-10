@@ -109,6 +109,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     claim: req.claim,
     evidence: req.evidence,
     mode: req.mode,
+    mandate: req.mandate,
   });
 
   // 2. Run through cascade (or solo for checkpoint) under engine budget.
