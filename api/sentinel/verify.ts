@@ -158,13 +158,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const promotionReason = processedResponse.meta.promotion?.reason;
     const mandateKind = processedResponse.meta.promotion?.mandate_kind;
     const actionKind = processedResponse.meta.promotion?.action_kind;
+    const unknownAction = processedResponse.meta.promotion?.unknown_action;
+    const unknownMandate = processedResponse.meta.promotion?.unknown_mandate;
     console.log(
       `[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}` +
         `${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}` +
         `${processedResponse.meta.proof_strength ? ` proof=${processedResponse.meta.proof_strength}` : ''}` +
         `${promotionReason ? ` promotion=${promotionReason}` : ''}` +
         `${mandateKind ? ` mandate_kind=${mandateKind}` : ''}` +
-        `${actionKind ? ` action_kind=${actionKind}` : ''}`,
+        `${actionKind ? ` action_kind=${actionKind}` : ''}` +
+        `${unknownAction !== undefined ? ` unknown_action=${unknownAction ? 1 : 0}` : ''}` +
+        `${unknownMandate !== undefined ? ` unknown_mandate=${unknownMandate ? 1 : 0}` : ''}`,
     );
 
     // --- Final response snapshot (sole return value) ---

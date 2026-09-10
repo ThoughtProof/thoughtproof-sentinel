@@ -25,6 +25,7 @@ import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import {
   classifyActionAuthKind,
   OBJECTIVE_MISMATCH_BLOCK_REASON,
+  recordActionAuthUnknownKinds,
 } from './action-auth-kind.js';
 import { bindStepObjections } from '../objection-evidence-bind.js';
 import {
@@ -75,6 +76,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     req.mode === 'action_authorization'
       ? classifyActionAuthKind(req.claim, req.evidence, req.mandate)
       : null;
+  const unknownKinds = actionAuthKind
+    ? recordActionAuthUnknownKinds(actionAuthKind.action_kind, actionAuthKind.mandate_kind)
+    : null;
   const objectiveMismatch = actionAuthKind?.objective_mismatch === true;
 
   const gateField = gateResult && !gateResult.silent
@@ -199,11 +203,12 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
                     ? {
                         action_kind: actionAuthKind.action_kind,
                         mandate_kind: actionAuthKind.mandate_kind,
+                        ...(unknownKinds ?? {}),
                       }
                     : {}),
                   release_id: releaseId,
                   policy:
-                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed+p0-informational-allowlist',
+                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed',
                 },
               }
             : {}),
@@ -281,6 +286,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         ? {
             action_kind: actionAuthKind.action_kind,
             mandate_kind: actionAuthKind.mandate_kind,
+            ...(unknownKinds ?? {}),
           }
         : {}),
       // Deploy provenance: Vercel sets VERCEL_GIT_COMMIT_SHA; local/dev may set
@@ -291,7 +297,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         process.env.RELEASE_ID ||
         undefined,
       policy:
-        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist',
+        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed',
     };
   }
 

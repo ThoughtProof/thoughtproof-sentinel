@@ -9,6 +9,10 @@
 
 import { toPublicVerdict, type InternalVerdict } from 'pot-cli/verdict';
 import type { SentinelVerdict, SentinelMode } from '../types.js';
+import {
+  informationalActionMayPublicAllow,
+  type ActionKind,
+} from './action-auth-kind.js';
 
 /**
  * Mode-specific verdict overrides.
@@ -134,9 +138,10 @@ export interface ActionAuthPromotionInput {
    */
   objectiveMismatch?: boolean | null;
   /**
-   * Classifier kinds (issue #38 allowlist). When `actionKind` is
-   * informational, public ALLOW requires `mandateKind === 'informational'`.
-   * Omitted kinds do not apply this extra check (tests / other callers).
+   * Classifier kinds (issues #38 / #47 allowlist). When `actionKind` is
+   * informational *or* unknown, public ALLOW requires
+   * `mandateKind === 'informational'`. Omitted kinds do not apply this
+   * extra check (tests / other callers).
    */
   actionKind?: string | null;
   mandateKind?: string | null;
@@ -240,14 +245,18 @@ export function resolveActionAuthPromotion(
     return finish(input.mappedVerdict, false, 'not_action_authorization');
   }
 
-  // P0 2026-09-10 / #38: informational action may public-ALLOW only when
-  // the mandate is positively informational. Cascade agreement_allow
-  // (and MCP claim=proposed_action faithfulness) must not fail-open.
-  // #37 blacklist (English/DE ship + pay) is subsumed by this invert.
+  // P0 2026-09-10 / #38 + #47: informational *or* unknown action may
+  // public-ALLOW only when the mandate is positively informational.
+  // Cascade agreement_allow (and MCP claim=proposed_action faithfulness)
+  // must not fail-open. #37 blacklist is subsumed by this invert.
+  // Omitted kinds do not apply the extra check.
+  const kindsPresent = input.actionKind != null && input.mandateKind != null;
   const informationalAllowlistBlocked =
-    input.actionKind === 'informational' &&
-    input.mandateKind != null &&
-    input.mandateKind !== 'informational';
+    kindsPresent &&
+    !informationalActionMayPublicAllow(
+      input.actionKind as ActionKind,
+      input.mandateKind as ActionKind,
+    );
   if (input.objectiveMismatch === true || informationalAllowlistBlocked) {
     return finish('BLOCK', false, 'objective_mismatch_fail_closed');
   }

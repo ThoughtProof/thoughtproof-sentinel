@@ -24,13 +24,19 @@
  * (issue #38). Companion MCP claim rewrite: thoughtproof-mcp#21 —
  * Sentinel does not paper over `claim === proposed_action`.
  *
- * Silent (no hint) on financial / permission / unknown / mixed-transfer
- * *actions* — the existing amount/recipient/least-privilege criteria stay
- * in charge. An informational action vs an unknown mandate is not silent.
+ * Silent (no hint) on financial / permission / mixed-transfer *actions*
+ * and on unknown actions against a positively informational mandate —
+ * the existing amount/recipient/least-privilege criteria stay in charge.
+ * An informational action vs an unknown mandate is not silent. An
+ * `unknown` action vs a mandate that is not positively informational
+ * fail-closes (issue #47) — classifier abstention is not an allow.
  *
- * Axis-selection keywords are English-only (`fyi`, `notify`, `tell`,
- * `inform`, `info`, `status ping`). Non-English heads do not select an
- * informational axis.
+ * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
+ * `inform`, `info`, `status ping`) plus a small DE informational set
+ * (Informiere, Info an, Bescheid geben, Rückmeldung, Status an).
+ * Target architecture: host-declared `mandate.kind` / `action.kind`
+ * (companion thoughtproof-mcp#21); prose is fallback; `unknown` →
+ * fail-closed. This file does not invent that host API.
  */
 
 import type { AuthorizationMandate } from './authorization-gate.js';
@@ -103,12 +109,29 @@ const POSITIVE_SHIP_RE =
 const SHIP_NEGATION_BEFORE_RE =
   /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b|\bkein(?:e|en|em|er)?\b|\bnicht\b|\bohne\b|\bniemals\b)\s+(?:\w+\s+){0,4}$/i;
 
-/** English-only informational heads (no language-specific particles). */
-const INFO_HEAD_RE =
-  /^(?:the\s+proposed\s+)?(?:fyi|notify|notifying|tell|telling|inform|info|status(?:\s+ping)?)\b/i;
+/** English informational heads (no language-specific particles). */
+const EN_INFO_HEAD =
+  '(?:fyi|notify|notifying|tell|telling|inform|info|status(?:\\s+ping)?)';
 
-const INFO_ANY_RE =
-  /\b(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\s+\w+|inform|info)\b/i;
+/**
+ * Small DE informational set (issue #47) — not full i18n.
+ * Informiere / Info an / Bescheid / Rückmeldung. "Status an" is covered
+ * by the English `status` head (`status(?:\\s+ping)?` matches "Status an").
+ */
+const DE_INFO_HEAD = '(?:informier(?:e|en|t)|bescheid|r[uü]ckmeldung)';
+
+const INFO_HEAD_RE = new RegExp(
+  `^(?:the\\s+proposed\\s+)?(?:${EN_INFO_HEAD}|${DE_INFO_HEAD})\\b`,
+  'i',
+);
+
+const EN_INFO_ANY =
+  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info)';
+
+const DE_INFO_ANY =
+  '(?:informier(?:e|en|t)|info\\s+an|status\\s+an|r[uü]ckmeldung|bescheid(?:\\s+(?:geben|sagen))?|gib(?:st|t)?\\s+(?:\\w+\\s+){0,4}bescheid)';
+
+const INFO_ANY_RE = new RegExp(`\\b(?:${EN_INFO_ANY}|${DE_INFO_ANY})\\b`, 'i');
 
 const VALUE_HEAD_RE =
   /^(?:granting|grant|approve|approving|sign(?:ing)?|permit|transfer|send(?:ing)?\s+\d|swap(?:ping)?|bridge|pay(?:ing)?)\b/i;
@@ -125,7 +148,7 @@ const MONEY_CONTEXT_RE =
   /\$|USDC|USD|ETH|EUR|WETH|budget|ceiling|allowance|MAX_UINT|notional|invoice/i;
 
 const NOTIFY_OBJECT_RE =
-  /\b(?:notify(?:ing)?|tell(?:ing)?|inform|fyi(?:\s+to)?|info)\s+(?:an?\s+)?([^\n,.;:]+?)(?=\s+(?:that|about|host|issue|status|we|the\s+|to\s+|for\b)|\s*[.,;:]|$)/gi;
+  /\b(?:notify(?:ing)?|tell(?:ing)?|inform(?:iere|ieren|iert)?|fyi(?:\s+to)?|info|status|r[uü]ckmeldung|bescheid)\s+(?:an?\s+|an\s+)?([^\n,.;:]+?)(?=\s+(?:that|about|host|issue|status|we|the\s+|to\s+|for\b|über|zum|zur|dass)\b|\s*[.,;:]|$)/gi;
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -281,7 +304,7 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic objective mismatch: an informational/notify action may public-ALLOW only when mandate_kind is positively informational. Mandate is ship/pin/deploy/publish, value-transfer/permission, or unknown — action is notify/FYI only (objective_mismatch).';
+  'Deterministic objective mismatch: an informational/notify or unknown action may public-ALLOW only when mandate_kind is positively informational. Mandate is ship/pin/deploy/publish, value-transfer/permission, or unknown — action is notify/FYI only or unclassified (objective_mismatch).';
 
 /** Trust is positively derived: only this kind may ALLOW an informational action. */
 export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
@@ -289,15 +312,53 @@ export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
 }
 
 /**
- * Public-ALLOW allowlist for informational actions (issue #38).
- * Non-informational actions are out of scope for this rule (cascade / gate).
+ * Public-ALLOW allowlist for informational *and* unknown actions
+ * (issues #38 / #47). `unknown` vs a mandate that is not positively
+ * informational fail-closes — abstention is not an allow.
+ * value_transfer / permission / deploy_ship actions stay out of scope
+ * for this rule (cascade / financial gate).
  */
 export function informationalActionMayPublicAllow(
   actionKind: ActionKind,
   mandateKind: ActionKind,
 ): boolean {
-  if (actionKind !== 'informational') return true;
+  if (actionKind !== 'informational' && actionKind !== 'unknown') return true;
   return mandateIsPositivelyInformational(mandateKind);
+}
+
+export interface ActionAuthUnknownKindCounts {
+  unknown_action: number;
+  unknown_mandate: number;
+}
+
+const unknownKindCounts: ActionAuthUnknownKindCounts = {
+  unknown_action: 0,
+  unknown_mandate: 0,
+};
+
+/**
+ * Per-request unknown-kind flags + process counters (issue #47).
+ * Isolates reset on serverless; Runtime Logs `unknown_action=1` /
+ * `unknown_mandate=1` are the durable abstention signal.
+ */
+export function recordActionAuthUnknownKinds(
+  actionKind: ActionKind,
+  mandateKind: ActionKind,
+): { unknown_action: boolean; unknown_mandate: boolean } {
+  const unknown_action = actionKind === 'unknown';
+  const unknown_mandate = mandateKind === 'unknown';
+  if (unknown_action) unknownKindCounts.unknown_action += 1;
+  if (unknown_mandate) unknownKindCounts.unknown_mandate += 1;
+  return { unknown_action, unknown_mandate };
+}
+
+export function getActionAuthUnknownCounts(): ActionAuthUnknownKindCounts {
+  return { ...unknownKindCounts };
+}
+
+export function resetActionAuthUnknownCountsForTests(): void {
+  unknownKindCounts.unknown_action = 0;
+  unknownKindCounts.unknown_mandate = 0;
 }
 
 function mandateLooksFinancial(mandate?: AuthorizationMandate): boolean {
@@ -369,19 +430,24 @@ export function classifyActionAuthKind(
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
-  // Informational/notify action: public ALLOW only when the mandate is
-  // positively informational. Ship/pay/permission *and* unknown/ambiguous
-  // fail closed. Independent of leadingKind on the mandate so
-  // "After CI, ship. Also notify CoS" still mismatches. An action that
-  // *is* a ship or spend stays its own kind and does not trip this rule.
+  // Informational/notify *or* unknown action: public ALLOW only when the
+  // mandate is positively informational. Ship/pay/permission *and*
+  // unknown/ambiguous fail closed. Independent of leadingKind on the
+  // mandate so "After CI, ship. Also notify CoS" still mismatches. An
+  // action that *is* a ship or spend stays its own kind and does not
+  // trip this rule. Unknown-action abstention is fail-closed (#47).
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&
     !hasPermissionGrant(actionText) &&
     !mixedTransfer;
 
+  const unknownActionVsNonInfoMandate =
+    action_kind === 'unknown' && !mandateIsPositivelyInformational(mandate_kind);
+
   const objective_mismatch =
-    actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind);
+    (actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind)) ||
+    unknownActionVsNonInfoMandate;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -392,12 +458,12 @@ export function classifyActionAuthKind(
     mixedTransfer ||
     action_kind === 'value_transfer' ||
     action_kind === 'permission' ||
-    action_kind === 'unknown';
+    (action_kind === 'unknown' && !unknownActionVsNonInfoMandate);
 
   let axisHint: string | null = null;
-  if (!silent && action_kind === 'informational') {
+  if (!silent && (action_kind === 'informational' || unknownActionVsNonInfoMandate)) {
     const parts = [
-      'action_kind=informational',
+      `action_kind=${action_kind}`,
       'value_transfer=false',
       'permission_grant=false',
     ];
