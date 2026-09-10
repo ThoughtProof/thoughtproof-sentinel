@@ -258,6 +258,12 @@ export interface SentinelStepObjection {
    */
   quote_match_mode?: 'exact' | 'trimmed' | 'line_whitespace' | 'unicode' | 'none';
   /**
+   * Who authored this objection surface. `deterministic_gate` means Sentinel
+   * overwrote predicate/score/reasoning after a machine-checkable mismatch
+   * (quote / quote_source from the cascade are preserved when present).
+   */
+  objection_source?: 'cascade' | 'deterministic_gate';
+  /**
    * Per-step reasoning. Uses the evaluator's prose when present; otherwise a
    * deterministic fallback synthesized from predicate + criterion (the cheap
    * SERV tiers do not always emit per-step prose).

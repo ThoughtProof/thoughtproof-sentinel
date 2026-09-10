@@ -215,6 +215,8 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(step2!.predicate).toBe('unfaithful');
     expect(step2!.score).toBe(0);
     expect(step2!.reasoning).toMatch(/objective_mismatch|Ship-mismatch/i);
+    expect(step2!.quote).toBe(action);
+    expect(step2!.objection_source).toBe('deterministic_gate');
     expect(JSON.stringify(res)).not.toMatch(/undefined\s*\[PROVENANCE/i);
     const evalInput = mockRunCascade.mock.calls[0][0] as { question: string };
     expect(evalInput.question).toMatch(/objective_mismatch=true/);
@@ -287,6 +289,64 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     const step2 = res.objections.find((o) => o.step_id === 'step_2');
     expect(step2?.predicate).toBe('unfaithful');
     expect(step2?.reasoning).not.toMatch(/weakly supported/i);
+  });
+
+  it('MCP German ship mandate + notify: claim=proposed_action + cascade ALLOW → BLOCK', async () => {
+    const mandate = 'Deploye erst wenn CI grün. Veröffentliche das Paket nach dem npm-Pin.';
+    const action = 'Notify CoS that CI is green.';
+    const evidence = mcpEvidence(mandate, action, 'Status ping only; nicht ausliefern.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named teammate.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.85, quote: action, reasoning: 'Notify looks aligned.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.quote).toBe(action);
+    expect(step2?.objection_source).toBe('deterministic_gate');
+  });
+
+  it('MCP payment mandate + notify: claim=proposed_action + cascade ALLOW → BLOCK', async () => {
+    const mandate = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const action = 'Notify CoS that the invoice is handled.';
+    const evidence = mcpEvidence(mandate, action, 'FYI only; do not send USDC.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend in the action.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'CoS named.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'FYI about the invoice.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.quote).toBe(action);
+    expect(step2?.objection_source).toBe('deterministic_gate');
   });
 
   it('Ship-mismatch stays BLOCK on scope/objective (not provenance)', async () => {

@@ -181,6 +181,35 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
     expect(c.objective_mismatch).toBe(true);
   });
 
+  it('German ship mandate + notify action is objective_mismatch (small DE verb set)', () => {
+    const ev = mcpEvidence(
+      'Deploye erst wenn CI grün. Veröffentliche das Paket nach dem npm-Pin.',
+      'Notify CoS that CI is green.',
+      'Status ping only; nicht ausliefern.',
+    );
+    const c = classifyActionAuthKind('Notify CoS that CI is green.', ev);
+    expect(c.action_kind).toBe('informational');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).toMatch(/mandate_kind=deploy_ship/);
+  });
+
+  it('payment mandate + notify-only action is objective_mismatch', () => {
+    const ev = mcpEvidence(
+      'Pay invoice #4471 by sending 250 USDC to 0xACME1234.',
+      'Notify CoS that the invoice is handled.',
+      'FYI only; do not send USDC.',
+    );
+    const c = classifyActionAuthKind('Notify CoS that the invoice is handled.', ev);
+    expect(c.action_kind).toBe('informational');
+    expect(c.mandate_kind).toBe('value_transfer');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.value_transfer).toBe(false);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).toMatch(/mandate_kind=value_transfer/);
+  });
+
   it('does not treat FYI "release notes" or negated deploy as a ship mandate', () => {
     const notes = classifyActionAuthKind(
       'Tell CoS about the release notes',

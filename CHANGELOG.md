@@ -4,17 +4,22 @@
 
 ### Fixed
 
-- **P0 Ship-mismatch fail-open on MCP `verify_before_action` (after #34):**
+- **Mitigation (not a closed #36) — English ship-mismatch fail-open on
+  MCP `verify_before_action` (after #34):**
   thoughtproof-mcp `buildSentinelVerifyBody` sets `claim` to
   `proposed_action` (not an "X is authorized by Y" assertion). After #34,
   informational steps 0/1/3 PASS and the cascade can `agreement_allow` or
   HOLD ("objective only weakly supported"). `resolveActionAuthPromotion`
   then passed `already_allow` through. Sentinel now hard-BLOCKs when
-  `classifyActionAuthKind` sets `objective_mismatch=true` — including
-  MCP host-quote `User mandate:` + excerpt spans, and mandate text that
-  mixes ship + notify. FYI-aligned (`claim` = action, no ship mandate)
-  is unchanged. Not an npm publish; public pin stays
-  `thoughtproof-mcp@0.3.2`.
+  `classifyActionAuthKind` sets `objective_mismatch=true` for a
+  notify-only action vs a non-informational mandate (English
+  ship/pin/deploy/publish, a small DE ship-verb set
+  deploye/veröffentliche/veröffentlichen/ausliefern, or a
+  value-transfer/permission mandate). MCP `User mandate:` excerpts and
+  ship+notify mandate prose are covered. FYI-aligned (`claim` = action,
+  informational mandate) is unchanged. This is **not** full i18n or
+  allowlist inversion — #36 stays open for follow-ups. Not an npm
+  publish; public pin stays `thoughtproof-mcp@0.3.2`.
 - `action_authorization` gold steps no longer treat aligned crew FYI /
   status pings as unbound spend or unauthorized counterparties (issue
   #33). Identifiers (issue numbers, versions) are not amounts; a named

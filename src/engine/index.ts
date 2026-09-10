@@ -406,21 +406,30 @@ function applyObjectiveMismatchSurface(
 ): SentinelStepObjection[] {
   const gold = goldSteps.find((g) => g.index === 2);
   const criterion = gold?.acceptance_criterion ?? gold?.description ?? 'Action serves the instruction given';
-  const fail: SentinelStepObjection = {
-    step_id: 'step_2',
-    criterion,
-    score: 0,
-    predicate: 'unfaithful',
-    quote: null,
-    quote_source: null,
-    reasoning: OBJECTIVE_MISMATCH_BLOCK_REASON,
-  };
   if (!objections.some((o) => o.step_id === 'step_2')) {
-    return [...objections, fail];
+    return [
+      ...objections,
+      {
+        step_id: 'step_2',
+        criterion,
+        score: 0,
+        predicate: 'unfaithful',
+        quote: null,
+        quote_source: null,
+        reasoning: OBJECTIVE_MISMATCH_BLOCK_REASON,
+        objection_source: 'deterministic_gate',
+      },
+    ];
   }
   return objections.map((o) =>
     o.step_id === 'step_2'
-      ? { ...o, ...fail, criterion: o.criterion || criterion }
+      ? {
+          ...o,
+          score: 0,
+          predicate: 'unfaithful',
+          reasoning: OBJECTIVE_MISMATCH_BLOCK_REASON,
+          objection_source: 'deterministic_gate',
+        }
       : o,
   );
 }

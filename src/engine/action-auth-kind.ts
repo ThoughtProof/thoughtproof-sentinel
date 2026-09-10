@@ -13,10 +13,13 @@
  * treated as authoritative (PR #34 review).
  *
  * It never asserts `objective_aligned=true`. It MAY assert
- * `objective_mismatch=true` when the mandate is ship/pin/deploy and the
- * action is notify-only. The engine then hard-BLOCKs (promotion
+ * `objective_mismatch=true` when the action is notify-only and the
+ * mandate is a non-informational kind (ship/pin/deploy/publish, value
+ * transfer, or permission). The engine then hard-BLOCKs (promotion
  * `objective_mismatch_fail_closed`) so cascade `agreement_allow` cannot
- * fail-open — including MCP `claim === proposed_action`.
+ * fail-open — including MCP `claim === proposed_action`. This is an
+ * English-majority mitigation plus a small DE ship-verb set — not full
+ * i18n / allowlist inversion.
  *
  * Silent (no hint) on financial / permission / unknown / mixed-transfer
  * actions — the existing amount/recipient/least-privilege criteria stay
@@ -80,16 +83,25 @@ const VALUE_RE =
 const PERMISSION_RE =
   /MAX_UINT256|unlimited\s+approval|approve\s*\(|Permit2|blanket\s+permit|\ballowance\b|spend\s+authority/i;
 
+const DE_SHIP_VERBS = 'deploye|veröffentliche|veröffentlichen|ausliefern';
+
 const DEPLOY_RE =
-  /\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\s+the)?\s+npm|npm\s+(?:version\s+)?pin|send-to-prod|release)\b/i;
+  new RegExp(
+    `\\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\\s+the)?\\s+npm|npm\\s+(?:version\\s+)?pin|send-to-prod|release|${DE_SHIP_VERBS})\\b`,
+    'i',
+  );
 
 /**
  * Positive ship/pin/deploy/publish for Ship-mismatch. Omits bare `release`
  * (FYI "release notes" must not flip a notify mandate). Negated mentions
- * ("no deploy", "do not pin npm") do not count.
+ * ("no deploy", "do not pin npm") do not count. Small DE verb set only —
+ * not full i18n.
  */
 const POSITIVE_SHIP_RE =
-  /\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\s+the)?\s+npm|npm\s+(?:version\s+)?pin|send-to-prod)\b/gi;
+  new RegExp(
+    `\\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\\s+the)?\\s+npm|npm\\s+(?:version\\s+)?pin|send-to-prod|${DE_SHIP_VERBS})\\b`,
+    'gi',
+  );
 
 const SHIP_NEGATION_BEFORE_RE =
   /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b)\s+(?:\w+\s+){0,4}$/i;
@@ -105,7 +117,7 @@ const VALUE_HEAD_RE =
   /^(?:granting|grant|approve|approving|sign(?:ing)?|permit|transfer|send(?:ing)?\s+\d|swap(?:ping)?|bridge|pay(?:ing)?)\b/i;
 
 const DEPLOY_HEAD_RE =
-  /^(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?|release)\b/i;
+  /^(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?|release|deploye|veröffentliche|veröffentlichen|ausliefern)\b/i;
 
 const ETH_ADDR_RE = /0x[0-9a-fA-F]{40}/;
 
@@ -271,7 +283,7 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic Ship-mismatch: mandate instructs ship/pin/deploy/publish; action is notify/FYI only (objective_mismatch).';
+  'Deterministic objective mismatch: mandate is ship/pin/deploy/publish or a value-transfer/permission instruction; action is notify/FYI only (objective_mismatch).';
 
 function mandateLooksFinancial(mandate?: AuthorizationMandate): boolean {
   if (!mandate) return false;
@@ -334,16 +346,23 @@ export function classifyActionAuthKind(
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
-  // Notify-only action against a positive ship/pin/deploy/publish mandate.
-  // Independent of leadingKind on the mandate so "After CI, ship. Also notify
-  // CoS" still mismatches. Action that *is* a ship (leading deploy) stays
-  // deploy_ship and does not trip this.
-  const objective_mismatch =
-    mandateHasPositiveShip &&
+  // Notify-only action against a non-informational mandate (ship/pin/deploy,
+  // value transfer, or permission). Independent of leadingKind on the
+  // mandate so "After CI, ship. Also notify CoS" still mismatches. An
+  // action that *is* a ship or spend stays its own kind and does not trip.
+  const actionIsNotifyOnly =
     action_kind === 'informational' &&
-    !value_transfer &&
-    !permission_grant &&
+    !hasValueTransfer(actionText) &&
+    !hasPermissionGrant(actionText) &&
     !mixedTransfer;
+
+  const mandateIsNonInformational =
+    mandateHasPositiveShip ||
+    mandate_kind === 'deploy_ship' ||
+    mandate_kind === 'value_transfer' ||
+    mandate_kind === 'permission';
+
+  const objective_mismatch = actionIsNotifyOnly && mandateIsNonInformational;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -370,7 +389,7 @@ export function classifyActionAuthKind(
       parts.push('named_recipient_in_mandate=true');
     }
     if (objective_mismatch) {
-      parts.push('mandate_kind=deploy_ship', 'objective_mismatch=true');
+      parts.push(`mandate_kind=${mandate_kind}`, 'objective_mismatch=true');
     }
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }

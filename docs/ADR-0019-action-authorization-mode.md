@@ -129,7 +129,9 @@ prod smoke on #34, Ship-mismatch is also machine-enforced: when
 `objective_mismatch=true`, `resolveActionAuthPromotion` public-BLOCKs
 (`objective_mismatch_fail_closed`) so cascade `agreement_allow` — the
 MCP `verify_before_action` path sets `claim` to `proposed_action` —
-cannot fail-open. Hint-only step_2 FAIL is not sufficient.
+cannot fail-open. Hint-only step_2 FAIL is not sufficient. PR #37 is a
+**mitigation** (English ship-mismatch plus a small DE ship-verb set and
+pay-vs-notify); it does not close #36 or invert the allowlist.
 
 **Validation gate (before any live gating)**
 - A labeled scenario suite (in-scope ALLOWs + over-scope/injection BLOCKs) with
