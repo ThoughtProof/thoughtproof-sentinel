@@ -3,7 +3,12 @@ import { validateVerifyRequest } from '../../src/validation.js';
 import { verify } from '../../src/engine/index.js';
 import { buildAttestationData, issueAttestation } from '../../src/eas/attest.js';
 import { buildBillingEvent, recordBillingEvent } from '../../src/billing.js';
-import { validateApiKey, checkRateLimit, checkGlobalRateLimit } from '../../src/auth.js';
+import {
+  validateApiKey,
+  checkRateLimit,
+  checkGlobalRateLimit,
+  rateLimitUnavailablePayload,
+} from '../../src/auth.js';
 import { x402Gate } from '../../src/middleware/x402.js';
 import { processSignedEvidence, applyEvidenceEffects } from '../../src/evidence-processing.js';
 import type { PaymentPlatform } from '../../src/types.js';
@@ -59,27 +64,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(503).json(modelConfigUnavailablePayload(requestId));
     }
 
-    // --- x402 Payment Gate (after auth, before engine) ---
-    const paymentResult = await x402Gate(req, res);
-    if (!paymentResult.allowed) {
-      return; // Gate already sent the 402/4xx response
-    }
+    // --- Rate Limiting BEFORE x402 (ADR-0021). ---
+    // Unset Redis → in-memory fallback. Configured-but-broken Redis → 503
+    // RATE_LIMIT_UNAVAILABLE (fail closed; do not bill / settle).
+    const rateLimitKey =
+      (req.headers['x-sentinel-key'] as string) ??
+      (req.headers['x-forwarded-for'] as string) ??
+      'anonymous';
+    const rateLimit =
+      authResult.valid && req.headers['x-sentinel-key']
+        ? await checkRateLimit(rateLimitKey, 120) // Authenticated: 120/min
+        : await checkGlobalRateLimit(); // Unauthenticated: 30/min
 
-    // --- Rate Limiting (Upstash Redis or in-memory fallback) ---
-    const rateLimitKey = (req.headers['x-sentinel-key'] as string) ?? req.headers['x-forwarded-for'] as string ?? 'anonymous';
-    const rateLimit = authResult.valid && req.headers['x-sentinel-key']
-      ? await checkRateLimit(rateLimitKey, 120) // Authenticated: 120/min
-      : await checkGlobalRateLimit();           // Unauthenticated: 30/min
+    if (rateLimit.unavailable) {
+      res.setHeader('Retry-After', '30');
+      return res.status(503).json(rateLimitUnavailablePayload(requestId));
+    }
 
     res.setHeader('X-RateLimit-Remaining', rateLimit.remaining.toString());
 
     if (!rateLimit.allowed) {
+      const retryAfterMs =
+        typeof rateLimit.resetAt === 'number'
+          ? Math.max(rateLimit.resetAt - Date.now(), 0)
+          : 60_000;
+      res.setHeader('Retry-After', Math.max(1, Math.ceil(retryAfterMs / 1000)).toString());
       return res.status(429).json({
         error: 'Rate limit exceeded',
         code: 'RATE_LIMITED',
         remaining: 0,
-        retry_after_ms: ('resetAt' in rateLimit) ? (rateLimit as { resetAt: number }).resetAt - Date.now() : 60_000,
+        retry_after_ms: retryAfterMs,
       });
+    }
+
+    // --- x402 Payment Gate (after auth + rate limit, before engine) ---
+    const paymentResult = await x402Gate(req, res);
+    if (!paymentResult.allowed) {
+      return; // Gate already sent the 402/4xx response
     }
 
     // --- Request Validation ---

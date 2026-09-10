@@ -7,25 +7,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { validateApiKey, checkRateLimit, checkGlobalRateLimit, _resetLimiters } from './auth.js';
 
+const mockLimit = vi.fn().mockResolvedValue({
+  success: true,
+  remaining: 119,
+  reset: Date.now() + 60000,
+  limit: 120,
+});
+
 // Mock @upstash/ratelimit
 vi.mock('@upstash/ratelimit', () => {
-  const mockLimit = vi.fn().mockResolvedValue({
-    success: true,
-    remaining: 119,
-    reset: Date.now() + 60000,
-    limit: 120,
-  });
-
   const RatelimitMock = vi.fn().mockImplementation(() => ({
     limit: mockLimit,
   }));
-
-  // Static method used in: new Ratelimit({ limiter: Ratelimit.slidingWindow(...) })
   RatelimitMock.slidingWindow = vi.fn().mockReturnValue('sliding-window-config');
-
-  return {
-    Ratelimit: RatelimitMock,
-  };
+  return { Ratelimit: RatelimitMock };
 });
 
 // Mock @upstash/redis
@@ -90,7 +85,6 @@ describe('checkRateLimit — in-memory fallback', () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    // Ensure no Upstash env vars → forces in-memory fallback
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
     _resetLimiters();
@@ -132,6 +126,13 @@ describe('checkRateLimit — Upstash Redis', () => {
   beforeEach(() => {
     process.env.UPSTASH_REDIS_REST_URL = 'https://fake-redis.upstash.io';
     process.env.UPSTASH_REDIS_REST_TOKEN = 'fake-token';
+    mockLimit.mockReset();
+    mockLimit.mockResolvedValue({
+      success: true,
+      remaining: 119,
+      reset: Date.now() + 60000,
+      limit: 120,
+    });
     _resetLimiters();
   });
 
@@ -149,6 +150,31 @@ describe('checkRateLimit — Upstash Redis', () => {
   it('returns Upstash reset timestamp', async () => {
     const result = await checkRateLimit('test_upstash_reset', 120);
     expect(result.resetAt).toBeGreaterThan(Date.now() - 1000);
+  });
+
+  it('trims trailing newline on token and still uses Upstash', async () => {
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'fake-token\n';
+    _resetLimiters();
+    const result = await checkRateLimit('test_upstash_trim', 120);
+    expect(result.allowed).toBe(true);
+    expect(result.unavailable).toBeUndefined();
+  });
+
+  it('fail-closes when Redis env is invalid after trim', async () => {
+    process.env.UPSTASH_REDIS_REST_TOKEN = '   \n';
+    _resetLimiters();
+    const result = await checkRateLimit('test_upstash_invalid', 120);
+    expect(result.allowed).toBe(false);
+    expect(result.unavailable).toBe(true);
+    expect(result.code).toBe('RATE_LIMIT_UNAVAILABLE');
+  });
+
+  it('fail-closes when limit() throws', async () => {
+    mockLimit.mockRejectedValueOnce(new Error('redis down'));
+    const result = await checkRateLimit('boom_key', 120);
+    expect(result.allowed).toBe(false);
+    expect(result.unavailable).toBe(true);
+    expect(result.code).toBe('RATE_LIMIT_UNAVAILABLE');
   });
 });
 
@@ -178,6 +204,13 @@ describe('checkGlobalRateLimit — Upstash Redis', () => {
   beforeEach(() => {
     process.env.UPSTASH_REDIS_REST_URL = 'https://fake-redis.upstash.io';
     process.env.UPSTASH_REDIS_REST_TOKEN = 'fake-token';
+    mockLimit.mockReset();
+    mockLimit.mockResolvedValue({
+      success: true,
+      remaining: 119,
+      reset: Date.now() + 60000,
+      limit: 120,
+    });
     _resetLimiters();
   });
 

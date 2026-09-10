@@ -5,15 +5,24 @@
  * Phase 1: X-Sentinel-Key validation + per-key rate limiting
  *
  * Rate limiting uses Upstash Redis when UPSTASH_REDIS_REST_URL and
- * UPSTASH_REDIS_REST_TOKEN are set. Falls back to in-memory (per-invocation)
- * when not configured — this only works within a single warm Vercel instance.
+ * UPSTASH_REDIS_REST_TOKEN resolve cleanly. Falls back to in-memory
+ * (per-invocation) only when Redis is **unset** — not when it is broken.
+ *
+ * When Redis is configured but unavailable / errors at limit-time:
+ * **fail closed** (see docs/ADR-0021-rate-limit-fail-closed.md). Callers map
+ * `unavailable: true` to HTTP 503 RATE_LIMIT_UNAVAILABLE before x402.
  *
  * This module is a platform adapter concern — NOT part of the engine.
  */
 
 import type { PaymentPlatform } from './types.js';
 import { Ratelimit } from '@upstash/ratelimit';
-import { Redis } from '@upstash/redis';
+import {
+  getSharedUpstashRedis,
+  resolveUpstashConfig,
+  warnIfUpstashTrimmed,
+  _resetSharedUpstashRedis,
+} from './upstash-config.js';
 
 // --- API Key Store ---
 // Phase 1: Move to Vercel KV or Supabase. For now, env-var based.
@@ -26,45 +35,97 @@ interface ApiKeyConfig {
   enabled: boolean;
 }
 
+export type RateLimitResult = {
+  allowed: boolean;
+  remaining: number;
+  resetAt: number;
+  /** True when Redis was required but could not answer — fail closed. */
+  unavailable?: boolean;
+  code?: 'RATE_LIMIT_UNAVAILABLE';
+};
+
 // --- Upstash Rate Limiters (lazy init) ---
 
 let _authenticatedLimiter: Ratelimit | null = null;
 let _globalLimiter: Ratelimit | null = null;
 let _upstashChecked = false;
+/** 'ready' | 'missing' | 'invalid' | 'error' */
+let _upstashState: 'ready' | 'missing' | 'invalid' | 'error' = 'missing';
 
-function getUpstashLimiters(): { authenticated: Ratelimit; global: Ratelimit } | null {
+function getUpstashLimiters():
+  | { ok: true; authenticated: Ratelimit; global: Ratelimit }
+  | { ok: false; state: 'missing' | 'invalid' | 'error' } {
   if (_upstashChecked) {
-    return _authenticatedLimiter && _globalLimiter
-      ? { authenticated: _authenticatedLimiter, global: _globalLimiter }
-      : null;
+    if (_upstashState === 'ready' && _authenticatedLimiter && _globalLimiter) {
+      return {
+        ok: true,
+        authenticated: _authenticatedLimiter,
+        global: _globalLimiter,
+      };
+    }
+    return { ok: false, state: _upstashState === 'ready' ? 'error' : _upstashState };
   }
   _upstashChecked = true;
 
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const cfg = resolveUpstashConfig();
+  warnIfUpstashTrimmed(cfg);
 
-  if (!url || !token) {
-    return null;
+  if (cfg.status === 'missing') {
+    _upstashState = 'missing';
+    return { ok: false, state: 'missing' };
   }
 
-  const redis = new Redis({ url, token });
+  if (cfg.status === 'invalid') {
+    _upstashState = 'invalid';
+    return { ok: false, state: 'invalid' };
+  }
 
-  _authenticatedLimiter = new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(120, '60 s'),
-    prefix: 'sentinel:rl:auth',
-  });
+  try {
+    const redis = getSharedUpstashRedis();
+    if (!redis) {
+      _upstashState = 'missing';
+      return { ok: false, state: 'missing' };
+    }
 
-  _globalLimiter = new Ratelimit({
-    redis,
-    limiter: Ratelimit.slidingWindow(
-      parseInt(process.env.SENTINEL_GLOBAL_RATE_LIMIT ?? '30', 10),
-      '60 s',
-    ),
-    prefix: 'sentinel:rl:global',
-  });
+    _authenticatedLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(120, '60 s'),
+      prefix: 'sentinel:rl:auth',
+    });
 
-  return { authenticated: _authenticatedLimiter, global: _globalLimiter };
+    _globalLimiter = new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(
+        parseInt(process.env.SENTINEL_GLOBAL_RATE_LIMIT ?? '30', 10),
+        '60 s',
+      ),
+      prefix: 'sentinel:rl:global',
+    });
+
+    _upstashState = 'ready';
+    return {
+      ok: true,
+      authenticated: _authenticatedLimiter,
+      global: _globalLimiter,
+    };
+  } catch (err) {
+    _upstashState = 'error';
+    console.error(
+      '[sentinel/auth] Upstash limiter init failed:',
+      err instanceof Error ? err.message : err,
+    );
+    return { ok: false, state: 'error' };
+  }
+}
+
+function unavailableResult(): RateLimitResult {
+  return {
+    allowed: false,
+    remaining: 0,
+    resetAt: Date.now() + 30_000,
+    unavailable: true,
+    code: 'RATE_LIMIT_UNAVAILABLE',
+  };
 }
 
 /** Reset cached limiters — for testing only */
@@ -72,6 +133,8 @@ export function _resetLimiters(): void {
   _authenticatedLimiter = null;
   _globalLimiter = null;
   _upstashChecked = false;
+  _upstashState = 'missing';
+  _resetSharedUpstashRedis();
 }
 
 // --- In-memory fallback (original) ---
@@ -82,11 +145,11 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 function checkRateLimitInMemory(
   key: string,
   maxPerMinute: number,
-): { allowed: boolean; remaining: number; resetAt: number } {
+): RateLimitResult {
   const now = Date.now();
   const existing = rateLimitWindows.get(key);
 
-  if (!existing || (now - existing.windowStart) > RATE_LIMIT_WINDOW_MS) {
+  if (!existing || now - existing.windowStart > RATE_LIMIT_WINDOW_MS) {
     rateLimitWindows.set(key, { count: 1, windowStart: now });
     return { allowed: true, remaining: maxPerMinute - 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
   }
@@ -151,44 +214,81 @@ export function validateApiKey(
  * Check rate limit for a given key.
  *
  * Uses Upstash Redis sliding window when configured.
- * Falls back to in-memory per-invocation tracking otherwise.
+ * Falls back to in-memory only when Redis env is unset.
+ * Fail-closed (unavailable) when Redis is configured but broken/errors.
  */
 export async function checkRateLimit(
   key: string,
   maxPerMinute: number = 60,
-): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+): Promise<RateLimitResult> {
   const upstash = getUpstashLimiters();
 
-  if (upstash) {
+  if (!upstash.ok) {
+    if (upstash.state === 'missing') {
+      return checkRateLimitInMemory(key, maxPerMinute);
+    }
+    // invalid | error → fail closed (do not silently uncap paid traffic)
+    return unavailableResult();
+  }
+
+  try {
     const result = await upstash.authenticated.limit(key);
     return {
       allowed: result.success,
       remaining: result.remaining,
       resetAt: result.reset,
     };
+  } catch (err) {
+    console.error(
+      '[sentinel/auth] Upstash rate-limit call failed (fail-closed):',
+      err instanceof Error ? err.message : err,
+    );
+    return unavailableResult();
   }
-
-  // Fallback: in-memory (only protects within a single warm instance)
-  return checkRateLimitInMemory(key, maxPerMinute);
 }
 
 /**
  * Global rate limit for unauthenticated requests (Phase 0).
  * More restrictive than per-key limits.
  */
-export async function checkGlobalRateLimit(): Promise<{ allowed: boolean; remaining: number; resetAt: number }> {
+export async function checkGlobalRateLimit(): Promise<RateLimitResult> {
   const upstash = getUpstashLimiters();
 
-  if (upstash) {
+  if (!upstash.ok) {
+    if (upstash.state === 'missing') {
+      const globalMax = parseInt(process.env.SENTINEL_GLOBAL_RATE_LIMIT ?? '30', 10);
+      return checkRateLimitInMemory('__global__', globalMax);
+    }
+    return unavailableResult();
+  }
+
+  try {
     const result = await upstash.global.limit('__global__');
     return {
       allowed: result.success,
       remaining: result.remaining,
       resetAt: result.reset,
     };
+  } catch (err) {
+    console.error(
+      '[sentinel/auth] Upstash global rate-limit call failed (fail-closed):',
+      err instanceof Error ? err.message : err,
+    );
+    return unavailableResult();
   }
+}
 
-  // Fallback
-  const globalMax = parseInt(process.env.SENTINEL_GLOBAL_RATE_LIMIT ?? '30', 10);
-  return checkRateLimitInMemory('__global__', globalMax);
+/** Stable payload for HTTP 503 when the limiter cannot answer. */
+export function rateLimitUnavailablePayload(requestId: string): {
+  error: string;
+  code: 'RATE_LIMIT_UNAVAILABLE';
+  request_id: string;
+  retry_after_s: number;
+} {
+  return {
+    error: 'Rate limit service temporarily unavailable',
+    code: 'RATE_LIMIT_UNAVAILABLE',
+    request_id: requestId,
+    retry_after_s: 30,
+  };
 }
