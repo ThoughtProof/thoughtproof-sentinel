@@ -5,6 +5,7 @@ import {
   canPromoteAllStepsPass,
   resolveActionAuthPromotion,
   acceptsMachineConditionProof,
+  decisionBasisForPromotionReason,
   type StepLite,
 } from './verdict.js';
 
@@ -117,6 +118,7 @@ describe('resolveActionAuthPromotion addendum', () => {
     });
     expect(d.publicVerdict).toBe('BLOCK');
     expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.decision_basis).toBe('deterministic');
   });
 
   it('never public-ALLOWs informational action unless mandate_kind is informational', () => {
@@ -164,6 +166,25 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).toBe('unclassified_abstention_fail_closed');
     expect(d.reason).not.toBe('already_allow');
     expect(d.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(d.decision_basis).toBe('deterministic');
+  });
+
+  it('marks cascade-derived ALLOW as decision_basis cascade', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      actionKind: 'informational',
+      mandateKind: 'informational',
+    });
+    expect(d.reason).toBe('already_allow');
+    expect(d.decision_basis).toBe('cascade');
+    expect(decisionBasisForPromotionReason('already_block')).toBe('cascade');
+    expect(decisionBasisForPromotionReason('objective_mismatch_fail_closed')).toBe(
+      'deterministic',
+    );
   });
 
   it('acceptsMachineConditionProof is fail-closed', () => {

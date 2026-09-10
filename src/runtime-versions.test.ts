@@ -59,10 +59,14 @@ describe('GET /sentinel/health', () => {
       ok: true,
       version: '0.1.0',
       pot_cli: potCli,
-      ...getModelReadiness(),
+      serv_key: getModelReadiness().serv_key,
     });
     expect((body as { pot_cli: string }).pot_cli).toMatch(/^\d+\.\d+\.\d+/);
     expect(['present', 'missing']).toContain((body as { serv_key: string }).serv_key);
+    expect(['redis', 'in_memory', 'unavailable']).toContain(
+      (body as { rate_limit: string }).rate_limit,
+    );
     expect(typeof (body as { ready: boolean }).ready).toBe('boolean');
+    expect((body as { ok: boolean }).ok).toBe(true);
   });
 });

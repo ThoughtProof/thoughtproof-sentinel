@@ -1,7 +1,7 @@
 # ADR-0021: Sentinel rate-limit fail-closed on Redis failure
 
-**Status:** Accepted (2026-09-10)  
-**Issue:** #41  
+**Status:** Accepted (2026-09-10); amended 2026-09-10 (#43)  
+**Issue:** #41 / #43  
 **Decider:** Founder product default (fail-closed), implemented in code
 
 ## Context
@@ -38,7 +38,43 @@ Root cause: `UPSTASH_REDIS_REST_TOKEN` Production env had a **trailing newline**
 - Operators must keep `UPSTASH_REDIS_REST_*` clean; prefer `printf '%s' | vercel env add` over dashboard paste.
 - Active limiter check (burst N calls / window against a **test** key) remains an operator script — not automated against production keys in CI.
 
+## Amendment (#43)
+
+### Health
+
+`GET /sentinel/health` exposes limiter store state:
+
+| `rate_limit` | Meaning |
+|---|---|
+| `redis` | `UPSTASH_REDIS_REST_*` resolve to a usable client |
+| `in_memory` | Redis env unset (dev fallback; not the production path) |
+| `unavailable` | configured-but-invalid (fail-closed) |
+
+`ready` is **false** when `rate_limit === "unavailable"` **or** `serv_key === "missing"`. `ok` remains liveness-only.
+
+### Limits — single source
+
+Authenticated ceiling, global default, window, 503 retry, and burst default live in `src/rate-limit-policy.json` (re-exported from `src/rate-limit-policy.ts`). The Upstash sliding window uses that authenticated number; callers must not pass a different ceiling.
+
+Current values: **120/min** authenticated, **30/min** global default, **60 s** window, **30 s** unavailable retry, burst default **140**.
+
+### Burst script
+
+`scripts/rate-limit-burst-check.mjs` defaults `BURST_N` above the authenticated ceiling. Expected mix on a healthy Redis limiter (authenticated, invalid-body verify): ~120 × HTTP 400, then HTTP 429 + `Retry-After`. HTTP 503 `RATE_LIMIT_UNAVAILABLE` means Redis is still broken.
+
+Optional Preview-only 503 dogfood (no Production env flip): branch-bound invalid `UPSTASH_REDIS_REST_TOKEN`, expect 503 + `Retry-After: 30` and no billing event.
+
+### Payment intents
+
+`POST /sentinel/payment-intents/:id/confirm` is directly reachable (not via verify). Unreachable / invalid Redis stays **non-2xx** and must not settle (ADR-0021 storage rule). Verify itself already evaluates the limiter **before** x402.
+
+### Global 30/min reachability (docs accuracy)
+
+When `SENTINEL_AUTH_REQUIRED=true`, keyless `POST /sentinel/verify` returns **401 before** `checkGlobalRateLimit()`. The documented 30/min global window is therefore unreachable on that path today; it remains reserved for Phase-0 open auth / future keyless endpoints. Preferred cost control for unauth flood is platform WAF before the Function runs. This amendment does **not** move IP limiting before key validation or change Production `SERV_API_KEY`.
+
 ## Non-goals
 
 - Rotating the Upstash token solely for whitespace (trim + re-set of same secret is enough when PING works).
-- Changing per-key numeric limits (still 120/min auth, 30/min global default).
+- Changing per-key numeric limits (still 120/min auth, 30/min global default — now one constant).
+- Production `SERV_API_KEY` / Upstash Production-token experiments.
+- #36 / #49 deploy-action vs unknown-mandate allowlist symmetry.

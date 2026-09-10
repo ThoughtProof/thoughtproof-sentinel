@@ -20,7 +20,12 @@ import type {
 
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
-import { mapVerdict, canPromoteStep2Only, resolveActionAuthPromotion } from './verdict.js';
+import {
+  mapVerdict,
+  canPromoteStep2Only,
+  resolveActionAuthPromotion,
+  decisionBasisForPromotionReason,
+} from './verdict.js';
 import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import {
   classifyActionAuthKind,
@@ -198,6 +203,11 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
                   reason: objectiveMismatch
                     ? 'objective_mismatch_fail_closed'
                     : ENGINE_BUDGET_REASON,
+                  decision_basis: decisionBasisForPromotionReason(
+                    objectiveMismatch
+                      ? 'objective_mismatch_fail_closed'
+                      : ENGINE_BUDGET_REASON,
+                  ),
                   steps_all_pass: false,
                   machine_condition_proof_present: false,
                   machine_condition_proof_accepted: false,
@@ -282,6 +292,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       public_verdict: decision.trace.public_verdict,
       promoted: decision.promoted,
       reason: decision.reason,
+      decision_basis: decision.decision_basis,
       steps_all_pass: decision.trace.steps_all_pass,
       machine_condition_proof_present: decision.trace.machine_condition_proof_present,
       machine_condition_proof_accepted: decision.trace.machine_condition_proof_accepted,

@@ -1,4 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import {
+  AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
+  GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT,
+} from '../src/rate-limit-policy.js';
 import { getPotCliVersion } from '../src/runtime-versions.js';
 
 const spec = {
@@ -404,7 +408,9 @@ const spec = {
           },
           '405': { description: 'Method not allowed (POST only)' },
           '413': { description: 'Request too large (max 1MB)' },
-          '429': { description: 'Rate limit exceeded (120/min authenticated, 30/min anonymous)' },
+          '429': {
+            description: `Rate limit exceeded (${AUTHENTICATED_RATE_LIMIT_PER_MINUTE}/min authenticated, ${GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT}/min anonymous)`,
+          },
         },
       },
     },
@@ -470,13 +476,19 @@ const spec = {
                     ready: {
                       type: 'boolean',
                       description:
-                        'Cascade readiness. false when required model env is incomplete (SERV_API_KEY missing).',
+                        'Readiness. false when SERV_API_KEY is missing or the rate-limit store is unavailable (Redis configured-but-invalid). ok remains liveness-only.',
                     },
                     serv_key: {
                       type: 'string',
                       enum: ['present', 'missing'],
                       description:
                         'SERV_API_KEY presence only. Never the key value. missing ⇒ ready=false.',
+                    },
+                    rate_limit: {
+                      type: 'string',
+                      enum: ['redis', 'in_memory', 'unavailable'],
+                      description:
+                        'Limiter store. redis = Upstash configured; in_memory = Redis unset (dev fallback); unavailable = configured-but-invalid (fail-closed). unavailable ⇒ ready=false.',
                     },
                     version: { type: 'string', description: 'Sentinel service version' },
                     pot_cli: {

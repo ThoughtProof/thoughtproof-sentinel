@@ -5,7 +5,16 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { validateApiKey, checkRateLimit, checkGlobalRateLimit, _resetLimiters } from './auth.js';
+import {
+  validateApiKey,
+  checkRateLimit,
+  checkGlobalRateLimit,
+  getRateLimitReadiness,
+  _resetLimiters,
+  AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
+  RATE_LIMIT_WINDOW,
+} from './auth.js';
+import { Ratelimit } from '@upstash/ratelimit';
 
 const mockLimit = vi.fn().mockResolvedValue({
   success: true,
@@ -142,20 +151,28 @@ describe('checkRateLimit — Upstash Redis', () => {
   });
 
   it('uses Upstash when configured', async () => {
-    const result = await checkRateLimit('test_upstash_key', 120);
+    const result = await checkRateLimit('test_upstash_key', AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(119);
   });
 
+  it('builds the sliding window from AUTHENTICATED_RATE_LIMIT_PER_MINUTE', async () => {
+    await checkRateLimit('test_upstash_constant', AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
+    expect(Ratelimit.slidingWindow).toHaveBeenCalledWith(
+      AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
+      RATE_LIMIT_WINDOW,
+    );
+  });
+
   it('returns Upstash reset timestamp', async () => {
-    const result = await checkRateLimit('test_upstash_reset', 120);
+    const result = await checkRateLimit('test_upstash_reset', AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
     expect(result.resetAt).toBeGreaterThan(Date.now() - 1000);
   });
 
   it('trims trailing newline on token and still uses Upstash', async () => {
     process.env.UPSTASH_REDIS_REST_TOKEN = 'fake-token\n';
     _resetLimiters();
-    const result = await checkRateLimit('test_upstash_trim', 120);
+    const result = await checkRateLimit('test_upstash_trim', AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
     expect(result.allowed).toBe(true);
     expect(result.unavailable).toBeUndefined();
   });
@@ -163,7 +180,7 @@ describe('checkRateLimit — Upstash Redis', () => {
   it('fail-closes when Redis env is invalid after trim', async () => {
     process.env.UPSTASH_REDIS_REST_TOKEN = '   \n';
     _resetLimiters();
-    const result = await checkRateLimit('test_upstash_invalid', 120);
+    const result = await checkRateLimit('test_upstash_invalid', AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
     expect(result.allowed).toBe(false);
     expect(result.unavailable).toBe(true);
     expect(result.code).toBe('RATE_LIMIT_UNAVAILABLE');
@@ -171,7 +188,7 @@ describe('checkRateLimit — Upstash Redis', () => {
 
   it('fail-closes when limit() throws', async () => {
     mockLimit.mockRejectedValueOnce(new Error('redis down'));
-    const result = await checkRateLimit('boom_key', 120);
+    const result = await checkRateLimit('boom_key', AUTHENTICATED_RATE_LIMIT_PER_MINUTE);
     expect(result.allowed).toBe(false);
     expect(result.unavailable).toBe(true);
     expect(result.code).toBe('RATE_LIMIT_UNAVAILABLE');
@@ -223,5 +240,42 @@ describe('checkGlobalRateLimit — Upstash Redis', () => {
     const result = await checkGlobalRateLimit();
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(119);
+  });
+});
+
+describe('getRateLimitReadiness', () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    _resetLimiters();
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    _resetLimiters();
+  });
+
+  it('reports in_memory when Redis env is unset', () => {
+    expect(getRateLimitReadiness({})).toEqual({ rate_limit: 'in_memory' });
+  });
+
+  it('reports redis when credentials resolve', () => {
+    expect(
+      getRateLimitReadiness({
+        UPSTASH_REDIS_REST_URL: 'https://example.upstash.io',
+        UPSTASH_REDIS_REST_TOKEN: 'tok',
+      }),
+    ).toEqual({ rate_limit: 'redis' });
+  });
+
+  it('reports unavailable when Redis env is configured-but-invalid', () => {
+    expect(
+      getRateLimitReadiness({
+        UPSTASH_REDIS_REST_URL: 'https://example.upstash.io',
+        UPSTASH_REDIS_REST_TOKEN: 'ab cd',
+      }),
+    ).toEqual({ rate_limit: 'unavailable' });
   });
 });

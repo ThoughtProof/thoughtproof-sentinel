@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getRateLimitReadiness } from '../../src/auth.js';
 import { getModelReadiness } from '../../src/model-config.js';
 import { getPotCliVersion } from '../../src/runtime-versions.js';
 
@@ -16,14 +17,19 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
       return res.status(200).end();
     }
 
-    // ok = liveness. ready / serv_key = cascade readiness (issue #32).
-    // Presence only — never the key value.
-    const { ready, serv_key } = getModelReadiness();
+    // ok = liveness only (issue #32 / #40).
+    // ready = cascade (serv_key) AND limiter store. Fail-closed Redis
+    // (configured-but-invalid) makes ready false so health matches verify 503.
+    // serv_key presence only — never the key value.
+    const { ready: modelReady, serv_key } = getModelReadiness();
+    const { rate_limit } = getRateLimitReadiness();
+    const ready = modelReady && rate_limit !== 'unavailable';
 
     res.status(200).json({
       ok: true,
       ready,
       serv_key,
+      rate_limit,
       version: VERSION,
       pot_cli: getPotCliVersion(),
       modes: [...MODES],

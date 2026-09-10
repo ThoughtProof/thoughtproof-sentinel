@@ -1,0 +1,7 @@
+{
+  "authenticatedPerMinute": 120,
+  "globalPerMinuteDefault": 30,
+  "windowSeconds": 60,
+  "unavailableRetryAfterS": 30,
+  "burstCheckDefaultN": 140
+}

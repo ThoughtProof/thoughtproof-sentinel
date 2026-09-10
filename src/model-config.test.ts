@@ -2,8 +2,9 @@
  * Model-config readiness + health/verify mapping for missing SERV_API_KEY (#32).
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import healthHandler from '../api/sentinel/health.js';
+import { _resetLimiters } from './auth.js';
 import {
   MODEL_CONFIG_ERROR_CODE,
   MODEL_CONFIG_ERROR_MESSAGE,
@@ -112,14 +113,27 @@ describe('modelConfigUnavailablePayload', () => {
 
 describe('GET /sentinel/health readiness', () => {
   const original = process.env.SERV_API_KEY;
+  const originalUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const originalToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  beforeEach(() => {
+    _resetLimiters();
+  });
 
   afterEach(() => {
     if (original === undefined) delete process.env.SERV_API_KEY;
     else process.env.SERV_API_KEY = original;
+    if (originalUrl === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = originalUrl;
+    if (originalToken === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = originalToken;
+    _resetLimiters();
   });
 
-  it('reports serv_key present and ready when the key is set', () => {
+  it('reports serv_key present and ready when the key is set and Redis is unset', () => {
     process.env.SERV_API_KEY = SECRET;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
     const ctx = mockRes();
     healthHandler({ method: 'GET' } as never, ctx.res as never);
 
@@ -128,12 +142,15 @@ describe('GET /sentinel/health readiness', () => {
       ok: true,
       ready: true,
       serv_key: 'present',
+      rate_limit: 'in_memory',
     });
     expect(JSON.stringify(ctx.body)).not.toContain(SECRET);
   });
 
   it('reports serv_key missing and ready false when the key is unset', () => {
     delete process.env.SERV_API_KEY;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
     const ctx = mockRes();
     healthHandler({ method: 'GET' } as never, ctx.res as never);
 
@@ -142,8 +159,41 @@ describe('GET /sentinel/health readiness', () => {
       ok: true,
       ready: false,
       serv_key: 'missing',
+      rate_limit: 'in_memory',
     });
     expect((ctx.body as { serv_key: string }).serv_key).not.toBe(SECRET);
     expect(JSON.stringify(ctx.body)).not.toContain(SECRET);
+  });
+
+  it('keeps ok true and ready false when Redis is configured-but-invalid', () => {
+    process.env.SERV_API_KEY = SECRET;
+    process.env.UPSTASH_REDIS_REST_URL = 'https://example.upstash.io';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'ab cd';
+    const ctx = mockRes();
+    healthHandler({ method: 'GET' } as never, ctx.res as never);
+
+    expect(ctx.statusCode).toBe(200);
+    expect(ctx.body).toMatchObject({
+      ok: true,
+      ready: false,
+      serv_key: 'present',
+      rate_limit: 'unavailable',
+    });
+  });
+
+  it('reports rate_limit redis when Upstash credentials resolve', () => {
+    process.env.SERV_API_KEY = SECRET;
+    process.env.UPSTASH_REDIS_REST_URL = 'https://example.upstash.io';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'tok';
+    const ctx = mockRes();
+    healthHandler({ method: 'GET' } as never, ctx.res as never);
+
+    expect(ctx.statusCode).toBe(200);
+    expect(ctx.body).toMatchObject({
+      ok: true,
+      ready: true,
+      serv_key: 'present',
+      rate_limit: 'redis',
+    });
   });
 });

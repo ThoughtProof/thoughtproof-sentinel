@@ -446,6 +446,7 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.verdict).toBe('ALLOW');
     expect(res.meta.promotion?.reason).toBe('already_allow');
     expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.decision_basis).toBe('cascade');
     expect(res.meta.promotion?.mandate_kind).toBe('informational');
     expect(res.meta.promotion?.action_kind).toBe('informational');
     expect(res.meta.promotion?.unknown_action).toBe(false);
@@ -475,6 +476,7 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.verdict).toBe('BLOCK');
     expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
     expect(res.meta.promotion?.reason).not.toBe('already_block');
+    expect(res.meta.promotion?.decision_basis).toBe('deterministic');
     expect(res.meta.promotion?.action_kind).toBe('unknown');
     expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
     expect(res.meta.promotion?.unknown_action).toBe(true);
@@ -538,6 +540,7 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.meta.promotion?.reason).toBe('unclassified_abstention_fail_closed');
     expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
     expect(res.meta.promotion?.reason).not.toBe('already_allow');
+    expect(res.meta.promotion?.decision_basis).toBe('deterministic');
     expect(res.meta.promotion?.action_kind).toBe('unknown');
     expect(res.meta.promotion?.mandate_kind).toBe('unknown');
     expect(res.meta.promotion?.unclassified_abstention).toBe(true);
