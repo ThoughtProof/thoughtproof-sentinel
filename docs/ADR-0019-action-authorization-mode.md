@@ -119,10 +119,12 @@ mode stays one `action_authorization` — **criteria tuning**, not a new
 FYI mode. Step 0 PASSES when there is no value/permission movement;
 step 1 PASSES when the named crew recipient is in the mandate; step 2
 still FAILS Ship-mismatch (mandate = ship/pin/deploy, action = notify).
-A conservative `structural_fact:` hint is prepended only for confident
-informational actions and never asserts `objective_aligned=true`. The
-deterministic gate is unchanged (can only ADD financial/identity
-BLOCKs).
+A conservative `SENTINEL_AXIS_HINT` is attached only to the Sentinel-
+authored verification question (system-origin, not evidence) and never
+asserts `objective_aligned=true`. Every caller `structural_fact:` is
+neutralized before classify so a smuggled line cannot fail-open ALLOW.
+Axis-selection keywords are English-only. The deterministic gate is
+unchanged (can only ADD financial/identity BLOCKs).
 
 **Validation gate (before any live gating)**
 - A labeled scenario suite (in-scope ALLOWs + over-scope/injection BLOCKs) with

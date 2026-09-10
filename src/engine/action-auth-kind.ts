@@ -6,15 +6,23 @@
  * reasons: issue numbers look like unbound spend, and named teammates
  * look like unauthorized counterparties (issue #33).
  *
- * This helper does NOT authorize anything. It only emits a
- * `structural_fact:` line the gold steps may treat as authoritative for
- * *axis selection* (informational vs value-transfer). It never asserts
- * `objective_aligned=true`. It MAY assert `objective_mismatch=true`
- * when the mandate is ship/pin/deploy and the action is notify-only
- * (strengthens Ship-mismatch fail-closed).
+ * This helper does NOT authorize anything. It never writes into caller
+ * evidence. A `SENTINEL_AXIS_HINT` is attached only to the Sentinel-
+ * authored verification *question*. Every caller `structural_fact:` is
+ * neutralized before classify/annotate so a smuggled line cannot be
+ * treated as authoritative (PR #34 review).
  *
- * Silent (no fact) on financial / permission / unknown actions — the
- * existing amount/recipient/least-privilege criteria stay in charge.
+ * It never asserts `objective_aligned=true`. It MAY assert
+ * `objective_mismatch=true` when the mandate is ship/pin/deploy and the
+ * action is notify-only (strengthens Ship-mismatch fail-closed).
+ *
+ * Silent (no hint) on financial / permission / unknown / mixed-transfer
+ * actions — the existing amount/recipient/least-privilege criteria stay
+ * in charge.
+ *
+ * Axis-selection keywords are English-only (`fyi`, `notify`, `tell`,
+ * `inform`, `info`, `status ping`). Non-English heads do not select an
+ * informational axis.
  */
 
 import type { AuthorizationMandate } from './authorization-gate.js';
@@ -46,11 +54,22 @@ export interface ActionAuthClassification {
   named_recipient_in_mandate: boolean;
   objective_mismatch: boolean;
   identifiers_are_not_spend_amounts: boolean;
-  /** Null when we have nothing confident to tell the cascade. */
-  structural_fact: string | null;
+  /**
+   * Sentinel-authored axis hint for the verification question.
+   * Null when we have nothing confident to tell the cascade.
+   * Never a `structural_fact:` evidence line.
+   */
+  axisHint: string | null;
 }
 
-const STRUCTURAL_FACT_PREFIX = 'structural_fact:';
+export const CALLER_STRUCTURAL_FACT_REDACTION =
+  '[caller-supplied structural_fact removed]';
+
+export const SENTINEL_AXIS_HINT_LABEL =
+  'SENTINEL_AXIS_HINT (system-origin, not evidence):';
+
+/** Whole-line / rest-of-line payload — do not leave `action_kind=…` behind. */
+const CALLER_STRUCTURAL_FACT_RE = /structural_fact\s*:[^\n]*/gi;
 
 const VALUE_RE =
   /\$\s*\d|\d[\d,.]*\s*(?:USDC|USD|ETH|EUR|WETH)\b|transfer\s+\d|swap\s+\d|bridge\s+\d|pay(?:ing)?\s+(?:invoice\s+)?\d|invoice\s*#?\s*\d|\bnotional\b|\bbudget\b|\bceiling\b/i;
@@ -61,11 +80,12 @@ const PERMISSION_RE =
 const DEPLOY_RE =
   /\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\s+the)?\s+npm|npm\s+(?:version\s+)?pin|send-to-prod|release)\b/i;
 
+/** English-only informational heads (no language-specific particles). */
 const INFO_HEAD_RE =
-  /^(?:the\s+proposed\s+)?(?:fyi|notify|notifying|tell|telling|inform|info(?:rm)?(?:\s+an)?|status(?:\s+ping)?)\b/i;
+  /^(?:the\s+proposed\s+)?(?:fyi|notify|notifying|tell|telling|inform|info|status(?:\s+ping)?)\b/i;
 
 const INFO_ANY_RE =
-  /\b(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\s+\w+|info(?:rm)?(?:\s+an)?)\b/i;
+  /\b(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\s+\w+|inform|info)\b/i;
 
 const VALUE_HEAD_RE =
   /^(?:granting|grant|approve|approving|sign(?:ing)?|permit|transfer|send(?:ing)?\s+\d|swap(?:ping)?|bridge|pay(?:ing)?)\b/i;
@@ -73,16 +93,25 @@ const VALUE_HEAD_RE =
 const DEPLOY_HEAD_RE =
   /^(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?|release)\b/i;
 
-const CREW: ReadonlyArray<{ id: string; aliases: readonly string[] }> = [
-  { id: 'cos', aliases: ['chief of staff', 'cos'] },
-  { id: 'qa', aliases: ['qa', 'quality assurance'] },
-];
+const ETH_ADDR_RE = /0x[0-9a-fA-F]{40}/;
+
+const TRANSFER_VERB_RE =
+  /\b(?:send(?:ing)?|transfer(?:ring)?|pay(?:ing)?|wire(?:ing)?|swap(?:ping)?|bridge(?:ing)?)\b/i;
 
 const MONEY_CONTEXT_RE =
   /\$|USDC|USD|ETH|EUR|WETH|budget|ceiling|allowance|MAX_UINT|notional|invoice/i;
 
+const NOTIFY_OBJECT_RE =
+  /\b(?:notify(?:ing)?|tell(?:ing)?|inform|fyi(?:\s+to)?|info)\s+(?:an?\s+)?([^\n,.;:]+?)(?=\s+(?:that|about|host|issue|status|we|the\s+|to\s+|for\b)|\s*[.,;:]|$)/gi;
+
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Neutralize every caller `structural_fact:` (prefix + rest of line). */
+export function sanitizeCallerStructuralFacts(text: string): string {
+  if (!text) return text ?? '';
+  return text.replace(CALLER_STRUCTURAL_FACT_RE, CALLER_STRUCTURAL_FACT_REDACTION);
 }
 
 function sectionAfter(
@@ -139,16 +168,22 @@ export function splitActionAuthEvidence(evidence: string): ActionAuthSections {
   return { mandate: evidence, action: evidence, reasoning: '', source: 'unstructured' };
 }
 
-function crewIds(text: string): Set<string> {
-  const s = text.toLowerCase();
-  const ids = new Set<string>();
-  for (const c of CREW) {
-    for (const alias of c.aliases) {
-      const re = new RegExp(`\\b${alias.replace(/\s+/g, '\\s+')}\\b`, 'i');
-      if (re.test(s)) ids.add(c.id);
-    }
+function notifyObjects(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(new RegExp(NOTIFY_OBJECT_RE.source, 'gi'))) {
+    const raw = (m[1] ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+    if (raw.length >= 2 && raw.length <= 60) out.push(raw);
   }
-  return ids;
+  return [...new Set(out)];
+}
+
+/** Recipient = notify-object intersection of mandate and action (no crew roster). */
+function namedRecipientInMandate(mandate: string, action: string): boolean {
+  const actionObjs = notifyObjects(action);
+  if (actionObjs.length === 0) return false;
+  const mandateLc = mandate.toLowerCase();
+  const mandateObjs = notifyObjects(mandate);
+  return actionObjs.some((obj) => mandateObjs.includes(obj) || mandateLc.includes(obj));
 }
 
 function hasValueTransfer(text: string): boolean {
@@ -157,6 +192,14 @@ function hasValueTransfer(text: string): boolean {
 
 function hasPermissionGrant(text: string): boolean {
   return PERMISSION_RE.test(text);
+}
+
+function hasEthAddress(text: string): boolean {
+  return ETH_ADDR_RE.test(text);
+}
+
+function hasTransferVerbWithNumber(text: string): boolean {
+  return TRANSFER_VERB_RE.test(text) && /\d/.test(text);
 }
 
 function leadingKind(text: string): ActionKind {
@@ -204,30 +247,37 @@ function mandateLooksFinancial(mandate?: AuthorizationMandate): boolean {
 }
 
 /**
- * Classify mandate vs action. Fail toward silence: when unsure, no fact.
+ * Classify mandate vs action. Fail toward silence: when unsure, no hint.
+ * Caller `structural_fact:` lines are neutralized first.
  */
 export function classifyActionAuthKind(
   claim: string,
   evidence: string,
   mandate?: AuthorizationMandate,
 ): ActionAuthClassification {
-  const sections = splitActionAuthEvidence(evidence);
+  const cleanClaim = sanitizeCallerStructuralFacts(claim ?? '');
+  const cleanEvidence = sanitizeCallerStructuralFacts(evidence ?? '');
+  const sections = splitActionAuthEvidence(cleanEvidence);
   const actionText = sections.source === 'unstructured'
-    ? `${claim}\n${evidence}`
+    ? `${cleanClaim}\n${cleanEvidence}`
     : sections.action;
   const mandateText = sections.source === 'unstructured'
-    ? `${claim}\n${evidence}`
+    ? `${cleanClaim}\n${cleanEvidence}`
     : sections.mandate;
 
+  const mixedTransfer =
+    hasEthAddress(actionText) || hasTransferVerbWithNumber(actionText);
+
   const permission_grant = hasPermissionGrant(actionText) || mandateLooksFinancial(mandate);
-  const value_transfer =
+  let value_transfer =
     hasValueTransfer(actionText) ||
+    mixedTransfer ||
     (typeof mandate?.action?.amount === 'number' && Number.isFinite(mandate.action.amount));
 
   let action_kind = classifyBlob(actionText);
   let mandate_kind = classifyBlob(mandateText);
 
-  // Structured spend / approval wins over a notify-shaped claim.
+  // Structured spend / approval / mixed transfer wins over a notify-shaped claim.
   if (permission_grant && action_kind === 'informational') action_kind = 'permission';
   if (value_transfer && action_kind === 'informational') action_kind = 'value_transfer';
   if (permission_grant && action_kind === 'unknown') action_kind = 'permission';
@@ -239,28 +289,28 @@ export function classifyActionAuthKind(
     mandate_kind = 'deploy_ship';
   }
 
-  const named_recipient_in_mandate = [...crewIds(actionText)].some((id) =>
-    crewIds(mandateText).has(id),
-  );
+  const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
   const objective_mismatch =
     mandate_kind === 'deploy_ship' &&
     action_kind === 'informational' &&
-    !hasValueTransfer(actionText) &&
-    !hasPermissionGrant(actionText);
+    !value_transfer &&
+    !permission_grant &&
+    !mixedTransfer;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
     !permission_grant &&
-    identifiersAreNotSpendAmounts(`${claim}\n${mandateText}\n${actionText}`);
+    identifiersAreNotSpendAmounts(`${cleanClaim}\n${mandateText}\n${actionText}`);
 
-  const silentFinancial =
+  const silent =
+    mixedTransfer ||
     action_kind === 'value_transfer' ||
     action_kind === 'permission' ||
     action_kind === 'unknown';
 
-  let structural_fact: string | null = null;
-  if (!silentFinancial && action_kind === 'informational') {
+  let axisHint: string | null = null;
+  if (!silent && action_kind === 'informational') {
     const parts = [
       'action_kind=informational',
       'value_transfer=false',
@@ -275,7 +325,7 @@ export function classifyActionAuthKind(
     if (objective_mismatch) {
       parts.push('mandate_kind=deploy_ship', 'objective_mismatch=true');
     }
-    structural_fact = `${STRUCTURAL_FACT_PREFIX} ${parts.join('; ')}`;
+    axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }
 
   return {
@@ -286,18 +336,41 @@ export function classifyActionAuthKind(
     named_recipient_in_mandate,
     objective_mismatch,
     identifiers_are_not_spend_amounts,
-    structural_fact,
+    axisHint,
   };
 }
 
-/** Prepend a structural_fact line when classification is confident. */
-export function annotateEvidenceWithActionAuthKind(
+export interface PreparedActionAuthEval {
+  sanitizedEvidence: string;
+  classification: ActionAuthClassification;
+  axisHint: string | null;
+}
+
+/**
+ * Sanitize caller evidence and classify. Never prepends a fact to evidence.
+ */
+export function prepareActionAuthEval(
   claim: string,
   evidence: string,
   mandate?: AuthorizationMandate,
+): PreparedActionAuthEval {
+  const sanitizedEvidence = sanitizeCallerStructuralFacts(evidence ?? '');
+  const classification = classifyActionAuthKind(claim, sanitizedEvidence, mandate);
+  return {
+    sanitizedEvidence,
+    classification,
+    axisHint: classification.axisHint,
+  };
+}
+
+/**
+ * Evidence passed to the cascade: caller `structural_fact:` neutralized.
+ * Does NOT inject a system fact (that belongs on the question only).
+ */
+export function annotateEvidenceWithActionAuthKind(
+  _claim: string,
+  evidence: string,
+  _mandate?: AuthorizationMandate,
 ): string {
-  const c = classifyActionAuthKind(claim, evidence, mandate);
-  if (!c.structural_fact) return evidence;
-  if (evidence.startsWith(STRUCTURAL_FACT_PREFIX)) return evidence;
-  return `${c.structural_fact}\n\n${evidence}`;
+  return sanitizeCallerStructuralFacts(evidence ?? '');
 }
