@@ -109,6 +109,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     claim: req.claim,
     evidence: req.evidence,
     mode: req.mode,
+    mandate: req.mandate,
   });
 
   // 2. Run through cascade (or solo for checkpoint) under engine budget.
@@ -270,7 +271,10 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     criterionByStepId.set(`step_${gs.index}`, gs.acceptance_criterion ?? gs.description);
   }
 
-  const evidence = req.evidence ?? '';
+  // Cite/normalize against the same string the cascade saw. For
+  // action_authorization that is sanitized evidence (caller structural_fact
+  // neutralized, no system hint mixed in). Other modes: trace_steps === claim evidence.
+  const evidence = modeOutput.evalInput.trace_steps ?? req.evidence ?? '';
   const rawObjections = normalizeCascadeSteps(steps, evidence).map((s) => {
     const criterion = criterionByStepId.get(s.step_id) ?? '';
     const prose = s.reasoning.trim();

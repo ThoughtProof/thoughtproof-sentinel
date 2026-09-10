@@ -4,6 +4,18 @@
 
 ### Fixed
 
+- `action_authorization` gold steps no longer treat aligned crew FYI /
+  status pings as unbound spend or unauthorized counterparties (issue
+  #33). Identifiers (issue numbers, versions) are not amounts; a named
+  teammate in the mandate is a valid notify recipient. Ship-mismatch
+  (mandate = ship/npm pin, action = notify) still fails mandate
+  alignment. This is **criteria tuning for non-financial actions** plus
+  a silent-unless-confident `SENTINEL_AXIS_HINT` on the verification
+  question (never mixed into caller evidence). Caller `structural_fact:`
+  lines are neutralized so a smuggled fact cannot fail-open ALLOW.
+  Mixed notify+send/0x actions stay silent. Not a dedicated FYI mode,
+  not an MCP package change, and not a weakening of financial
+  fail-closed.
 - Cascade steps with `quote: null` and omitted reasoning no longer surface
   `undefined [PROVENANCE DOWNGRADE: quote invalid or missing]` (dogfood
   2026-09-09, FYI-aligned `weakly_faithful`).

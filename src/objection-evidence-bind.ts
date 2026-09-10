@@ -281,6 +281,19 @@ export function boundTotals(ctx: BindContext): BoundTotals {
   return out;
 }
 
+const MONEY_CONTEXT_RE =
+  /\$|USDC|USD|ETH|EUR|WETH|budget|ceiling|allowance|MAX_UINT|notional|invoice/i;
+
+function isIdentifierOnlyNumericClaim(
+  text: string,
+  ctx: BindContext,
+  bounds: BoundTotals,
+): boolean {
+  if (bounds.amount !== null || bounds.ceiling !== null) return false;
+  const corpus = [ctx.claim, ctx.evidence, text].filter(Boolean).join('\n');
+  return !MONEY_CONTEXT_RE.test(corpus);
+}
+
 export function parseNumericClaim(text: string): NumericClaim {
   const s = String(text ?? '');
   const claim: NumericClaim = {
@@ -345,6 +358,19 @@ export function bindObjectionText(
   };
 
   if (!claim.is_numericish) return result;
+
+  // Issue / version identifiers are not spend claims. When the corpus has no
+  // money language and no bound amount/ceiling, do not rewrite the surface
+  // as "[objection_unverified] numeric claim without bound evidence".
+  // Verdict is unchanged either way; this only stops FYI/status objections
+  // that mention #33 or 0.8.10 from looking like unbound budget math.
+  if (isIdentifierOnlyNumericClaim(text, ctx, bounds)) {
+    result.status = 'non_numeric';
+    result.surface = 'pass_through';
+    result.log_code = 'numeric_identifier_not_spend';
+    result.detail = { identifier_only: true, relation: claim.relation };
+    return result;
+  }
 
   const amount = bounds.amount;
   const ceiling = bounds.ceiling;

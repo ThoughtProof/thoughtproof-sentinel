@@ -110,6 +110,22 @@ the *gold-step semantics*, not a new grading engine.
 - New surface to calibrate. Ships **shadow-mode first** (logged, non-gating)
   against a labeled scenario set before it gates any live path.
 
+### Informational crew actions (issue #33, 2026-09-10)
+
+Gold steps 0/1 were wallet-shaped (amount / 0x recipient). Aligned FYI /
+status pings then failed: issue numbers looked like unbound spend, and
+named teammates (CoS, QA) looked like unauthorized counterparties. The
+mode stays one `action_authorization` — **criteria tuning**, not a new
+FYI mode. Step 0 PASSES when there is no value/permission movement;
+step 1 PASSES when the named crew recipient is in the mandate; step 2
+still FAILS Ship-mismatch (mandate = ship/pin/deploy, action = notify).
+A conservative `SENTINEL_AXIS_HINT` is attached only to the Sentinel-
+authored verification question (system-origin, not evidence) and never
+asserts `objective_aligned=true`. Every caller `structural_fact:` is
+neutralized before classify so a smuggled line cannot fail-open ALLOW.
+Axis-selection keywords are English-only. The deterministic gate is
+unchanged (can only ADD financial/identity BLOCKs).
+
 **Validation gate (before any live gating)**
 - A labeled scenario suite (in-scope ALLOWs + over-scope/injection BLOCKs) with
   **0 false ALLOWs** on the drain class, mirroring the Sentinel compliance bar.
