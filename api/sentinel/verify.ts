@@ -155,7 +155,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const billingEvent = buildBillingEvent(processedResponse, { platform, agent_id: agentId });
     await recordBillingEvent(billingEvent);
 
-    console.log(`[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}${processedResponse.meta.proof_strength ? ` proof=${processedResponse.meta.proof_strength}` : ''}`);
+    const promotionReason = processedResponse.meta.promotion?.reason;
+    const mandateKind = processedResponse.meta.promotion?.mandate_kind;
+    const actionKind = processedResponse.meta.promotion?.action_kind;
+    console.log(
+      `[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}` +
+        `${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}` +
+        `${processedResponse.meta.proof_strength ? ` proof=${processedResponse.meta.proof_strength}` : ''}` +
+        `${promotionReason ? ` promotion=${promotionReason}` : ''}` +
+        `${mandateKind ? ` mandate_kind=${mandateKind}` : ''}` +
+        `${actionKind ? ` action_kind=${actionKind}` : ''}`,
+    );
 
     // --- Final response snapshot (sole return value) ---
     const finalResponse = {

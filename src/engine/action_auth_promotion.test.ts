@@ -182,6 +182,37 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).toBe('objective_mismatch_fail_closed');
   });
 
+  it('4d. agreement_allow + informational action + unknown mandate → BLOCK (allowlist)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'informational',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e. agreement_allow + positively informational mandate stays already_allow', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'informational',
+      mandateKind: 'informational',
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
   it('5. non-action_authorization modes are pass-through (DQL/other lanes untouched)', () => {
     const d = resolveActionAuthPromotion({
       mode: 'handoff',

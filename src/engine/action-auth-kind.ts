@@ -12,18 +12,21 @@
  * neutralized before classify/annotate so a smuggled line cannot be
  * treated as authoritative (PR #34 review).
  *
- * It never asserts `objective_aligned=true`. It MAY assert
- * `objective_mismatch=true` when the action is notify-only and the
- * mandate is a non-informational kind (ship/pin/deploy/publish, value
- * transfer, or permission). The engine then hard-BLOCKs (promotion
- * `objective_mismatch_fail_closed`) so cascade `agreement_allow` cannot
- * fail-open — including MCP `claim === proposed_action`. This is an
- * English-majority mitigation plus a small DE ship-verb set — not full
- * i18n / allowlist inversion.
+ * It never asserts `objective_aligned=true`. An informational action
+ * may reach public ALLOW only when the mandate is **positively**
+ * `informational` (`mandate_kind === 'informational'`). Otherwise the
+ * classifier asserts `objective_mismatch=true` and the engine
+ * hard-BLOCKs (`objective_mismatch_fail_closed`) so cascade
+ * `agreement_allow` cannot fail-open — including MCP
+ * `claim === proposed_action`, unknown/ambiguous mandates, non-English
+ * ship prose, and payment→notify. #37's English/DE ship + pay blacklist
+ * remains mitigation lineage; this invert is the structural close
+ * (issue #38). Companion MCP claim rewrite: thoughtproof-mcp#21 —
+ * Sentinel does not paper over `claim === proposed_action`.
  *
  * Silent (no hint) on financial / permission / unknown / mixed-transfer
- * actions — the existing amount/recipient/least-privilege criteria stay
- * in charge.
+ * *actions* — the existing amount/recipient/least-privilege criteria stay
+ * in charge. An informational action vs an unknown mandate is not silent.
  *
  * Axis-selection keywords are English-only (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`). Non-English heads do not select an
@@ -283,7 +286,24 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic objective mismatch: mandate is ship/pin/deploy/publish or a value-transfer/permission instruction; action is notify/FYI only (objective_mismatch).';
+  'Deterministic objective mismatch: an informational/notify action may public-ALLOW only when mandate_kind is positively informational. Mandate is ship/pin/deploy/publish, value-transfer/permission, or unknown — action is notify/FYI only (objective_mismatch).';
+
+/** Trust is positively derived: only this kind may ALLOW an informational action. */
+export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
+  return kind === 'informational';
+}
+
+/**
+ * Public-ALLOW allowlist for informational actions (issue #38).
+ * Non-informational actions are out of scope for this rule (cascade / gate).
+ */
+export function informationalActionMayPublicAllow(
+  actionKind: ActionKind,
+  mandateKind: ActionKind,
+): boolean {
+  if (actionKind !== 'informational') return true;
+  return mandateIsPositivelyInformational(mandateKind);
+}
 
 function mandateLooksFinancial(mandate?: AuthorizationMandate): boolean {
   if (!mandate) return false;
@@ -346,23 +366,19 @@ export function classifyActionAuthKind(
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
-  // Notify-only action against a non-informational mandate (ship/pin/deploy,
-  // value transfer, or permission). Independent of leadingKind on the
-  // mandate so "After CI, ship. Also notify CoS" still mismatches. An
-  // action that *is* a ship or spend stays its own kind and does not trip.
+  // Informational/notify action: public ALLOW only when the mandate is
+  // positively informational. Ship/pay/permission *and* unknown/ambiguous
+  // fail closed. Independent of leadingKind on the mandate so
+  // "After CI, ship. Also notify CoS" still mismatches. An action that
+  // *is* a ship or spend stays its own kind and does not trip this rule.
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&
     !hasPermissionGrant(actionText) &&
     !mixedTransfer;
 
-  const mandateIsNonInformational =
-    mandateHasPositiveShip ||
-    mandate_kind === 'deploy_ship' ||
-    mandate_kind === 'value_transfer' ||
-    mandate_kind === 'permission';
-
-  const objective_mismatch = actionIsNotifyOnly && mandateIsNonInformational;
+  const objective_mismatch =
+    actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind);
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -388,8 +404,9 @@ export function classifyActionAuthKind(
     if (named_recipient_in_mandate) {
       parts.push('named_recipient_in_mandate=true');
     }
+    parts.push(`mandate_kind=${mandate_kind}`);
     if (objective_mismatch) {
-      parts.push(`mandate_kind=${mandate_kind}`, 'objective_mismatch=true');
+      parts.push('objective_mismatch=true');
     }
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }

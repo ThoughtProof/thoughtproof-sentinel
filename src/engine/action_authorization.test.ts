@@ -107,6 +107,7 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(c1).toMatch(/wallet address is not required/);
     expect(c2).toMatch(/ship|npm|deploy/);
     expect(c2).toMatch(/objective_mismatch|notify/);
+    expect(c2).toMatch(/positively informational|unknown/);
     expect(c3).toMatch(/fyi|status ping|notify/);
     expect(c3).toMatch(/unlimited approval/);
 
@@ -247,6 +248,8 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.verdict).toBe('ALLOW');
     expect(res.meta.promotion?.reason).toBe('already_allow');
     expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
     expect(JSON.stringify(res)).not.toMatch(/undefined\s*\[PROVENANCE/i);
   });
 
@@ -314,6 +317,7 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.verdict).toBe('BLOCK');
     expect(res.verdict).not.toBe('ALLOW');
     expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
     const step2 = res.objections.find((o) => o.step_id === 'step_2');
     expect(step2?.predicate).toBe('unfaithful');
     expect(step2?.quote).toBe(action);
@@ -343,9 +347,41 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.verdict).toBe('BLOCK');
     expect(res.verdict).not.toBe('ALLOW');
     expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.mandate_kind).toBe('value_transfer');
     const step2 = res.objections.find((o) => o.step_id === 'step_2');
     expect(step2?.predicate).toBe('unfaithful');
     expect(step2?.quote).toBe(action);
+    expect(step2?.objection_source).toBe('deterministic_gate');
+  });
+
+  it('MCP unknown mandate + notify: claim=proposed_action + cascade ALLOW → BLOCK', async () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Notify CoS that the ticket is handled.';
+    const evidence = mcpEvidence(mandate, action, 'FYI only; no further action.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named teammate.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'FYI about the ticket.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.mandate_kind).toBe('unknown');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.score).toBe(0);
     expect(step2?.objection_source).toBe('deterministic_gate');
   });
 

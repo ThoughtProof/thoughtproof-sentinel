@@ -4,6 +4,20 @@
 
 ### Fixed
 
+- **Informational ALLOW allowlist (issue #38):**
+  An informational / notify-only action may reach public ALLOW only
+  when `mandate_kind` is positively `informational`. Otherwise
+  `objective_mismatch_fail_closed` BLOCK — including unknown /
+  ambiguous mandates, DE ship→notify, and payment→notify. This closes
+  the structural gap that #37 mitigated as an English-majority
+  blacklist (`hasPositiveShipInstruction` / non-informational kinds).
+  #37 remains mitigation lineage; #36 stays open (MCP claim framing is
+  companion [thoughtproof-mcp#21](https://github.com/ThoughtProof/thoughtproof-mcp/issues/21)
+  — Sentinel does not paper over `claim === proposed_action`).
+  FYI-aligned (`mandate_kind === informational`) still ALLOW. English
+  ship hard-BLOCK from #37 is preserved. Verify log line now includes
+  `promotion=` (and `mandate_kind` / `action_kind` when present) so
+  Runtime Logs answer dogfood without receipt dumps.
 - **Finite receipt confidence (issue #39):**
   Averaging step scores now coerces missing / NaN / Infinity `score` to
   `0` (`Number.isFinite(s.score) ? s.score : 0`). Response `confidence`

@@ -2,14 +2,21 @@
  * action_authorization axis classifier (issue #33 / PR #34).
  *
  * Deterministic: FYI-aligned → informational hint on the question;
- * Ship-mismatch → objective_mismatch; wallet drains and mixed transfers
- * stay silent; caller structural_fact: is neutralized.
+ * informational action ALLOW only when mandate_kind is positively
+ * informational (#38); ship/pay/unknown + notify → objective_mismatch;
+ * wallet drains and mixed transfers stay silent; caller
+ * structural_fact: is neutralized.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   annotateEvidenceWithActionAuthKind,
   CALLER_STRUCTURAL_FACT_REDACTION,
   classifyActionAuthKind,
+  informationalActionMayPublicAllow,
+  mandateIsPositivelyInformational,
   prepareActionAuthEval,
   sanitizeCallerStructuralFacts,
   SENTINEL_AXIS_HINT_LABEL,
@@ -81,6 +88,7 @@ describe('classifyActionAuthKind — FYI aligned (issue #33)', () => {
     expect(c.objective_mismatch).toBe(false);
     expect(c.axisHint).toContain(SENTINEL_AXIS_HINT_LABEL);
     expect(c.axisHint).toMatch(/action_kind=informational/);
+    expect(c.axisHint).toMatch(/mandate_kind=informational/);
     expect(c.axisHint).toMatch(/named_recipient_in_mandate=true/);
     expect(c.axisHint).not.toMatch(/objective_mismatch=true/);
     expect(c.axisHint).not.toMatch(/^structural_fact:/);
@@ -159,8 +167,15 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
       'Notify CoS that the host switched to git main.',
       'FYI only; do not pin npm or ship.',
     );
-    expect(classifyActionAuthKind('Notify CoS that the host switched to git main.', excerptOnly)
-      .objective_mismatch).toBe(false);
+    // Excerpt-only is unknown (no ship/info/pay keywords). #37 blacklist
+    // would miss it; #38 allowlist fail-closes notify vs unknown.
+    const excerptClass = classifyActionAuthKind(
+      'Notify CoS that the host switched to git main.',
+      excerptOnly,
+    );
+    expect(excerptClass.mandate_kind).toBe('unknown');
+    expect(excerptClass.action_kind).toBe('informational');
+    expect(excerptClass.objective_mismatch).toBe(true);
     const c = classifyActionAuthKind('Notify CoS that the host switched to git main.', ev);
     expect(splitActionAuthEvidence(ev).mandate).toBe(full);
     expect(c.mandate_kind).toBe('deploy_ship');
@@ -208,6 +223,33 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
     expect(c.value_transfer).toBe(false);
     expect(c.axisHint).toMatch(/objective_mismatch=true/);
     expect(c.axisHint).toMatch(/mandate_kind=value_transfer/);
+  });
+
+  it('unknown / ambiguous mandate + notify-only is objective_mismatch (allowlist invert)', () => {
+    const ev = mcpEvidence(
+      'Handle ticket 8821 as discussed in standup.',
+      'Notify CoS that the ticket is handled.',
+      'FYI only; no further action.',
+    );
+    const c = classifyActionAuthKind('Notify CoS that the ticket is handled.', ev);
+    expect(c.action_kind).toBe('informational');
+    expect(c.mandate_kind).toBe('unknown');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).toMatch(/mandate_kind=unknown/);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+  });
+
+  it('non-English ship without DE verb set still mismatches via unknown mandate', () => {
+    const ev = mcpEvidence(
+      'Mets le paquet en production demain.',
+      'Notify CoS that CI is green.',
+      'Status ping only.',
+    );
+    const c = classifyActionAuthKind('Notify CoS that CI is green.', ev);
+    expect(c.action_kind).toBe('informational');
+    expect(c.mandate_kind).toBe('unknown');
+    expect(c.objective_mismatch).toBe(true);
   });
 
   it('does not treat FYI "release notes" or negated deploy as a ship mandate', () => {
@@ -340,6 +382,59 @@ describe('caller structural_fact neutralization (PR #34 injection)', () => {
     expect(prepared.classification.objective_mismatch).toBe(true);
     expect(prepared.axisHint).toMatch(/objective_mismatch=true/);
     expect(prepared.axisHint).toContain(SENTINEL_AXIS_HINT_LABEL);
+  });
+});
+
+describe('informational allowlist helpers (issue #38)', () => {
+  it('only informational mandate is positively informational', () => {
+    expect(mandateIsPositivelyInformational('informational')).toBe(true);
+    expect(mandateIsPositivelyInformational('unknown')).toBe(false);
+    expect(mandateIsPositivelyInformational('deploy_ship')).toBe(false);
+    expect(mandateIsPositivelyInformational('value_transfer')).toBe(false);
+    expect(mandateIsPositivelyInformational('permission')).toBe(false);
+  });
+
+  it('informational action may public-ALLOW only with positively informational mandate', () => {
+    expect(informationalActionMayPublicAllow('informational', 'informational')).toBe(true);
+    expect(informationalActionMayPublicAllow('informational', 'unknown')).toBe(false);
+    expect(informationalActionMayPublicAllow('informational', 'deploy_ship')).toBe(false);
+    expect(informationalActionMayPublicAllow('informational', 'value_transfer')).toBe(false);
+    expect(informationalActionMayPublicAllow('value_transfer', 'unknown')).toBe(true);
+  });
+});
+
+describe('suite mismatch / FYI lock (issue #38)', () => {
+  const suitePath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../scenarios/action-authorization-suite.json',
+  );
+  const suite = JSON.parse(readFileSync(suitePath, 'utf8')) as {
+    scenarios: Array<{ id: string; expect: string; claim: string; evidence: string }>;
+  };
+
+  it('every mismatch-* suite case is classifier not-allow (not positively informational)', () => {
+    const rows = suite.scenarios.filter((s) => s.id.startsWith('mismatch-'));
+    expect(rows.length).toBeGreaterThanOrEqual(4);
+    for (const s of rows) {
+      expect(s.expect).toBe('not-allow');
+      const c = classifyActionAuthKind(s.claim, s.evidence);
+      expect(c.action_kind, s.id).toBe('informational');
+      expect(c.mandate_kind, s.id).not.toBe('informational');
+      expect(c.objective_mismatch, s.id).toBe(true);
+      expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), s.id).toBe(false);
+    }
+  });
+
+  it('FYI-aligned suite cases stay positively informational (ALLOW path)', () => {
+    for (const id of ['ok-04-fyi-aligned-cos-status', 'ok-05-fyi-aligned-qa-issue-number']) {
+      const s = suite.scenarios.find((row) => row.id === id);
+      expect(s, id).toBeDefined();
+      const c = classifyActionAuthKind(s!.claim, s!.evidence);
+      expect(c.mandate_kind, id).toBe('informational');
+      expect(c.action_kind, id).toBe('informational');
+      expect(c.objective_mismatch, id).toBe(false);
+      expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), id).toBe(true);
+    }
   });
 });
 

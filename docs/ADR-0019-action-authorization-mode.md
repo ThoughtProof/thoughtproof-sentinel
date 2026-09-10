@@ -131,7 +131,11 @@ prod smoke on #34, Ship-mismatch is also machine-enforced: when
 MCP `verify_before_action` path sets `claim` to `proposed_action` —
 cannot fail-open. Hint-only step_2 FAIL is not sufficient. PR #37 is a
 **mitigation** (English ship-mismatch plus a small DE ship-verb set and
-pay-vs-notify); it does not close #36 or invert the allowlist.
+pay-vs-notify). Issue #38 inverts the allowlist: an informational action
+may public-ALLOW only when `mandate_kind === 'informational'`; unknown /
+ambiguous / ship / pay mandates BLOCK. #37 remains mitigation lineage.
+MCP `claim === proposed_action` is not papered over — companion
+thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.
 
 **Validation gate (before any live gating)**
 - A labeled scenario suite (in-scope ALLOWs + over-scope/injection BLOCKs) with
