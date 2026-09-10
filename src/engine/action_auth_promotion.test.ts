@@ -363,6 +363,21 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).not.toBe('already_allow');
   });
 
+  it('4e19. cascade BLOCK stays already_block (no ALLOW upgrade)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      actionKind: 'value_transfer',
+      mandateKind: 'value_transfer',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('already_block');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+  });
+
   it('4e14. agreement_allow + value_transfer + value_transfer stays already_allow', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

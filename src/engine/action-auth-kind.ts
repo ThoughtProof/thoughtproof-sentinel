@@ -25,8 +25,13 @@
  * Sentinel does not paper over `claim === proposed_action`.
  *
  * Silent (no hint) on financial / permission / mixed-transfer *actions*
- * and on unknown actions against a positively informational mandate —
- * the existing amount/recipient/least-privilege criteria stay in charge.
+ * that are not a positively matching in-mandate pair, and on unknown
+ * actions against a positively informational mandate — the existing
+ * amount/recipient/least-privilege criteria stay in charge. Matching
+ * financial pairs (amount at or below grant + authorized 0x) emit a
+ * PASS hint (`financial_pair_match` / `amount_within_grant`) so the
+ * cascade does not fail-close on a legitimate 0x+amount action (#55).
+ * Overshoot / wrong-recipient / unbounded stay silent or mismatch.
  * An informational action vs an unknown mandate is not silent. An
  * `unknown` action vs a *named* non-informational mandate
  * (`deploy_ship` / `value_transfer` / `permission`) fail-closes as
@@ -96,6 +101,18 @@ export interface ActionAuthClassification {
    * approved amount is compatible with the mandate spend (ok-01).
    */
   bounded_permission_compatible: boolean;
+  /**
+   * Kind pair is a positively matching financial pair (value_transfer
+   * or permission allowlist, including bounded permission × spend).
+   * Used only to emit a cascade PASS hint — never a public-ALLOW (#55).
+   */
+  financial_pair_match: boolean;
+  /**
+   * Parseable action amount is at or below the mandated spend notional.
+   * Token amounts (USDC/ETH/WETH) preferred over bare $ prices (#55).
+   * Hint-only — never a promotion ALLOW.
+   */
+  amount_within_grant: boolean;
   /**
    * Sentinel-authored axis hint for the verification question.
    * Null when we have nothing confident to tell the cascade.
@@ -413,6 +430,57 @@ export function boundedPermissionCompatibleWithMandate(
   return actionAmt <= mandateAmt * (1 + AMOUNT_COMPAT_TOLERANCE);
 }
 
+const TOKEN_NOTIONAL_RE =
+  /(\d[\d,]*(?:\.\d+)?)\s*(?:USDC|USD|ETH|EUR|WETH)\b/gi;
+
+/** Suite + live prose use short 0x tokens (`0xACME1234`), not only 40-nibble hex. */
+const OX_TOKEN_RE = /0x[0-9a-zA-Z]{4,}/gi;
+
+function firstTokenSpendNotional(text: string): number | null {
+  if (!text) return null;
+  const re = new RegExp(TOKEN_NOTIONAL_RE.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const n = parseNotionalToken(m[1] ?? '');
+    if (n != null) return n;
+  }
+  return null;
+}
+
+/**
+ * Amount at or below the granted figure. Prefers token notionals so a
+ * limit-order price (`$4,000`) does not inflate the mandate spend (ok-03
+ * 0.5 WETH vs drain-04 8 WETH). Fail-closed when either side has no
+ * parseable amount, or the action is unbounded.
+ */
+export function amountAtOrBelowGranted(actionText: string, mandateText: string): boolean {
+  if (!actionText || !mandateText) return false;
+  if (permissionIsUnbounded(actionText)) return false;
+  const mandateSpan = mandateSpendSpan(mandateText);
+  const actionAmt =
+    firstTokenSpendNotional(actionText) ?? firstSpendNotional(actionText);
+  const mandateAmt =
+    firstTokenSpendNotional(mandateSpan) ?? firstSpendNotional(mandateSpan);
+  if (actionAmt == null || mandateAmt == null) return false;
+  return actionAmt <= mandateAmt * (1 + AMOUNT_COMPAT_TOLERANCE);
+}
+
+function oxTokens(text: string): string[] {
+  return [...new Set((text.match(new RegExp(OX_TOKEN_RE.source, 'gi')) ?? []).map((s) => s.toLowerCase()))];
+}
+
+/**
+ * Every 0x token named in the action also appears in the mandate.
+ * Fail toward silence when the action names no 0x (named-payee-only
+ * stays on gold-step prose; the live #55 hole is 0x+amount).
+ */
+export function financialRecipientAuthorized(mandate: string, action: string): boolean {
+  const actionTokens = oxTokens(action);
+  if (actionTokens.length === 0) return false;
+  const mandateLc = mandateSpendSpan(mandate).toLowerCase();
+  return actionTokens.every((t) => mandateLc.includes(t));
+}
+
 /** Optional pairing context — omitted kinds/texts fail closed on permission × value_transfer. */
 export interface ActionAuthKindPairingContext {
   actionText?: string | null;
@@ -672,10 +740,27 @@ export function classifyActionAuthKind(
     !permission_grant &&
     identifiersAreNotSpendAmounts(`${cleanClaim}\n${mandateText}\n${actionText}`);
 
+  const financial_pair_match =
+    !objective_mismatch &&
+    (action_kind === 'value_transfer' || action_kind === 'permission') &&
+    mandatePositivelyMatchesAction(action_kind, mandate_kind, {
+      actionText,
+      mandateText,
+      boundedPermissionCompatible: bounded_permission_compatible,
+    });
+  const amount_within_grant = amountAtOrBelowGranted(actionText, mandateText);
+  const financialPassHint =
+    financial_pair_match &&
+    amount_within_grant &&
+    financialRecipientAuthorized(mandateText, actionText);
+
   const silent =
     ((mixedTransfer || action_kind === 'value_transfer') &&
-      !valueTransferVsNonMatchingMandate) ||
-    (action_kind === 'permission' && !permissionVsNonMatchingMandate) ||
+      !valueTransferVsNonMatchingMandate &&
+      !financialPassHint) ||
+    (action_kind === 'permission' &&
+      !permissionVsNonMatchingMandate &&
+      !financialPassHint) ||
     (action_kind === 'unknown' && !unknownActionVsNamedMandate && !unclassified_abstention);
 
   let axisHint: string | null = null;
@@ -686,7 +771,8 @@ export function classifyActionAuthKind(
       unclassified_abstention ||
       deployVsNonMatchingMandate ||
       valueTransferVsNonMatchingMandate ||
-      permissionVsNonMatchingMandate)
+      permissionVsNonMatchingMandate ||
+      financialPassHint)
   ) {
     const parts = [
       `action_kind=${action_kind}`,
@@ -706,6 +792,13 @@ export function classifyActionAuthKind(
     if (unclassified_abstention) {
       parts.push('unclassified_abstention=true');
     }
+    if (financialPassHint) {
+      parts.push('financial_pair_match=true');
+      parts.push('amount_within_grant=true');
+      if (bounded_permission_compatible) {
+        parts.push('bounded_permission_compatible=true');
+      }
+    }
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }
 
@@ -719,6 +812,8 @@ export function classifyActionAuthKind(
     unclassified_abstention,
     identifiers_are_not_spend_amounts,
     bounded_permission_compatible,
+    financial_pair_match,
+    amount_within_grant,
     axisHint,
   };
 }

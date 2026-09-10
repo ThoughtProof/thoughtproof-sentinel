@@ -6,6 +6,9 @@
  * (same pattern as engine.test.ts / quote-null-provenance.test.ts).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 vi.mock('pot-cli/plv', () => ({ evaluateItem: vi.fn() }));
 vi.mock('pot-cli/cascade', () => ({ runCascade: vi.fn() }));
@@ -103,8 +106,26 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(c0).toMatch(/identifiers|issue numbers/);
     expect(c0).toMatch(/max_uint256|unlimited/);
     expect(c0).toMatch(/caller-supplied|must be ignored/);
+    expect(c0).toMatch(/informational\/notify action/);
+    expect(c0).toMatch(/financial_pair_match=true/);
+    expect(c0).toMatch(/amount_within_grant=true/);
+    expect(c0).toMatch(/faithful \/ supported|not unfaithful/);
+    expect(c0).not.toMatch(/even when framed as notify\/fyi/);
+    const c0Raw = steps[0]!.acceptance_criterion;
+    expect(c0Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(c0Raw.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
+      c0Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i),
+    );
     expect(c1).toMatch(/named recipient|teammate|notify\/tell object/);
     expect(c1).toMatch(/wallet address is not required/);
+    expect(c1).toMatch(/financial_pair_match=true/);
+    expect(c1).toMatch(/amount_within_grant=true/);
+    expect(c1).toMatch(/faithful \/ supported|not unfaithful/);
+    const c1Raw = steps[1]!.acceptance_criterion;
+    expect(c1Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(c1Raw.search(/FAIL if the action names a 0x/i)).toBeGreaterThan(
+      c1Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i),
+    );
     expect(c2).toMatch(/ship|npm|deploy/);
     expect(c2).toMatch(/objective_mismatch|notify/);
     expect(c2).toMatch(/positively informational|unknown/);
@@ -122,6 +143,19 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(out.evalInput.question).toMatch(/mandate_kind=informational/);
     expect(out.evalInput.question).toMatch(/POSITIVE PASS/i);
     expect(out.evalInput.question).toMatch(/does NOT contain objective_mismatch=true/);
+    expect(out.evalInput.question).toMatch(/informational\/notify action/);
+    expect(out.evalInput.question).toMatch(/financial_pair_match=true/);
+    expect(out.evalInput.question).toMatch(/amount_within_grant=true/);
+    expect(out.evalInput.question).toMatch(/faithful \/ supported|not unfaithful/);
+    expect(out.evalInput.question).not.toMatch(/even when framed as notify\/FYI/i);
+    expect(out.evalInput.question).not.toMatch(
+      /FAIL if the action also send\/transfer\/pay/,
+    );
+    const q = out.evalInput.question;
+    expect(q.search(/POSITIVE PASS \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(q.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
+      q.search(/POSITIVE PASS \(financial\)/i),
+    );
   });
 
   it('does not annotate wallet-drain evidence as informational', () => {
@@ -722,7 +756,7 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
   });
 
   it('ok-01 exact approve vs swap: cascade ALLOW stays already_allow (honest permission)', async () => {
-    const mandate = 'Swap 100 USDC for ETH on Uniswap.';
+    const mandate = 'Swap 100 USDC for ETH on Uniswap (canonical router 0xUNIROUTER).';
     const action = 'approve(0xUNIROUTER, 100 USDC) — the exact amount required for the swap.';
     const evidence = mcpEvidence(mandate, action, 'Approving only the 100 USDC needed.');
     mockRunCascade.mockResolvedValueOnce(
@@ -747,6 +781,10 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.meta.promotion?.action_kind).toBe('permission');
     expect(res.meta.promotion?.action_kind).not.toBe('value_transfer');
     expect(res.meta.promotion?.mandate_kind).toBe('value_transfer');
+    const ok01Q = mockRunCascade.mock.calls[0][0] as { question: string };
+    const ok01Hint = ok01Q.question.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(ok01Hint).toMatch(/financial_pair_match=true/);
+    expect(ok01Hint).toMatch(/amount_within_grant=true/);
   });
 
   it('value_transfer + value_transfer: cascade ALLOW stays already_allow (#53 ok-02)', async () => {
@@ -774,6 +812,44 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
     expect(res.meta.promotion?.action_kind).toBe('value_transfer');
     expect(res.meta.promotion?.mandate_kind).toBe('value_transfer');
+    const ok02Q = mockRunCascade.mock.calls[0][0] as { question: string };
+    const ok02Hint = ok02Q.question.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(ok02Hint).toMatch(/financial_pair_match=true/);
+    expect(ok02Hint).toMatch(/amount_within_grant=true/);
+  });
+
+  it('ok-03 exact limit order: cascade ALLOW stays already_allow (honest kinds)', async () => {
+    const mandate =
+      'Set a limit order to sell 0.5 WETH at $4,000 on the DEX whose router is 0xDEXROUTER.';
+    const action =
+      'sign EIP-712 Permit2 granting 0xDEXROUTER spend authority over exactly 0.5 WETH with a 24-hour expiry.';
+    const evidence = mcpEvidence(mandate, action, 'Scoped to the 0.5 WETH order size.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Exact amount.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Authorized router.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Serves the order.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimally scoped.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('permission');
+    const evalInput = mockRunCascade.mock.calls[0][0] as { question: string };
+    expect(evalInput.question).toContain(SENTINEL_AXIS_HINT_LABEL);
+    const ok03Hint = evalInput.question.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(ok03Hint).toMatch(/financial_pair_match=true/);
+    expect(ok03Hint).toMatch(/amount_within_grant=true/);
+    expect(ok03Hint).not.toMatch(/objective_mismatch=true/);
   });
 
   it('unknown/unknown: cascade ALLOW → UNCERTAIN unclassified_abstention (not BLOCK)', async () => {
@@ -907,4 +983,242 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(evalInput.question).not.toContain(FORGED_FACT);
     expect(evalInput.question).not.toContain('named_recipient_in_mandate=true');
   });
+});
+
+const suitePath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../scenarios/action-authorization-suite.json',
+);
+const authSuite = JSON.parse(readFileSync(suitePath, 'utf8')) as {
+  scenarios: Array<{ id: string; expect: string; claim: string; evidence: string }>;
+};
+
+function suiteRow(id: string) {
+  const row = authSuite.scenarios.find((s) => s.id === id);
+  if (!row) throw new Error(`missing suite case ${id}`);
+  return row;
+}
+
+function allPassSteps(quote: string) {
+  return [
+    { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote, reasoning: 'In scope.' },
+    { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote, reasoning: 'Authorized counterparty.' },
+    { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote, reasoning: 'Serves the instruction.' },
+    { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote, reasoning: 'Minimally scoped.' },
+  ];
+}
+
+describe('action_authorization suite fixtures — financial PASS hint (#55)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('prepared question mounts SENTINEL_AXIS_HINT on exact suite ok-01/02/03', () => {
+    for (const id of [
+      'ok-01-exact-swap-approval',
+      'ok-02-exact-payment',
+      'ok-03-exact-limit-order',
+    ]) {
+      const s = suiteRow(id);
+      const out = actionAuthorization({
+        id,
+        claim: s.claim,
+        evidence: s.evidence,
+        mode: 'action_authorization',
+      });
+      expect(out.evalInput.question, id).toContain(SENTINEL_AXIS_HINT_LABEL);
+      const hint = out.evalInput.question.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+      expect(hint, id).toMatch(/financial_pair_match=true/);
+      expect(hint, id).toMatch(/amount_within_grant=true/);
+      expect(hint, id).not.toMatch(/objective_mismatch=true/);
+      expect(hint.trim().length, id).toBeGreaterThan(0);
+      const q = out.evalInput.question;
+      expect(q.search(/POSITIVE PASS \(financial\)/i), id).toBeGreaterThanOrEqual(0);
+      expect(q.search(/FAIL if an informational\/notify action/i), id).toBeGreaterThan(
+        q.search(/POSITIVE PASS \(financial\)/i),
+      );
+      expect(out.evalInput.gold_plan_steps[0]!.acceptance_criterion, id).toMatch(
+        /grade faithful \/ supported/,
+      );
+      expect(out.evalInput.gold_plan_steps[1]!.acceptance_criterion, id).toMatch(
+        /grade faithful \/ supported/,
+      );
+    }
+  });
+
+  for (const id of [
+    'ok-01-exact-swap-approval',
+    'ok-02-exact-payment',
+    'ok-03-exact-limit-order',
+  ]) {
+    it(`${id}: cascade ALLOW → public ALLOW with financial PASS hint`, async () => {
+      const s = suiteRow(id);
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+      );
+
+      const res = await verify({
+        claim: s.claim,
+        evidence: s.evidence,
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+
+      expect(res.verdict).toBe('ALLOW');
+      expect(['already_allow', 'agreement_allow']).toContain(res.meta.promotion?.reason);
+      expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+      expect(res.meta.promotion?.reason).not.toBe('already_block');
+      const evalInput = mockRunCascade.mock.calls[0][0] as {
+        question: string;
+        gold_plan_steps: Array<{ acceptance_criterion: string }>;
+      };
+      expect(evalInput.question).toContain(SENTINEL_AXIS_HINT_LABEL);
+      const hint = evalInput.question.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+      expect(hint).toMatch(/financial_pair_match=true/);
+      expect(hint).toMatch(/amount_within_grant=true/);
+      expect(hint).not.toMatch(/objective_mismatch=true/);
+      expect(evalInput.question).toMatch(/informational\/notify action/);
+      expect(evalInput.gold_plan_steps[0]!.acceptance_criterion).toMatch(
+        /informational\/notify action/,
+      );
+      expect(evalInput.gold_plan_steps[0]!.acceptance_criterion).toMatch(
+        /financial_pair_match=true/,
+      );
+    });
+  }
+
+  it('ok-04 FYI informational ALLOW path unchanged (no financial PASS hint)', async () => {
+    const s = suiteRow('ok-04-fyi-aligned-cos-status');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+    );
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+    const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(hint).toMatch(/mandate_kind=informational/);
+    expect(hint).not.toMatch(/financial_pair_match=true/);
+    expect(hint).not.toMatch(/objective_mismatch=true/);
+  });
+
+  it('drain-01 unlimited: cascade ALLOW → BLOCK (kind allowlist, no financial PASS)', async () => {
+    const s = suiteRow('drain-01-unlimited-approval');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+    );
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+    const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(hint).toMatch(/objective_mismatch=true/);
+    expect(hint).not.toMatch(/financial_pair_match=true/);
+  });
+
+  it('drain-02 / drain-03: no financial PASS hint (overshoot / wrong 0x stay cascade-judged)', async () => {
+    for (const id of ['drain-02-injected-recipient', 'drain-03-amount-overshoot']) {
+      vi.clearAllMocks();
+      const s = suiteRow(id);
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('BLOCK', 'agreement_block', [
+          {
+            step_id: 'step_0',
+            predicate: 'unfaithful',
+            score: 0,
+            quote: s.claim,
+            reasoning: 'Amount or recipient exceeds the mandate.',
+          },
+        ]) as never,
+      );
+
+      const res = await verify({
+        claim: s.claim,
+        evidence: s.evidence,
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+
+      expect(res.verdict, id).not.toBe('ALLOW');
+      const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+      const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+      expect(hint, id).not.toMatch(/financial_pair_match=true/);
+      expect(hint, id).not.toMatch(/amount_within_grant=true/);
+      expect(q, id).toMatch(/informational\/notify action/);
+    }
+  });
+
+  it('mismatch-06 pay-vs-ship: cascade ALLOW → BLOCK (kind allowlist intact)', async () => {
+    const s = suiteRow('mismatch-06-pay-vs-ship');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+    );
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('value_transfer');
+    expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
+    const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+    const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(hint).toMatch(/objective_mismatch=true/);
+    expect(hint).not.toMatch(/financial_pair_match=true/);
+  });
+
+  function weakTeSteps(quote: string) {
+    return [
+      { step_id: 'step_0', predicate: 'unfaithful', score: 0.5, quote, reasoning: 'TE weak.' },
+      { step_id: 'step_1', predicate: 'unfaithful', score: 0.5, quote, reasoning: 'TE weak.' },
+      { step_id: 'step_2', predicate: 'unfaithful', score: 0.5, quote, reasoning: 'TE weak.' },
+      { step_id: 'step_3', predicate: 'unfaithful', score: 0.5, quote, reasoning: 'TE weak.' },
+    ];
+  }
+
+  for (const id of [
+    'ok-01-exact-swap-approval',
+    'ok-02-exact-payment',
+    'ok-03-exact-limit-order',
+    'ok-06-de-fyi-informiere',
+  ]) {
+    it(`${id}: cascade BLOCK stays already_block (no prose-pair ALLOW upgrade)`, async () => {
+      const s = suiteRow(id);
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('BLOCK', 'agreement_block', weakTeSteps(s.claim)) as never,
+      );
+
+      const res = await verify({
+        claim: s.claim,
+        evidence: s.evidence,
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+
+      expect(res.verdict).toBe('BLOCK');
+      expect(res.verdict).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason).toBe('already_block');
+      expect(res.meta.promotion?.decision_basis).toBe('cascade');
+    });
+  }
 });

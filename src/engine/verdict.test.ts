@@ -244,6 +244,21 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).not.toBe('already_allow');
   });
 
+  it('cascade BLOCK stays already_block (no prose-pair ALLOW upgrade, #34/#37)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'BLOCK',
+      cascadeReason: 'agreement_block',
+      mappedVerdict: 'BLOCK',
+      steps: allPass,
+      actionKind: 'value_transfer',
+      mandateKind: 'value_transfer',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('already_block');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+  });
+
   it('permission + value_transfer + bounded compatible stays already_allow (ok-01)', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',
@@ -320,6 +335,9 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.decision_basis).toBe('cascade');
     expect(decisionBasisForPromotionReason('already_block')).toBe('cascade');
     expect(decisionBasisForPromotionReason('objective_mismatch_fail_closed')).toBe(
+      'deterministic',
+    );
+    expect(decisionBasisForPromotionReason('unclassified_abstention_fail_closed')).toBe(
       'deterministic',
     );
   });

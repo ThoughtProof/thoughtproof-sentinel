@@ -356,6 +356,7 @@ export function resolveActionAuthPromotion(
   }
 
   if (input.mappedVerdict === 'BLOCK') {
+    // Non-Goal #34/#37: never upgrade cascade BLOCK → public ALLOW.
     return finish('BLOCK', false, 'already_block');
   }
 
