@@ -4,6 +4,38 @@
 
 ### Fixed
 
+- **FYI PASS-hint + DE ship negation (issue #38 dogfood):**
+  Preview FYI (case 1) was UNCERTAIN with `mandate_kind=informational`
+  (gate OK) but cascade `disagreement_hold` / `steps_not_all_pass`: all
+  four steps had PASS-shaped prose yet `predicate=unfaithful` / score 0
+  (grade surface, not a FAIL-list misread). Step 2 criterion + question
+  now state a positive PASS trigger: `SENTINEL_AXIS_HINT` with
+  `mandate_kind=informational` and no `objective_mismatch=true` → aligned
+  notify/FYI PASSES (grade faithful/supported). Promotion allowlist is
+  unchanged. DE negation before ship verbs (`kein(e|en|em|er)?`,
+  `nicht`, `ohne`, `niemals`) so "kein Deploy" / "keine Zahlung" are not
+  `deploy_ship` (case 6).
+- **Informational ALLOW allowlist (issue #38):**
+  An informational / notify-only action may reach public ALLOW only
+  when `mandate_kind` is positively `informational`. Otherwise
+  `objective_mismatch_fail_closed` BLOCK — including unknown /
+  ambiguous mandates, DE ship→notify, and payment→notify. This closes
+  the structural gap that #37 mitigated as an English-majority
+  blacklist (`hasPositiveShipInstruction` / non-informational kinds).
+  #37 remains mitigation lineage; #36 stays open (MCP claim framing is
+  companion [thoughtproof-mcp#21](https://github.com/ThoughtProof/thoughtproof-mcp/issues/21)
+  — Sentinel does not paper over `claim === proposed_action`).
+  FYI-aligned (`mandate_kind === informational`) still ALLOW. English
+  ship hard-BLOCK from #37 is preserved. Verify log line now includes
+  `promotion=` (and `mandate_kind` / `action_kind` when present) so
+  Runtime Logs answer dogfood without receipt dumps.
+  **Known limitation (merge protocol):** aligned FYI is positively
+  allowlisted only when the mandate is recognizably `informational`.
+  Unrecognized mandates and unrecognized actions (`action_kind !==
+  informational`) fall through to the cascade —
+  `informationalActionMayPublicAllow` returns true for non-informational
+  actions, so `unknown` abstains rather than fail-closes. Follow-up:
+  [#47](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/47).
 - **Finite receipt confidence (issue #39):**
   Averaging step scores now coerces missing / NaN / Infinity `score` to
   `0` (`Number.isFinite(s.score) ? s.score : 0`). Response `confidence`

@@ -67,7 +67,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       ? runAuthorizationGate(req.mandate, gateMode)
       : null;
 
-  // Deterministic Ship-mismatch (notify/FYI vs ship/pin/deploy/publish).
+  // Deterministic informational allowlist (issue #38): notify/FYI may
+  // public-ALLOW only when mandate_kind is positively informational.
   // Computed before the cascade so budget-exhaust and agreement_allow cannot
   // fail-open. Same classifier the mode handler uses for SENTINEL_AXIS_HINT.
   const actionAuthKind =
@@ -194,9 +195,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
                   steps_all_pass: false,
                   machine_condition_proof_present: false,
                   machine_condition_proof_accepted: false,
+                  ...(actionAuthKind
+                    ? {
+                        action_kind: actionAuthKind.action_kind,
+                        mandate_kind: actionAuthKind.mandate_kind,
+                      }
+                    : {}),
                   release_id: releaseId,
                   policy:
-                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed',
+                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed+p0-informational-allowlist',
                 },
               }
             : {}),
@@ -256,6 +263,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       // No structured proof contract yet — never pass LLM text here.
       machineConditionProof: null,
       objectiveMismatch,
+      actionKind: actionAuthKind?.action_kind ?? null,
+      mandateKind: actionAuthKind?.mandate_kind ?? null,
     });
     verdict = decision.publicVerdict;
     promotionMeta = {
@@ -268,6 +277,12 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       steps_all_pass: decision.trace.steps_all_pass,
       machine_condition_proof_present: decision.trace.machine_condition_proof_present,
       machine_condition_proof_accepted: decision.trace.machine_condition_proof_accepted,
+      ...(actionAuthKind
+        ? {
+            action_kind: actionAuthKind.action_kind,
+            mandate_kind: actionAuthKind.mandate_kind,
+          }
+        : {}),
       // Deploy provenance: Vercel sets VERCEL_GIT_COMMIT_SHA; local/dev may set
       // GIT_COMMIT / RELEASE_ID. Policy id is stable for this ADR addendum.
       release_id:
@@ -276,7 +291,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         process.env.RELEASE_ID ||
         undefined,
       policy:
-        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed',
+        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist',
     };
   }
 
@@ -332,8 +347,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   });
   let objections = bind.surface_objections;
 
-  // 5c. Ship-mismatch surface: if the classifier fired, step_2 must not
-  // remain a near-pass ("objective only weakly supported") on a public BLOCK.
+  // 5c. Objective-mismatch surface: if the allowlist/classifier fired,
+  // step_2 must not remain a near-pass on a public BLOCK.
   if (objectiveMismatch) {
     objections = applyObjectiveMismatchSurface(
       objections,

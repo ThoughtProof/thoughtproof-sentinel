@@ -12,18 +12,21 @@
  * neutralized before classify/annotate so a smuggled line cannot be
  * treated as authoritative (PR #34 review).
  *
- * It never asserts `objective_aligned=true`. It MAY assert
- * `objective_mismatch=true` when the action is notify-only and the
- * mandate is a non-informational kind (ship/pin/deploy/publish, value
- * transfer, or permission). The engine then hard-BLOCKs (promotion
- * `objective_mismatch_fail_closed`) so cascade `agreement_allow` cannot
- * fail-open — including MCP `claim === proposed_action`. This is an
- * English-majority mitigation plus a small DE ship-verb set — not full
- * i18n / allowlist inversion.
+ * It never asserts `objective_aligned=true`. An informational action
+ * may reach public ALLOW only when the mandate is **positively**
+ * `informational` (`mandate_kind === 'informational'`). Otherwise the
+ * classifier asserts `objective_mismatch=true` and the engine
+ * hard-BLOCKs (`objective_mismatch_fail_closed`) so cascade
+ * `agreement_allow` cannot fail-open — including MCP
+ * `claim === proposed_action`, unknown/ambiguous mandates, non-English
+ * ship prose, and payment→notify. #37's English/DE ship + pay blacklist
+ * remains mitigation lineage; this invert is the structural close
+ * (issue #38). Companion MCP claim rewrite: thoughtproof-mcp#21 —
+ * Sentinel does not paper over `claim === proposed_action`.
  *
  * Silent (no hint) on financial / permission / unknown / mixed-transfer
- * actions — the existing amount/recipient/least-privilege criteria stay
- * in charge.
+ * *actions* — the existing amount/recipient/least-privilege criteria stay
+ * in charge. An informational action vs an unknown mandate is not silent.
  *
  * Axis-selection keywords are English-only (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`). Non-English heads do not select an
@@ -85,17 +88,11 @@ const PERMISSION_RE =
 
 const DE_SHIP_VERBS = 'deploye|veröffentliche|veröffentlichen|ausliefern';
 
-const DEPLOY_RE =
-  new RegExp(
-    `\\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\\s+the)?\\s+npm|npm\\s+(?:version\\s+)?pin|send-to-prod|release|${DE_SHIP_VERBS})\\b`,
-    'i',
-  );
-
 /**
  * Positive ship/pin/deploy/publish for Ship-mismatch. Omits bare `release`
  * (FYI "release notes" must not flip a notify mandate). Negated mentions
- * ("no deploy", "do not pin npm") do not count. Small DE verb set only —
- * not full i18n.
+ * ("no deploy", "kein Deploy", "do not pin npm") do not count. Small DE
+ * verb set only — not full i18n.
  */
 const POSITIVE_SHIP_RE =
   new RegExp(
@@ -104,7 +101,7 @@ const POSITIVE_SHIP_RE =
   );
 
 const SHIP_NEGATION_BEFORE_RE =
-  /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b)\s+(?:\w+\s+){0,4}$/i;
+  /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b|\bkein(?:e|en|em|er)?\b|\bnicht\b|\bohne\b|\bniemals\b)\s+(?:\w+\s+){0,4}$/i;
 
 /** English-only informational heads (no language-specific particles). */
 const INFO_HEAD_RE =
@@ -253,11 +250,12 @@ function classifyBlob(text: string): ActionKind {
   if (lead !== 'unknown') return lead;
   if (hasPermissionGrant(text)) return 'permission';
   if (hasValueTransfer(text)) return 'value_transfer';
-  if (DEPLOY_RE.test(text) && !INFO_ANY_RE.test(text)) return 'deploy_ship';
+  // Positive ship only — "kein Deploy" / "no deploy" must not win over FYI.
+  if (hasPositiveShipInstruction(text) && !INFO_ANY_RE.test(text)) return 'deploy_ship';
   if (INFO_ANY_RE.test(text) && !hasValueTransfer(text) && !hasPermissionGrant(text)) {
     return 'informational';
   }
-  if (DEPLOY_RE.test(text)) return 'deploy_ship';
+  if (hasPositiveShipInstruction(text)) return 'deploy_ship';
   return 'unknown';
 }
 
@@ -283,7 +281,24 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic objective mismatch: mandate is ship/pin/deploy/publish or a value-transfer/permission instruction; action is notify/FYI only (objective_mismatch).';
+  'Deterministic objective mismatch: an informational/notify action may public-ALLOW only when mandate_kind is positively informational. Mandate is ship/pin/deploy/publish, value-transfer/permission, or unknown — action is notify/FYI only (objective_mismatch).';
+
+/** Trust is positively derived: only this kind may ALLOW an informational action. */
+export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
+  return kind === 'informational';
+}
+
+/**
+ * Public-ALLOW allowlist for informational actions (issue #38).
+ * Non-informational actions are out of scope for this rule (cascade / gate).
+ */
+export function informationalActionMayPublicAllow(
+  actionKind: ActionKind,
+  mandateKind: ActionKind,
+): boolean {
+  if (actionKind !== 'informational') return true;
+  return mandateIsPositivelyInformational(mandateKind);
+}
 
 function mandateLooksFinancial(mandate?: AuthorizationMandate): boolean {
   if (!mandate) return false;
@@ -335,34 +350,38 @@ export function classifyActionAuthKind(
   if (permission_grant && action_kind === 'unknown') action_kind = 'permission';
   if (value_transfer && action_kind === 'unknown') action_kind = 'value_transfer';
 
-  // Positive ship/pin instruction only — do not flip "no deploy" FYI
-  // mandates just because the word "deploy" appears in a negation.
+  // Positive ship/pin instruction only — do not flip "no deploy" / "kein
+  // Deploy" FYI mandates just because the word "deploy" appears in a negation.
   const mandateHasPositiveShip = hasPositiveShipInstruction(mandateText);
   if (mandateHasPositiveShip && mandate_kind !== 'value_transfer' && mandate_kind !== 'permission') {
     mandate_kind = 'deploy_ship';
+  } else if (mandate_kind === 'deploy_ship' && !mandateHasPositiveShip) {
+    // leadingKind saw a deploy head that was only a negated mention, or
+    // classifyBlob raced ahead of negation. Prefer informational when the
+    // mandate also has an info axis; otherwise unknown (allowlist fail-closed).
+    mandate_kind =
+      INFO_HEAD_RE.test(mandateText.trim()) || INFO_ANY_RE.test(mandateText)
+        ? 'informational'
+        : 'unknown';
   } else if (mandate_kind === 'unknown' && DEPLOY_HEAD_RE.test(mandateText.trim())) {
-    mandate_kind = 'deploy_ship';
+    if (mandateHasPositiveShip) mandate_kind = 'deploy_ship';
   }
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
-  // Notify-only action against a non-informational mandate (ship/pin/deploy,
-  // value transfer, or permission). Independent of leadingKind on the
-  // mandate so "After CI, ship. Also notify CoS" still mismatches. An
-  // action that *is* a ship or spend stays its own kind and does not trip.
+  // Informational/notify action: public ALLOW only when the mandate is
+  // positively informational. Ship/pay/permission *and* unknown/ambiguous
+  // fail closed. Independent of leadingKind on the mandate so
+  // "After CI, ship. Also notify CoS" still mismatches. An action that
+  // *is* a ship or spend stays its own kind and does not trip this rule.
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&
     !hasPermissionGrant(actionText) &&
     !mixedTransfer;
 
-  const mandateIsNonInformational =
-    mandateHasPositiveShip ||
-    mandate_kind === 'deploy_ship' ||
-    mandate_kind === 'value_transfer' ||
-    mandate_kind === 'permission';
-
-  const objective_mismatch = actionIsNotifyOnly && mandateIsNonInformational;
+  const objective_mismatch =
+    actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind);
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -388,8 +407,9 @@ export function classifyActionAuthKind(
     if (named_recipient_in_mandate) {
       parts.push('named_recipient_in_mandate=true');
     }
+    parts.push(`mandate_kind=${mandate_kind}`);
     if (objective_mismatch) {
-      parts.push(`mandate_kind=${mandate_kind}`, 'objective_mismatch=true');
+      parts.push('objective_mismatch=true');
     }
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }

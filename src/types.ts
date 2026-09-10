@@ -352,6 +352,9 @@ export interface SentinelVerifyResponse {
       steps_all_pass: boolean;
       machine_condition_proof_present: boolean;
       machine_condition_proof_accepted: boolean;
+      /** Classifier kinds (issue #38 allowlist). Present on action_authorization. */
+      action_kind?: string;
+      mandate_kind?: string;
       /** Git commit SHA (short or full) baked at build/runtime for deploy provenance. */
       release_id?: string;
       /** Policy id for this promotion layer revision. */

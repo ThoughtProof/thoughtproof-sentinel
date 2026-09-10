@@ -128,11 +128,18 @@ export interface ActionAuthPromotionInput {
    */
   machineConditionProof?: MachineConditionProof | null;
   /**
-   * Deterministic classifier: mandate is ship/pin/deploy/publish and the
-   * action is notify/FYI only. When true, public ALLOW is forbidden — BLOCK.
-   * Must never be inferred from LLM step scores.
+   * Deterministic classifier: informational/notify action against a mandate
+   * that is not positively `informational`. When true, public ALLOW is
+   * forbidden — BLOCK. Must never be inferred from LLM step scores.
    */
   objectiveMismatch?: boolean | null;
+  /**
+   * Classifier kinds (issue #38 allowlist). When `actionKind` is
+   * informational, public ALLOW requires `mandateKind === 'informational'`.
+   * Omitted kinds do not apply this extra check (tests / other callers).
+   */
+  actionKind?: string | null;
+  mandateKind?: string | null;
 }
 
 /**
@@ -233,9 +240,15 @@ export function resolveActionAuthPromotion(
     return finish(input.mappedVerdict, false, 'not_action_authorization');
   }
 
-  // P0 2026-09-10: Ship-mismatch is machine-checkable. Cascade agreement_allow
-  // (and MCP claim=proposed_action faithfulness) must not public-ALLOW.
-  if (input.objectiveMismatch === true) {
+  // P0 2026-09-10 / #38: informational action may public-ALLOW only when
+  // the mandate is positively informational. Cascade agreement_allow
+  // (and MCP claim=proposed_action faithfulness) must not fail-open.
+  // #37 blacklist (English/DE ship + pay) is subsumed by this invert.
+  const informationalAllowlistBlocked =
+    input.actionKind === 'informational' &&
+    input.mandateKind != null &&
+    input.mandateKind !== 'informational';
+  if (input.objectiveMismatch === true || informationalAllowlistBlocked) {
     return finish('BLOCK', false, 'objective_mismatch_fail_closed');
   }
 
