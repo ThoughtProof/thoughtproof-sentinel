@@ -23,6 +23,24 @@ import {
   warnIfUpstashTrimmed,
   _resetSharedUpstashRedis,
 } from './upstash-config.js';
+import {
+  AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
+  GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT,
+  RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S,
+  RATE_LIMIT_WINDOW,
+  RATE_LIMIT_WINDOW_SECONDS,
+} from './rate-limit-policy.js';
+
+export {
+  AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
+  GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT,
+  RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S,
+  RATE_LIMIT_WINDOW,
+  RATE_LIMIT_WINDOW_SECONDS,
+  type RateLimitBackend,
+} from './rate-limit-policy.js';
+
+export { getRateLimitReadiness } from './upstash-env.js';
 
 // --- API Key Store ---
 // Phase 1: Move to Vercel KV or Supabase. For now, env-var based.
@@ -89,16 +107,13 @@ function getUpstashLimiters():
 
     _authenticatedLimiter = new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(120, '60 s'),
+      limiter: Ratelimit.slidingWindow(AUTHENTICATED_RATE_LIMIT_PER_MINUTE, RATE_LIMIT_WINDOW),
       prefix: 'sentinel:rl:auth',
     });
 
     _globalLimiter = new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(
-        parseInt(process.env.SENTINEL_GLOBAL_RATE_LIMIT ?? '30', 10),
-        '60 s',
-      ),
+      limiter: Ratelimit.slidingWindow(resolveGlobalRateLimitPerMinute(), RATE_LIMIT_WINDOW),
       prefix: 'sentinel:rl:global',
     });
 
@@ -118,11 +133,19 @@ function getUpstashLimiters():
   }
 }
 
+function resolveGlobalRateLimitPerMinute(): number {
+  const parsed = parseInt(
+    process.env.SENTINEL_GLOBAL_RATE_LIMIT ?? String(GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT),
+    10,
+  );
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT;
+}
+
 function unavailableResult(): RateLimitResult {
   return {
     allowed: false,
     remaining: 0,
-    resetAt: Date.now() + 30_000,
+    resetAt: Date.now() + RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S * 1000,
     unavailable: true,
     code: 'RATE_LIMIT_UNAVAILABLE',
   };
@@ -140,7 +163,7 @@ export function _resetLimiters(): void {
 // --- In-memory fallback (original) ---
 
 const rateLimitWindows = new Map<string, { count: number; windowStart: number }>();
-const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_WINDOW_MS = RATE_LIMIT_WINDOW_SECONDS * 1000;
 
 function checkRateLimitInMemory(
   key: string,
@@ -219,7 +242,7 @@ export function validateApiKey(
  */
 export async function checkRateLimit(
   key: string,
-  maxPerMinute: number = 60,
+  maxPerMinute: number = AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
 ): Promise<RateLimitResult> {
   const upstash = getUpstashLimiters();
 
@@ -256,8 +279,7 @@ export async function checkGlobalRateLimit(): Promise<RateLimitResult> {
 
   if (!upstash.ok) {
     if (upstash.state === 'missing') {
-      const globalMax = parseInt(process.env.SENTINEL_GLOBAL_RATE_LIMIT ?? '30', 10);
-      return checkRateLimitInMemory('__global__', globalMax);
+      return checkRateLimitInMemory('__global__', resolveGlobalRateLimitPerMinute());
     }
     return unavailableResult();
   }
@@ -289,6 +311,6 @@ export function rateLimitUnavailablePayload(requestId: string): {
     error: 'Rate limit service temporarily unavailable',
     code: 'RATE_LIMIT_UNAVAILABLE',
     request_id: requestId,
-    retry_after_s: 30,
+    retry_after_s: RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S,
   };
 }

@@ -360,6 +360,12 @@ export interface SentinelVerifyResponse {
       unknown_mandate?: boolean;
       /** Both kinds unknown — UNCERTAIN abstention, not named mismatch. */
       unclassified_abstention?: boolean;
+      /**
+       * `deterministic` = allowlist / abstention / mismatch gate decided
+       * BLOCK|UNCERTAIN (not cascade confidence). `cascade` = promotion
+       * followed the cascade-derived path (issue #43 / Raul).
+       */
+      decision_basis?: ActionAuthDecisionBasis;
       /** Git commit SHA (short or full) baked at build/runtime for deploy provenance. */
       release_id?: string;
       /** Policy id for this promotion layer revision. */
@@ -384,8 +390,18 @@ export interface SentinelVerifyResponse {
   };
 }
 
+export type RateLimitBackend = 'redis' | 'in_memory' | 'unavailable';
+
+/** Whether the public verdict came from the deterministic gate or the cascade. */
+export type ActionAuthDecisionBasis = 'deterministic' | 'cascade';
+
 export interface SentinelHealthResponse {
   ok: boolean;
+  /** Liveness only — process answered. */
+  ready?: boolean;
+  serv_key?: 'present' | 'missing';
+  /** Limiter store. unavailable ⇒ ready=false (issue #43). */
+  rate_limit?: RateLimitBackend;
   version: string;
   modes: SentinelMode[];
   tiers: SentinelTier[];

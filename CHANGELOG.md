@@ -2,8 +2,50 @@
 
 ## Unreleased
 
+### Added
+
+- **Health `rate_limit` + limiter-aware `ready` (issue #43):**
+  `GET /sentinel/health` now includes `rate_limit: "redis" | "in_memory" |
+  "unavailable"`. `ready` is false when Redis is configured-but-invalid
+  (fail-closed limiter), when `SERV_API_KEY` is missing, **or** (ADR-0021
+  hard variant) when `VERCEL_ENV=production` and `rate_limit` is
+  `in_memory`. Preview/dev may still be `in_memory` + `ready: true`.
+  No `degraded` field. `ok` stays liveness-only; `serv_key` is unchanged
+  (`present` | `missing`, never the value). Dogfood: `curl -sS https://sentinel.thoughtproof.ai/sentinel/health`
+  (or a Preview URL) and read `rate_limit`. Optional Preview-only check
+  of the 503 branch: branch-bound invalid `UPSTASH_REDIS_REST_TOKEN`,
+  expect `rate_limit: "unavailable"` + `ready: false` and authenticated
+  verify `503 RATE_LIMIT_UNAVAILABLE` + `Retry-After: 30` (no Production
+  env flip).
+- **`decision_basis` on action_authorization promotion meta (issue #43
+  bonus / Raul):** receipts now carry `decision_basis: "deterministic" |
+  "cascade"`. Deterministic = allowlist / abstention / mismatch gate
+  (`objective_mismatch_fail_closed`, `unclassified_abstention_fail_closed`).
+  Cascade = promotion followed the cascade-derived path. Distinguishes
+  gate BLOCK|UNCERTAIN from cascade confidence. Deploy/publish vs
+  unknown-mandate allowlist symmetry remains #49 (out of scope here).
+
+### Changed
+
+- **Single 120/min constant + burst default (issue #43):**
+  `src/rate-limit-policy.json` is the source for authenticated 120/min,
+  global 30/min default, 60s window, 503 `Retry-After: 30`, and burst
+  `BURST_N` default 140. Upstash `slidingWindow` uses the same number
+  as `checkRateLimit` callers, OpenAPI, ADR-0021, and
+  `scripts/rate-limit-burst-check.mjs`. Burst expected mix: ~120 × 400
+  validation, then 429 + `Retry-After`. `503 RATE_LIMIT_UNAVAILABLE`
+  means Redis is still broken.
+
 ### Fixed
 
+- **Preview `/sentinel/health` 500 (issue #43 dogfood):** health no longer
+  imports `src/auth.ts` (which pulled `@upstash/ratelimit` and
+  `import` of `rate-limit-policy.json`). Vercel Node does not transform
+  JSON imports the way Vitest does, so the handler failed at load
+  (`FUNCTION_INVOCATION_FAILED`) while `npm test` stayed green. Policy
+  numbers are TypeScript literals; the burst script still reads the
+  sibling JSON (lockstep-tested). `rate_limit` is resolved via
+  `upstash-env` (config probe, no Redis SDK).
 - **Unknown-action abstention + DE informational markers (issue #47):**
   After #46, `informationalActionMayPublicAllow` returned true whenever
   `action_kind !== 'informational'`, so `unknown` actions abstained and

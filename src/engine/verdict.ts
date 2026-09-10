@@ -113,6 +113,20 @@ export type ActionAuthPromotionReason =
   | 'objective_mismatch_fail_closed'
   | 'unclassified_abstention_fail_closed';
 
+/** Receipt-level origin of the public verdict (issue #43). */
+export type ActionAuthDecisionBasis = 'deterministic' | 'cascade';
+
+const DETERMINISTIC_PROMOTION_REASONS = new Set<string>([
+  'objective_mismatch_fail_closed',
+  'unclassified_abstention_fail_closed',
+]);
+
+export function decisionBasisForPromotionReason(
+  reason: string,
+): ActionAuthDecisionBasis {
+  return DETERMINISTIC_PROMOTION_REASONS.has(reason) ? 'deterministic' : 'cascade';
+}
+
 export interface ActionAuthPromotionInput {
   mode: SentinelMode | string;
   /** Cascade internal verdict before public remap (ALLOW/CONDITIONAL_ALLOW/HOLD/BLOCK/…). */
@@ -168,6 +182,8 @@ export interface ActionAuthPromotionDecision {
   /** Whether all-steps-pass promotion actually fired. */
   promoted: boolean;
   reason: ActionAuthPromotionReason;
+  /** Deterministic gate vs cascade-derived confidence. */
+  decision_basis: ActionAuthDecisionBasis;
   /** Trace fields for meta / debugging. */
   trace: {
     cascade_reason: string | null;
@@ -242,6 +258,7 @@ export function resolveActionAuthPromotion(
     publicVerdict,
     promoted,
     reason,
+    decision_basis: decisionBasisForPromotionReason(reason),
     trace: { ...baseTrace, public_verdict: publicVerdict },
   });
 

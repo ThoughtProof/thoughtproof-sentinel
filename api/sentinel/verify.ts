@@ -8,6 +8,8 @@ import {
   checkRateLimit,
   checkGlobalRateLimit,
   rateLimitUnavailablePayload,
+  AUTHENTICATED_RATE_LIMIT_PER_MINUTE,
+  RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S,
 } from '../../src/auth.js';
 import { x402Gate } from '../../src/middleware/x402.js';
 import { processSignedEvidence, applyEvidenceEffects } from '../../src/evidence-processing.js';
@@ -73,11 +75,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'anonymous';
     const rateLimit =
       authResult.valid && req.headers['x-sentinel-key']
-        ? await checkRateLimit(rateLimitKey, 120) // Authenticated: 120/min
-        : await checkGlobalRateLimit(); // Unauthenticated: 30/min
+        ? await checkRateLimit(rateLimitKey, AUTHENTICATED_RATE_LIMIT_PER_MINUTE)
+        : await checkGlobalRateLimit();
 
     if (rateLimit.unavailable) {
-      res.setHeader('Retry-After', '30');
+      res.setHeader('Retry-After', String(RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S));
       return res.status(503).json(rateLimitUnavailablePayload(requestId));
     }
 

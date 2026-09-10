@@ -116,6 +116,9 @@ Cascade + ADR-0019 remain the **amplifiers** to public ALLOW.
 - Engine helper: `resolveActionAuthPromotion` in `src/engine/verdict.ts`
 - Wired in Sentinel promotion layer only (`src/engine/index.ts`) — cascade untouched
 - Trace on `meta.promotion`: cascade_reason, internal_verdict, mapped_verdict, public_verdict
+- `decision_basis`: `deterministic` | `cascade` (issue #43) — distinguish
+  allowlist / abstention / mismatch gate BLOCK|UNCERTAIN from
+  cascade-derived confidence
 - Exception / machine condition-proof: **fail-closed** (`acceptsMachineConditionProof` always false)
 - `agreement_allow` unchanged (003/005 separate semantic track)
 - DQL: untouched

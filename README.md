@@ -6,7 +6,7 @@ Agentic verification API — lightweight verification for autonomous agent workf
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/sentinel/health` | GET | Liveness (`ok`) + cascade readiness (`ready`, `serv_key`) |
+| `/sentinel/health` | GET | Liveness (`ok`) + readiness (`ready`, `serv_key`, `rate_limit`) |
 | `/sentinel/tiers` | GET | Tier discovery |
 | `/sentinel/verify` | POST | Verification (501 until engine wired) |
 
