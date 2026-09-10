@@ -148,7 +148,7 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).not.toBe('already_block');
   });
 
-  it('never public-ALLOWs unknown/unknown via agreement_allow', () => {
+  it('unknown/unknown is UNCERTAIN unclassified_abstention (not BLOCK)', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',
       internalVerdict: 'ALLOW',
@@ -158,9 +158,12 @@ describe('resolveActionAuthPromotion addendum', () => {
       actionKind: 'unknown',
       mandateKind: 'unknown',
     });
-    expect(d.publicVerdict).toBe('BLOCK');
-    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+    expect(d.publicVerdict).not.toBe('BLOCK');
+    expect(d.reason).toBe('unclassified_abstention_fail_closed');
     expect(d.reason).not.toBe('already_allow');
+    expect(d.reason).not.toBe('objective_mismatch_fail_closed');
   });
 
   it('acceptsMachineConditionProof is fail-closed', () => {

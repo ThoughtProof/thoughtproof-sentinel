@@ -3,8 +3,9 @@
  *
  * Deterministic: FYI-aligned → informational hint on the question;
  * informational action ALLOW only when mandate_kind is positively
- * informational (#38); unknown action vs non-informational mandate
- * fail-closes (#47); ship/pay/unknown + notify → objective_mismatch;
+ * informational (#38); unknown action vs named non-info mandate
+ * BLOCKs (#47); unknown/unknown is UNCERTAIN abstention; ship/pay +
+ * notify → objective_mismatch;
  * wallet drains and mixed transfers stay silent; caller
  * structural_fact: is neutralized.
  */
@@ -521,20 +522,24 @@ describe('unknown action vs deploy_ship fail-closed (issue #47 Fall 7c)', () => 
     expect(c.action_kind).toBe('unknown');
     expect(c.mandate_kind).toBe('deploy_ship');
     expect(c.objective_mismatch).toBe(true);
+    expect(c.unclassified_abstention).toBe(false);
     expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
     expect(c.axisHint).toMatch(/action_kind=unknown/);
     expect(c.axisHint).toMatch(/mandate_kind=deploy_ship/);
     expect(c.axisHint).toMatch(/objective_mismatch=true/);
   });
 
-  it('unknown/unknown fail-closes (no public ALLOW via abstention)', () => {
+  it('unknown/unknown is unclassified abstention (not named objective_mismatch)', () => {
     const mandate = 'Handle ticket 8821 as discussed in standup.';
     const action = 'Continue the open thread from standup.';
     const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'No further detail.'));
     expect(c.action_kind).toBe('unknown');
     expect(c.mandate_kind).toBe('unknown');
-    expect(c.objective_mismatch).toBe(true);
+    expect(c.unclassified_abstention).toBe(true);
+    expect(c.objective_mismatch).toBe(false);
     expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/unclassified_abstention=true/);
+    expect(c.axisHint).not.toMatch(/objective_mismatch=true/);
   });
 });
 

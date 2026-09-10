@@ -134,9 +134,12 @@ cannot fail-open. Hint-only step_2 FAIL is not sufficient. PR #37 is a
 **mitigation** (English ship-mismatch plus a small DE ship-verb set and
 pay-vs-notify). Issue #38 inverts the allowlist: an informational action
 may public-ALLOW only when `mandate_kind === 'informational'`; unknown /
-ambiguous / ship / pay mandates BLOCK. #47 closes the action-side gap:
-`action_kind === 'unknown'` vs a mandate that is not positively
-informational fail-closes (no public ALLOW). #37 remains mitigation lineage.
+ambiguous / ship / pay mandates BLOCK. #47 closes the action-side gap with two-tier fail-closed (no public
+ALLOW either way): `unknown` vs a named non-informational mandate
+(`deploy_ship` / `value_transfer` / `permission`) BLOCKs
+`objective_mismatch_fail_closed`; unknown/unknown is UNCERTAIN
+`unclassified_abstention_fail_closed` (classify better, not "exceeds
+mandate"). #37 remains mitigation lineage.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.
 

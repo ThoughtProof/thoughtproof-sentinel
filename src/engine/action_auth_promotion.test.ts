@@ -230,6 +230,40 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).not.toBe('already_block');
   });
 
+  it('4e6. agreement_allow + unknown action + value_transfer → BLOCK named conflict', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'unknown',
+      mandateKind: 'value_transfer',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('4e5. agreement_allow + unknown/unknown → UNCERTAIN unclassified_abstention (not BLOCK)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'unknown',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+    expect(d.publicVerdict).not.toBe('BLOCK');
+    expect(d.reason).toBe('unclassified_abstention_fail_closed');
+    expect(d.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
   it('4e4. agreement_allow + unknown action + informational mandate stays already_allow', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

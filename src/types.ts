@@ -358,6 +358,8 @@ export interface SentinelVerifyResponse {
       /** Per-request unknown-kind flags (issue #47 abstention counters). */
       unknown_action?: boolean;
       unknown_mandate?: boolean;
+      /** Both kinds unknown — UNCERTAIN abstention, not named mismatch. */
+      unclassified_abstention?: boolean;
       /** Git commit SHA (short or full) baked at build/runtime for deploy provenance. */
       release_id?: string;
       /** Policy id for this promotion layer revision. */

@@ -9,19 +9,30 @@
   `action_kind !== 'informational'`, so `unknown` actions abstained and
   could fail-open via cascade `agreement_allow` (dogfood
   `sent_a3ae25f9e68d4234` ALLOW unknown/unknown; Fall 7c BLOCKed via
-  `already_block`, not the allowlist). `unknown` vs a mandate that is
-  not positively informational now fail-closes
-  (`objective_mismatch_fail_closed`) — no public ALLOW. A small DE
-  informational set (Informiere, Info an, Bescheid geben, Rückmeldung,
-  Status an) so Fall 6 classifies `informational`/`informational`.
-  Per-request `unknown_action` / `unknown_mandate` flags on promotion
-  meta and the verify log line (plus process counters) so prod
-  abstention rate is measurable. Target: host-declared `mandate.kind` /
+  `already_block`, not the allowlist). Two-tier fail-closed, no public
+  ALLOW either way:
+  - `unknown` action vs a **named** non-informational mandate
+    (`deploy_ship` / `value_transfer` / `permission`) → **BLOCK**
+    `objective_mismatch_fail_closed` (real named conflict; Fall 7c /
+    mismatch-05).
+  - `unknown` / `unknown` → public **UNCERTAIN**
+    `unclassified_abstention_fail_closed` (not BLOCK). Safety-equivalent
+    (MCP execute stays false) but the receipt says "classify better",
+    not "action exceeds mandate".
+  A small DE informational set (Informiere, Info an, Bescheid geben,
+  Rückmeldung, Status an) so Fall 6 classifies
+  `informational`/`informational`. Per-request `unknown_action` /
+  `unknown_mandate` / `unclassified_abstention` flags on promotion meta
+  and the verify log line (plus process counters) so prod abstention
+  rate is measurable. Target: host-declared `mandate.kind` /
   `action.kind` with prose as fallback and `unknown → fail-closed`
   (companion thoughtproof-mcp#21); this change does not invent that
   host API. #38 informational allowlist is unchanged (informational
   action + non-informational mandate still BLOCK). FYI-aligned English
   informational ALLOW is unchanged. The #46 known limitation is closed.
+  Follow-up (not this change): deploy-action vs unknown-mandate
+  allowlist asymmetry (`informationalActionMayPublicAllow('deploy_ship',
+  'unknown') === true`).
 - **FYI PASS-hint + DE ship negation (issue #38 dogfood):**
   Preview FYI (case 1) was UNCERTAIN with `mandate_kind=informational`
   (gate OK) but cascade `disagreement_hold` / `steps_not_all_pass`: all

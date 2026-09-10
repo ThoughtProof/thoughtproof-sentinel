@@ -28,8 +28,12 @@
  * and on unknown actions against a positively informational mandate —
  * the existing amount/recipient/least-privilege criteria stay in charge.
  * An informational action vs an unknown mandate is not silent. An
- * `unknown` action vs a mandate that is not positively informational
- * fail-closes (issue #47) — classifier abstention is not an allow.
+ * `unknown` action vs a *named* non-informational mandate
+ * (`deploy_ship` / `value_transfer` / `permission`) fail-closes as
+ * BLOCK `objective_mismatch_fail_closed` (issue #47). Unknown/unknown
+ * is UNCERTAIN `unclassified_abstention_fail_closed` — still no public
+ * ALLOW, but the receipt says "classify better", not "action exceeds
+ * mandate".
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`) plus a small DE informational set
@@ -68,6 +72,8 @@ export interface ActionAuthClassification {
   permission_grant: boolean;
   named_recipient_in_mandate: boolean;
   objective_mismatch: boolean;
+  /** Both kinds unknown — abstention, not a named mandate conflict. */
+  unclassified_abstention: boolean;
   identifiers_are_not_spend_amounts: boolean;
   /**
    * Sentinel-authored axis hint for the verification question.
@@ -304,19 +310,36 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic objective mismatch: an informational/notify or unknown action may public-ALLOW only when mandate_kind is positively informational. Mandate is ship/pin/deploy/publish, value-transfer/permission, or unknown — action is notify/FYI only or unclassified (objective_mismatch).';
+  'Deterministic objective mismatch: an informational/notify or unknown action may public-ALLOW only when mandate_kind is positively informational. Mandate is ship/pin/deploy/publish or value-transfer/permission — action is notify/FYI only or unclassified against a named non-informational mandate (objective_mismatch).';
+
+export const UNCLASSIFIED_ABSTENTION_REASON =
+  'Unclassified abstention: action_kind and mandate_kind are both unknown. No public ALLOW (fail-closed). Not a named objective mismatch — classify better (host-declared kind or prose markers).';
 
 /** Trust is positively derived: only this kind may ALLOW an informational action. */
 export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
   return kind === 'informational';
 }
 
+/** Named non-informational mandates — a real conflict vs unknown/notify action. */
+export function mandateIsNamedNonInformational(kind: ActionKind): boolean {
+  return kind === 'deploy_ship' || kind === 'value_transfer' || kind === 'permission';
+}
+
+export function isUnclassifiedAbstention(
+  actionKind: ActionKind,
+  mandateKind: ActionKind,
+): boolean {
+  return actionKind === 'unknown' && mandateKind === 'unknown';
+}
+
 /**
  * Public-ALLOW allowlist for informational *and* unknown actions
- * (issues #38 / #47). `unknown` vs a mandate that is not positively
- * informational fail-closes — abstention is not an allow.
+ * (issues #38 / #47). Returns false whenever public ALLOW is forbidden.
+ * Unknown/unknown is still not-allow (promotion maps it to UNCERTAIN
+ * `unclassified_abstention_fail_closed`, not BLOCK).
  * value_transfer / permission / deploy_ship actions stay out of scope
- * for this rule (cascade / financial gate).
+ * for this rule (cascade / financial gate). Deploy-action vs unknown
+ * mandate allowlist asymmetry is a follow-up — not closed here.
  */
 export function informationalActionMayPublicAllow(
   actionKind: ActionKind,
@@ -430,24 +453,25 @@ export function classifyActionAuthKind(
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
-  // Informational/notify *or* unknown action: public ALLOW only when the
-  // mandate is positively informational. Ship/pay/permission *and*
-  // unknown/ambiguous fail closed. Independent of leadingKind on the
-  // mandate so "After CI, ship. Also notify CoS" still mismatches. An
-  // action that *is* a ship or spend stays its own kind and does not
-  // trip this rule. Unknown-action abstention is fail-closed (#47).
+  // Informational/notify action: public ALLOW only when the mandate is
+  // positively informational. Ship/pay/permission fail closed as a
+  // named conflict. Unknown/unknown is abstention (UNCERTAIN), not
+  // objective_mismatch. Independent of leadingKind on the mandate so
+  // "After CI, ship. Also notify CoS" still mismatches. An action that
+  // *is* a ship or spend stays its own kind and does not trip this rule.
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&
     !hasPermissionGrant(actionText) &&
     !mixedTransfer;
 
-  const unknownActionVsNonInfoMandate =
-    action_kind === 'unknown' && !mandateIsPositivelyInformational(mandate_kind);
+  const unclassified_abstention = isUnclassifiedAbstention(action_kind, mandate_kind);
+  const unknownActionVsNamedMandate =
+    action_kind === 'unknown' && mandateIsNamedNonInformational(mandate_kind);
 
   const objective_mismatch =
     (actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind)) ||
-    unknownActionVsNonInfoMandate;
+    unknownActionVsNamedMandate;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -458,10 +482,10 @@ export function classifyActionAuthKind(
     mixedTransfer ||
     action_kind === 'value_transfer' ||
     action_kind === 'permission' ||
-    (action_kind === 'unknown' && !unknownActionVsNonInfoMandate);
+    (action_kind === 'unknown' && !unknownActionVsNamedMandate && !unclassified_abstention);
 
   let axisHint: string | null = null;
-  if (!silent && (action_kind === 'informational' || unknownActionVsNonInfoMandate)) {
+  if (!silent && (action_kind === 'informational' || unknownActionVsNamedMandate || unclassified_abstention)) {
     const parts = [
       `action_kind=${action_kind}`,
       'value_transfer=false',
@@ -477,6 +501,9 @@ export function classifyActionAuthKind(
     if (objective_mismatch) {
       parts.push('objective_mismatch=true');
     }
+    if (unclassified_abstention) {
+      parts.push('unclassified_abstention=true');
+    }
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }
 
@@ -487,6 +514,7 @@ export function classifyActionAuthKind(
     permission_grant,
     named_recipient_in_mandate,
     objective_mismatch,
+    unclassified_abstention,
     identifiers_are_not_spend_amounts,
     axisHint,
   };
