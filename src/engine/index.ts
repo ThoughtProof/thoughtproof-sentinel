@@ -260,6 +260,26 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     )
   ) {
     verdict = 'ALLOW';
+    // Receipt only — gate behavior unchanged. Without this, 3b ALLOWs are
+    // indistinguishable from native cascade ALLOW in prod logs.
+    promotionMeta = {
+      cascade_reason: cascadeOutput.cascadeReason ?? null,
+      internal_verdict: String(internalVerdict),
+      mapped_verdict: 'UNCERTAIN',
+      public_verdict: 'ALLOW',
+      promoted: true,
+      reason: 'inferential_step_promoted',
+      steps_all_pass: false,
+      machine_condition_proof_present: false,
+      machine_condition_proof_accepted: false,
+      decision_basis: 'cascade',
+      release_id:
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        process.env.GIT_COMMIT ||
+        process.env.RELEASE_ID ||
+        undefined,
+      policy: 'adr-0018-trade-reasoning-step2-promotion',
+    };
   }
 
   // 3c. action_authorization promotion (ADR-0019 + 2026-08-08 addendum).
