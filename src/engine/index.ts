@@ -39,6 +39,7 @@ import {
   startEngineBudget,
 } from './budget.js';
 import { randomUUID } from 'crypto';
+import { finiteScore, receiptConfidence } from '../confidence.js';
 
 /**
  * Run a single Sentinel verification.
@@ -93,7 +94,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     return {
       id,
       verdict: 'BLOCK',
-      confidence: 1,
+      confidence: receiptConfidence(1),
       reasoning: reason,
       objections: gateResult.violations.map((v, i) => ({
         step_id: `gate_${v.kind}`,
@@ -163,7 +164,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       return {
         id,
         verdict: publicVerdict,
-        confidence: 0,
+        confidence: receiptConfidence(0),
         reasoning:
           `Engine budget exhausted before cascade completed (stage=${err.stage}, ` +
           `elapsed_ms=${err.elapsedMs}, budget_ms=${err.budgetMs}). ` +
@@ -223,7 +224,11 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     req.mode === 'trade_reasoning' &&
     verdict === 'UNCERTAIN' &&
     canPromoteStep2Only(
-      steps3b.map((s) => ({ step_id: s.step_id, score: s.score, predicate: String(s.predicate) })),
+      steps3b.map((s) => ({
+        step_id: s.step_id,
+        score: finiteScore(s.score),
+        predicate: String(s.predicate),
+      })),
     )
   ) {
     verdict = 'ALLOW';
@@ -245,7 +250,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       mappedVerdict: verdict,
       steps: steps3b.map((s) => ({
         step_id: s.step_id,
-        score: s.score,
+        score: finiteScore(s.score),
         predicate: String(s.predicate),
       })),
       // No structured proof contract yet — never pass LLM text here.
@@ -275,10 +280,13 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     };
   }
 
-  // 4. Calculate confidence from step scores
+  // 4. Calculate confidence from step scores.
+  //    Non-finite / missing scores coerce to 0 (fail-closed). `steps.length > 0`
+  //    does not protect against undefined/NaN scores — those produced
+  //    avgScore=NaN → JSON null on live receipts (issue #39).
   const steps = cascadeOutput.result.step_evaluations;
   let avgScore = steps.length > 0
-    ? steps.reduce((sum, s) => sum + s.score, 0) / steps.length
+    ? steps.reduce((sum, s) => sum + finiteScore(s.score), 0) / steps.length
     : 0;
 
   // 5. Surface per-step objections (the actionable substance). pot-cli
@@ -301,7 +309,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     return {
       step_id: s.step_id,
       criterion,
-      score: Math.round(s.score * 1000) / 1000,
+      score: receiptConfidence(s.score),
       predicate: String(s.predicate),
       quote: s.quote,
       quote_source: s.quote_source ?? null,
@@ -332,7 +340,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       modeOutput.evalInput.gold_plan_steps,
     );
     if (objections.length > 0) {
-      avgScore = objections.reduce((sum, o) => sum + o.score, 0) / objections.length;
+      avgScore = objections.reduce((sum, o) => sum + finiteScore(o.score), 0) / objections.length;
     }
   }
 
@@ -345,7 +353,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   return {
     id,
     verdict,
-    confidence: Math.round(avgScore * 1000) / 1000,
+    confidence: receiptConfidence(avgScore),
     reasoning: publicReasoning,
     objections,
     mode: req.mode,

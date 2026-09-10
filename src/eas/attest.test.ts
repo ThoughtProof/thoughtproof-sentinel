@@ -101,6 +101,14 @@ describe('buildAttestationData', () => {
     const data = buildAttestationData(mockReq, mockRes);
     expect(data.claimHash).not.toBe(data.evidenceHash);
   });
+
+  it('copies non-finite response confidence as 0 (issue #39)', () => {
+    const nanRes = { ...mockRes, confidence: Number.NaN };
+    const data = buildAttestationData(mockReq, nanRes);
+    expect(Number.isFinite(data.confidence)).toBe(true);
+    expect(data.confidence).toBe(0);
+    expect(JSON.parse(JSON.stringify(data)).confidence).toBe(0);
+  });
 });
 
 describe('encodeAttestationData', () => {

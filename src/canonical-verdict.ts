@@ -24,6 +24,7 @@ import { createHash } from 'crypto';
 // @ts-ignore - canonicalize types are loose; runtime export is the function
 import canonicalize from 'canonicalize';
 import type { SentinelVerifyResponse } from './types.js';
+import { confidenceToPercent } from './confidence.js';
 
 /**
  * The canonical body shape.  Tagged with `artifactSchema` so consumers can
@@ -78,10 +79,7 @@ export function buildCanonicalSentinelVerdict(
   const evaluatedAt = Math.floor(
     new Date(response.meta.verified_at).getTime() / 1000,
   );
-  const confidence = Math.max(
-    0,
-    Math.min(100, Math.round(response.confidence * 100)),
-  );
+  const confidence = confidenceToPercent(response.confidence);
 
   const modelsUsed = response.meta.models_used ?? [];
   const models: CanonicalSentinelVerdictBody['models'] = {

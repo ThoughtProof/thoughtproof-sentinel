@@ -163,4 +163,11 @@ describe('CanonicalSentinelVerdict', () => {
     );
     expect(hash).toBe(FIXTURE_HASH_0x);
   });
+
+  it('canonical confidence is a finite 0–100 int when source is NaN (issue #39)', () => {
+    const body = buildCanonicalSentinelVerdict(makeResponse({ confidence: Number.NaN }));
+    expect(Number.isFinite(body.confidence)).toBe(true);
+    expect(body.confidence).toBe(0);
+    expect(JSON.parse(serializeCanonicalSentinelVerdict(body)).confidence).toBe(0);
+  });
 });
