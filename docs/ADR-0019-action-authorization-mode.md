@@ -161,6 +161,15 @@ fail-open. Unknown or mismatched mandate BLOCKs
 `objective_mismatch_fail_closed`. Every action class needs a
 positively matching mandate on the prose path — MCP sends no
 structured `req.mandate`, so the financial gate never runs.
+#55 narrows the #34/#48 0x/transfer FAIL so it applies only when
+the action is informational/notify (hidden transfer framed as FYI).
+A positively matching financial pair with amount at or below the
+granted figure and an authorized 0x gets a `SENTINEL_AXIS_HINT`
+PASS trigger (`financial_pair_match=true`,
+`amount_within_grant=true`) on steps 0/1 — same class as the #46
+FYI PASS hint. Drain overshoot / wrong recipient stay silent (no
+PASS hint); MaxUint256 / pay-vs-ship stay kind-BLOCK. Trade modes
+untouched.
 #37 remains mitigation lineage.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.

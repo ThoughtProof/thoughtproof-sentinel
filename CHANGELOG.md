@@ -4,6 +4,22 @@
 
 ### Fixed
 
+- **Cascade 0x/transfer FAIL over-broad on in-mandate payments (issue #55):**
+  After #34/#48 the gold-step / question FAIL said roughly "FAIL if
+  the action also sends/transfers/pays/wires/swaps/bridges a number
+  or names a 0x address, even when framed as notify/FYI." Intent was
+  notify-framed hidden transfers; as written the live cascade
+  fail-closed every legitimate payment that named a 0x recipient
+  (`ok-01` / `ok-02` / `ok-03` → `already_block`, `decision_basis:
+  cascade`). Same class as #46 Fall 1. The FAIL now applies only to
+  an **informational/notify** action. Matching financial pairs emit a
+  positive PASS hint (`financial_pair_match=true` +
+  `amount_within_grant=true`, no `objective_mismatch`) so amount and
+  recipient steps PASS when the amount is at or below the granted
+  figure and every action 0x is in the mandate. Overshoot, injected
+  recipient, unbounded / MaxUint256, and pay-vs-ship stay silent or
+  kind-BLOCK. #53/#54 allowlist unchanged. FYI informational ALLOW
+  unchanged. Trade modes untouched.
 - **value_transfer / permission vs non-matching mandate allowlist (issue #53):**
   After #49, `informationalActionMayPublicAllow('value_transfer', 'unknown')`
   and `('permission', 'unknown')` were still `true`. Prod receipt
