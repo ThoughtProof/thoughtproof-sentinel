@@ -14,7 +14,9 @@
  *
  * It never asserts `objective_aligned=true`. It MAY assert
  * `objective_mismatch=true` when the mandate is ship/pin/deploy and the
- * action is notify-only (strengthens Ship-mismatch fail-closed).
+ * action is notify-only. The engine then hard-BLOCKs (promotion
+ * `objective_mismatch_fail_closed`) so cascade `agreement_allow` cannot
+ * fail-open — including MCP `claim === proposed_action`.
  *
  * Silent (no hint) on financial / permission / unknown / mixed-transfer
  * actions — the existing amount/recipient/least-privilege criteria stay
@@ -30,6 +32,7 @@ import {
   MCP_EVIDENCE_ACTION_LABEL,
   MCP_EVIDENCE_MANDATE_LABEL,
   MCP_EVIDENCE_REASONING_LABEL,
+  MCP_EVIDENCE_USER_MANDATE_LABEL,
 } from '../step-quote-provenance.js';
 
 export type ActionKind =
@@ -79,6 +82,17 @@ const PERMISSION_RE =
 
 const DEPLOY_RE =
   /\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\s+the)?\s+npm|npm\s+(?:version\s+)?pin|send-to-prod|release)\b/i;
+
+/**
+ * Positive ship/pin/deploy/publish for Ship-mismatch. Omits bare `release`
+ * (FYI "release notes" must not flip a notify mandate). Negated mentions
+ * ("no deploy", "do not pin npm") do not count.
+ */
+const POSITIVE_SHIP_RE =
+  /\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\s+the)?\s+npm|npm\s+(?:version\s+)?pin|send-to-prod)\b/gi;
+
+const SHIP_NEGATION_BEFORE_RE =
+  /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b)\s+(?:\w+\s+){0,4}$/i;
 
 /** English-only informational heads (no language-specific particles). */
 const INFO_HEAD_RE =
@@ -139,8 +153,15 @@ export function splitActionAuthEvidence(evidence: string): ActionAuthSections {
     'Context:',
   ]);
   if (mcpMandate !== null && mcpAction !== null) {
+    // thoughtproof-mcp puts the full instruction under `User mandate:` when
+    // the host quote is a proper excerpt. Classification must use the full
+    // instruction, not only the provenance span.
+    const userMandate = sectionAfter(evidence, MCP_EVIDENCE_USER_MANDATE_LABEL, [
+      MCP_EVIDENCE_MANDATE_LABEL,
+      MCP_EVIDENCE_ACTION_LABEL,
+    ]);
     return {
-      mandate: mcpMandate,
+      mandate: userMandate ? userMandate : mcpMandate,
       action: mcpAction,
       reasoning:
         sectionAfter(evidence, MCP_EVIDENCE_REASONING_LABEL, ['Context:']) ?? '',
@@ -233,6 +254,25 @@ function identifiersAreNotSpendAmounts(corpus: string): boolean {
   return !MONEY_CONTEXT_RE.test(corpus);
 }
 
+/**
+ * True when the text contains a positive ship/pin/deploy/publish instruction.
+ * Negated mentions do not count. Bare "release" is ignored.
+ */
+export function hasPositiveShipInstruction(text: string): boolean {
+  if (!text) return false;
+  const re = new RegExp(POSITIVE_SHIP_RE.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const before = text.slice(Math.max(0, m.index - 48), m.index);
+    if (SHIP_NEGATION_BEFORE_RE.test(before)) continue;
+    return true;
+  }
+  return false;
+}
+
+export const OBJECTIVE_MISMATCH_BLOCK_REASON =
+  'Deterministic Ship-mismatch: mandate instructs ship/pin/deploy/publish; action is notify/FYI only (objective_mismatch).';
+
 function mandateLooksFinancial(mandate?: AuthorizationMandate): boolean {
   if (!mandate) return false;
   const amount = mandate.action?.amount;
@@ -285,14 +325,21 @@ export function classifyActionAuthKind(
 
   // Positive ship/pin instruction only — do not flip "no deploy" FYI
   // mandates just because the word "deploy" appears in a negation.
-  if (mandate_kind === 'unknown' && DEPLOY_HEAD_RE.test(mandateText.trim())) {
+  const mandateHasPositiveShip = hasPositiveShipInstruction(mandateText);
+  if (mandateHasPositiveShip && mandate_kind !== 'value_transfer' && mandate_kind !== 'permission') {
+    mandate_kind = 'deploy_ship';
+  } else if (mandate_kind === 'unknown' && DEPLOY_HEAD_RE.test(mandateText.trim())) {
     mandate_kind = 'deploy_ship';
   }
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
+  // Notify-only action against a positive ship/pin/deploy/publish mandate.
+  // Independent of leadingKind on the mandate so "After CI, ship. Also notify
+  // CoS" still mismatches. Action that *is* a ship (leading deploy) stays
+  // deploy_ship and does not trip this.
   const objective_mismatch =
-    mandate_kind === 'deploy_ship' &&
+    mandateHasPositiveShip &&
     action_kind === 'informational' &&
     !value_transfer &&
     !permission_grant &&

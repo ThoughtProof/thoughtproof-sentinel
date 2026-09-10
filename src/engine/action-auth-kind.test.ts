@@ -19,6 +19,7 @@ import {
   MCP_EVIDENCE_ACTION_LABEL,
   MCP_EVIDENCE_MANDATE_LABEL,
   MCP_EVIDENCE_REASONING_LABEL,
+  MCP_EVIDENCE_USER_MANDATE_LABEL,
 } from '../step-quote-provenance.js';
 
 function mcpEvidence(mandate: string, action: string, reasoning: string): string {
@@ -119,6 +120,89 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
     expect(c.named_recipient_in_mandate).toBe(false);
     expect(c.axisHint).toMatch(/objective_mismatch=true/);
     expect(c.axisHint).toMatch(/mandate_kind=deploy_ship/);
+  });
+
+  it('MCP verify_before_action: claim === proposed_action still mismatches', () => {
+    const action = 'Notify CoS that we are shipping now.';
+    const ev = mcpEvidence(
+      'Ship the release only after pinning the npm version and CI is green.',
+      action,
+      'Notify chief of staff; do not pin npm or wait for CI.',
+    );
+    const c = classifyActionAuthKind(action, ev);
+    expect(c.action_kind).toBe('informational');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+  });
+
+  it('uses User mandate (full instruction) when the host quote is a non-ship excerpt', () => {
+    const full =
+      'Ship the 0.8.10 package only when CI is green and the changelog is ready.';
+    const excerpt = 'when CI is green and the changelog';
+    expect(full.includes(excerpt)).toBe(true);
+    const ev = [
+      MCP_EVIDENCE_USER_MANDATE_LABEL,
+      full,
+      '',
+      MCP_EVIDENCE_MANDATE_LABEL,
+      excerpt,
+      '',
+      MCP_EVIDENCE_ACTION_LABEL,
+      'Notify CoS that the host switched to git main.',
+      '',
+      MCP_EVIDENCE_REASONING_LABEL,
+      'FYI only; do not pin npm or ship.',
+    ].join('\n');
+    const excerptOnly = mcpEvidence(
+      excerpt,
+      'Notify CoS that the host switched to git main.',
+      'FYI only; do not pin npm or ship.',
+    );
+    expect(classifyActionAuthKind('Notify CoS that the host switched to git main.', excerptOnly)
+      .objective_mismatch).toBe(false);
+    const c = classifyActionAuthKind('Notify CoS that the host switched to git main.', ev);
+    expect(splitActionAuthEvidence(ev).mandate).toBe(full);
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.action_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+  });
+
+  it('mandate with ship + notify-CoS still counts as deploy_ship', () => {
+    const ev = mcpEvidence(
+      'After CI is green, ship the package. Also notify CoS when done.',
+      'Notify CoS that CI is green.',
+      'Status ping only; not shipping.',
+    );
+    const c = classifyActionAuthKind('Notify CoS that CI is green.', ev);
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.action_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(true);
+  });
+
+  it('does not treat FYI "release notes" or negated deploy as a ship mandate', () => {
+    const notes = classifyActionAuthKind(
+      'Tell CoS about the release notes',
+      mcpEvidence(
+        'Tell CoS about the release notes',
+        'Tell CoS about the release notes',
+        'FYI only.',
+      ),
+    );
+    expect(notes.objective_mismatch).toBe(false);
+    expect(notes.mandate_kind).toBe('informational');
+
+    const negated = classifyActionAuthKind(
+      'Info an qa',
+      mcpEvidence(
+        'Info QA about issue 33 status; no spend, no deploy, no npm pin.',
+        'Info an qa: issue 33 status only.',
+        'Status ping.',
+      ),
+    );
+    expect(negated.objective_mismatch).toBe(false);
+    expect(negated.mandate_kind).toBe('informational');
   });
 });
 

@@ -106,6 +106,19 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.publicVerdict).toBe('ALLOW');
   });
 
+  it('never public-ALLOWs agreement_allow when objective_mismatch', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: true,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+  });
+
   it('acceptsMachineConditionProof is fail-closed', () => {
     expect(acceptsMachineConditionProof({ kind: 'x', fulfilled: true })).toBe(false);
   });
