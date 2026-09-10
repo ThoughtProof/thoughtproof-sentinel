@@ -145,11 +145,23 @@ when the mandate is **positively** `deploy_ship`. Unknown or mismatched
 mandate BLOCKs `objective_mismatch_fail_closed` — the same promotion
 mapping as #38 informational + unknown. ALLOW is reserved for
 positively derived fit on high-blast kinds, not only notify.
-`value_transfer` / `permission` are caught by the financial gate
-**when a structured `mandate` is supplied**; prose-only requests
-(MCP shape: claim/evidence/mode/tier, no `req.mandate`) rely on
-gold-step criteria. Follow-up: issue #53 positive allowlist for
-those kinds on the prose path. #37 remains mitigation lineage.
+#53 closes the remaining prose-path gap: a `value_transfer` action
+may public-ALLOW only when the mandate is **positively**
+`value_transfer`. A `permission` action may public-ALLOW when the
+mandate is **positively** `permission`, **or** when the mandate is
+`value_transfer` and the approval is **bounded** and amount-
+compatible with the mandated spend (pairing matrix; ok-01 exact-
+amount approve vs Swap). An `approve` is never reclassified as
+`value_transfer` — the receipt stays `action_kind=permission`.
+Unbounded permission (MAX_UINT256, decimal integers ≥20 digits
+including MaxUint256 decimal, `0xf{40,}` / long hex, full/entire
+balance, no expiry, infinite, unbegrenzt) vs a spend mandate BLOCKs
+`objective_mismatch_fail_closed` so cascade `agreement_allow` cannot
+fail-open. Unknown or mismatched mandate BLOCKs
+`objective_mismatch_fail_closed`. Every action class needs a
+positively matching mandate on the prose path — MCP sends no
+structured `req.mandate`, so the financial gate never runs.
+#37 remains mitigation lineage.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.
 

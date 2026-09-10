@@ -38,9 +38,18 @@
  * (issue #49). Unknown or mismatched mandate fail-closes as BLOCK
  * `objective_mismatch_fail_closed` — same spirit as #38; the
  * high-blast kind must not have more room than an unknown action.
- * `value_transfer` / `permission` hit the financial gate only when a
- * structured `mandate` is supplied; prose-only MCP (no `req.mandate`)
- * is gold-step criteria (follow-up #53).
+ * A `value_transfer` action may public-ALLOW only when the mandate is
+ * **positively** `value_transfer`. A `permission` action may
+ * public-ALLOW when the mandate is **positively** `permission`, or
+ * when the mandate is `value_transfer` **and** the approval is
+ * bounded and amount-compatible with the mandated spend (issue #53
+ * pairing matrix — ok-01 exact-amount approve). An approval is never
+ * reclassified as `value_transfer` (honest receipt). Unbounded /
+ * MaxUint256-decimal / full-balance / no-expiry / infinite
+ * permission vs a spend mandate BLOCKs
+ * `objective_mismatch_fail_closed`. Every action class needs a
+ * positively matching mandate on the prose path — MCP sends no
+ * structured `req.mandate`, so the financial gate never runs.
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`) plus a small DE informational set
@@ -82,6 +91,11 @@ export interface ActionAuthClassification {
   /** Both kinds unknown — abstention, not a named mandate conflict. */
   unclassified_abstention: boolean;
   identifiers_are_not_spend_amounts: boolean;
+  /**
+   * permission × value_transfer pairing: approval is bounded and the
+   * approved amount is compatible with the mandate spend (ok-01).
+   */
+  bounded_permission_compatible: boolean;
   /**
    * Sentinel-authored axis hint for the verification question.
    * Null when we have nothing confident to tell the cascade.
@@ -322,7 +336,89 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic objective mismatch: public ALLOW requires positively derived kind fit. Informational/notify or unknown actions may ALLOW only when mandate_kind is informational; deploy/publish/pin actions may ALLOW only when mandate_kind is deploy_ship. Unknown or mismatched mandate, or notify/FYI against a named ship/pay/permission mandate, is objective_mismatch.';
+  'Deterministic objective mismatch: public ALLOW requires positively derived kind fit. Informational/notify or unknown actions may ALLOW only when mandate_kind is informational; deploy/publish/pin only when mandate_kind is deploy_ship; value_transfer only when mandate_kind is value_transfer; permission when mandate_kind is permission, or when mandate_kind is value_transfer and the approval is bounded and amount-compatible with the mandated spend. Unbounded / MaxUint256 / full-balance / no-expiry permission vs a spend mandate is objective_mismatch.';
+
+/**
+ * Unbounded / unlimited permission markers. Used for the
+ * permission × value_transfer pairing matrix — never to reclassify
+ * an approval as value_transfer.
+ *
+ * Catches magic strings, decimal integers ≥20 digits (MaxUint256
+ * decimal is 78 digits), MAX_UINT hex (`0xf{40,}` or ≥48 hex digits
+ * so an 0x + 40-nibble address is not treated as max-uint), and
+ * full/entire balance, no-expiry, infinite, unbegrenzt.
+ */
+const UNBOUNDED_PERMISSION_PHRASE_RE =
+  /MAX_UINT256|maxuint256|unlimited\s+approval|blanket\s+permit|full(?:\s+\w+)?\s+balance|entire(?:\s+\w+)?\s+balance|no(?:t\s+any)?\s+expiry|without\s+expiry|infinite|unbegrenzt/i;
+
+const LARGE_DECIMAL_UINT_RE = /\d{20,}/;
+
+/** 40+ f-nibbles, or 48+ hex digits (longer than an ETH address). */
+const MAX_UINT_HEX_RE = /0x(?:[fF]{40,}|[0-9a-fA-F]{48,})/;
+
+export function permissionIsUnbounded(text: string): boolean {
+  if (!text) return false;
+  return (
+    UNBOUNDED_PERMISSION_PHRASE_RE.test(text) ||
+    LARGE_DECIMAL_UINT_RE.test(text) ||
+    MAX_UINT_HEX_RE.test(text)
+  );
+}
+
+const NOTIONAL_RE =
+  /\$\s*(\d[\d,]*(?:\.\d+)?)|(\d[\d,]*(?:\.\d+)?)\s*(?:USDC|USD|ETH|EUR|WETH)\b/gi;
+
+const AMOUNT_COMPAT_TOLERANCE = 0.005;
+
+function parseNotionalToken(raw: string): number | null {
+  const digits = raw.replace(/[^\d]/g, '');
+  if (digits.length >= 20) return null;
+  const n = Number(raw.replace(/,/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Drop wallet-balance and trailing proposed-action so suite one-liners do not inflate the mandate notional. */
+function mandateSpendSpan(text: string): string {
+  return text
+    .replace(/WALLET BALANCE:[^\n]*/gi, ' ')
+    .split(/\n?\s*AGENT PROPOSED ACTION:/i)[0] ?? text;
+}
+
+function firstSpendNotional(text: string): number | null {
+  if (!text) return null;
+  const re = new RegExp(NOTIONAL_RE.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const n = parseNotionalToken(m[1] ?? m[2] ?? '');
+    if (n != null) return n;
+  }
+  return null;
+}
+
+/**
+ * Bounded permission × value_transfer mandate: not unbounded, and the
+ * approved amount is exact / within the mandated spend notional.
+ * Fail-closed when either side has no parseable amount.
+ */
+export function boundedPermissionCompatibleWithMandate(
+  actionText: string,
+  mandateText: string,
+): boolean {
+  if (permissionIsUnbounded(actionText) || permissionIsUnbounded(mandateText)) {
+    return false;
+  }
+  const actionAmt = firstSpendNotional(actionText);
+  const mandateAmt = firstSpendNotional(mandateSpendSpan(mandateText));
+  if (actionAmt == null || mandateAmt == null) return false;
+  return actionAmt <= mandateAmt * (1 + AMOUNT_COMPAT_TOLERANCE);
+}
+
+/** Optional pairing context — omitted kinds/texts fail closed on permission × value_transfer. */
+export interface ActionAuthKindPairingContext {
+  actionText?: string | null;
+  mandateText?: string | null;
+  boundedPermissionCompatible?: boolean | null;
+}
 
 export const UNCLASSIFIED_ABSTENTION_REASON =
   'Unclassified abstention: action_kind and mandate_kind are both unknown. No public ALLOW (fail-closed). Not a named objective mismatch — classify better (host-declared kind or prose markers).';
@@ -335,6 +431,50 @@ export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
 /** Trust is positively derived: only this kind may ALLOW a deploy/publish/pin action. */
 export function mandateIsPositivelyDeployShip(kind: ActionKind): boolean {
   return kind === 'deploy_ship';
+}
+
+/** Trust is positively derived: only this kind may ALLOW a value_transfer action. */
+export function mandateIsPositivelyValueTransfer(kind: ActionKind): boolean {
+  return kind === 'value_transfer';
+}
+
+/** Trust is positively derived: only this kind may ALLOW a permission action. */
+export function mandateIsPositivelyPermission(kind: ActionKind): boolean {
+  return kind === 'permission';
+}
+
+/**
+ * Public-ALLOW kind fit (issues #38 / #47 / #49 / #53).
+ * Every named action class requires a positively matching mandate.
+ * Unknown actions follow the informational allowlist (#47).
+ */
+export function mandatePositivelyMatchesAction(
+  actionKind: ActionKind,
+  mandateKind: ActionKind,
+  context?: ActionAuthKindPairingContext,
+): boolean {
+  if (actionKind === 'informational' || actionKind === 'unknown') {
+    return mandateIsPositivelyInformational(mandateKind);
+  }
+  if (actionKind === 'deploy_ship') {
+    return mandateIsPositivelyDeployShip(mandateKind);
+  }
+  if (actionKind === 'value_transfer') {
+    return mandateIsPositivelyValueTransfer(mandateKind);
+  }
+  if (actionKind === 'permission') {
+    if (mandateIsPositivelyPermission(mandateKind)) return true;
+    if (mandateIsPositivelyValueTransfer(mandateKind)) {
+      if (context?.boundedPermissionCompatible === true) return true;
+      if (context?.boundedPermissionCompatible === false) return false;
+      if (context?.actionText && context?.mandateText) {
+        return boundedPermissionCompatibleWithMandate(context.actionText, context.mandateText);
+      }
+      return false;
+    }
+    return false;
+  }
+  return false;
 }
 
 /** Named non-informational mandates — a real conflict vs unknown/notify action. */
@@ -350,34 +490,35 @@ export function isUnclassifiedAbstention(
 }
 
 /**
- * Public-ALLOW allowlist (issues #38 / #47 / #49).
+ * Public-ALLOW allowlist (issues #38 / #47 / #49 / #53).
  * Returns false whenever public ALLOW is forbidden by kind pairing.
  *
  * - informational or unknown action → only when mandate is positively
  *   informational (#38 / #47)
  * - deploy_ship action → only when mandate is positively deploy_ship
  *   (#49)
+ * - value_transfer action → only when mandate is positively
+ *   value_transfer (#53)
+ * - permission action → when mandate is positively permission, or
+ *   when mandate is value_transfer **and** the approval is bounded
+ *   and amount-compatible (pairing matrix; optional `context`).
+ *   Kind-only `permission` × `value_transfer` is false (fail-closed
+ *   — decimal MaxUint256 must not already_allow).
  * - unknown/unknown is still not-allow (promotion maps it to UNCERTAIN
  *   `unclassified_abstention_fail_closed`, not BLOCK)
- * - value_transfer / permission stay out of this rule: financial gate
- *   only when a structured `mandate` is supplied; prose-only MCP
- *   (claim/evidence/mode/tier, no `req.mandate`) is gold-step
- *   criteria — follow-up #53
  *
- * Fail-closed reason for a blocked deploy/informational pair is
+ * Fail-closed reason for a blocked pair is
  * `objective_mismatch_fail_closed` (same promotion mapping as #38).
+ * Every action class needs a positively matching mandate on the prose
+ * path — MCP sends no structured `req.mandate`. Approvals stay
+ * `action_kind=permission` (never reclassified as value_transfer).
  */
 export function informationalActionMayPublicAllow(
   actionKind: ActionKind,
   mandateKind: ActionKind,
+  context?: ActionAuthKindPairingContext,
 ): boolean {
-  if (actionKind === 'informational' || actionKind === 'unknown') {
-    return mandateIsPositivelyInformational(mandateKind);
-  }
-  if (actionKind === 'deploy_ship') {
-    return mandateIsPositivelyDeployShip(mandateKind);
-  }
-  return true;
+  return mandatePositivelyMatchesAction(actionKind, mandateKind, context);
 }
 
 export interface ActionAuthUnknownKindCounts {
@@ -490,9 +631,13 @@ export function classifyActionAuthKind(
   // objective_mismatch. Independent of leadingKind on the mandate so
   // "After CI, ship. Also notify CoS" still mismatches. A deploy/publish
   // /pin *action* may ALLOW only when the mandate is positively
-  // deploy_ship (#49) — unknown or mismatched mandate is a named
-  // conflict, not cascade room. Spend/permission stay out of this
-  // allowlist (structured financial gate only; prose path is #53).
+  // deploy_ship (#49). A value_transfer *action* may ALLOW only when
+  // the mandate is positively value_transfer. A permission *action*
+  // may ALLOW when the mandate is permission, or when the mandate is
+  // value_transfer and the approval is bounded + amount-compatible
+  // (#53 pairing matrix). Approvals stay permission (honest receipt).
+  // Unknown or mismatched mandate is a named conflict, not cascade
+  // room — MCP prose has no structured `req.mandate`.
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&
@@ -504,11 +649,23 @@ export function classifyActionAuthKind(
     action_kind === 'unknown' && mandateIsNamedNonInformational(mandate_kind);
   const deployVsNonMatchingMandate =
     action_kind === 'deploy_ship' && !mandateIsPositivelyDeployShip(mandate_kind);
+  const valueTransferVsNonMatchingMandate =
+    action_kind === 'value_transfer' && !mandateIsPositivelyValueTransfer(mandate_kind);
+  const bounded_permission_compatible =
+    action_kind === 'permission' &&
+    mandateIsPositivelyValueTransfer(mandate_kind) &&
+    boundedPermissionCompatibleWithMandate(actionText, mandateText);
+  const permissionVsNonMatchingMandate =
+    action_kind === 'permission' &&
+    !mandateIsPositivelyPermission(mandate_kind) &&
+    !bounded_permission_compatible;
 
   const objective_mismatch =
     (actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind)) ||
     unknownActionVsNamedMandate ||
-    deployVsNonMatchingMandate;
+    deployVsNonMatchingMandate ||
+    valueTransferVsNonMatchingMandate ||
+    permissionVsNonMatchingMandate;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -516,9 +673,9 @@ export function classifyActionAuthKind(
     identifiersAreNotSpendAmounts(`${cleanClaim}\n${mandateText}\n${actionText}`);
 
   const silent =
-    mixedTransfer ||
-    action_kind === 'value_transfer' ||
-    action_kind === 'permission' ||
+    ((mixedTransfer || action_kind === 'value_transfer') &&
+      !valueTransferVsNonMatchingMandate) ||
+    (action_kind === 'permission' && !permissionVsNonMatchingMandate) ||
     (action_kind === 'unknown' && !unknownActionVsNamedMandate && !unclassified_abstention);
 
   let axisHint: string | null = null;
@@ -527,12 +684,14 @@ export function classifyActionAuthKind(
     (action_kind === 'informational' ||
       unknownActionVsNamedMandate ||
       unclassified_abstention ||
-      deployVsNonMatchingMandate)
+      deployVsNonMatchingMandate ||
+      valueTransferVsNonMatchingMandate ||
+      permissionVsNonMatchingMandate)
   ) {
     const parts = [
       `action_kind=${action_kind}`,
-      'value_transfer=false',
-      'permission_grant=false',
+      `value_transfer=${value_transfer}`,
+      `permission_grant=${permission_grant}`,
     ];
     if (identifiers_are_not_spend_amounts) {
       parts.push('identifiers_are_not_spend_amounts=true');
@@ -559,6 +718,7 @@ export function classifyActionAuthKind(
     objective_mismatch,
     unclassified_abstention,
     identifiers_are_not_spend_amounts,
+    bounded_permission_compatible,
     axisHint,
   };
 }

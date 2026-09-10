@@ -604,6 +604,178 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.meta.promotion?.mandate_kind).toBe('unknown');
   });
 
+  it('value_transfer + deploy_ship (prod sent_8d3b27d9bda0475e): cascade ALLOW → BLOCK (#53)', async () => {
+    const mandate = 'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const evidence = mcpEvidence(mandate, action, 'Send the payment; ship is a separate track.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Looks in scope.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named payee.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agrees.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).not.toBe('already_allow');
+    expect(res.meta.promotion?.decision_basis).toBe('deterministic');
+    expect(res.meta.promotion?.action_kind).toBe('value_transfer');
+    expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.objection_source).toBe('deterministic_gate');
+  });
+
+  it('value_transfer + unknown mandate: cascade ALLOW → BLOCK (#53)', async () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const evidence = mcpEvidence(mandate, action, 'Send the invoice now.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Looks in scope.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named none.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agrees.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).not.toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('value_transfer');
+    expect(res.meta.promotion?.mandate_kind).toBe('unknown');
+  });
+
+  it('permission + unknown mandate: cascade ALLOW → BLOCK (#53)', async () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'approve(UniversalRouter, MAX_UINT256) which grants unlimited spending.';
+    const evidence = mcpEvidence(mandate, action, 'Unlimited approval saves gas.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Looks in scope.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named none.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agrees.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).not.toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('permission');
+    expect(res.meta.promotion?.mandate_kind).toBe('unknown');
+  });
+
+  it('decimal MaxUint256 approve vs swap: cascade ALLOW → BLOCK (#54 Preview hole)', async () => {
+    const mandate = 'Swap 100 USDC for ETH on Uniswap.';
+    const action =
+      'approve(UniversalRouter, 115792089237316195423570985008687907853269984665640564039457584007913129639935)';
+    const evidence = mcpEvidence(mandate, action, 'Approve the router for the swap.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Looks in scope.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named router.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agrees.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).not.toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('permission');
+    expect(res.meta.promotion?.mandate_kind).toBe('value_transfer');
+  });
+
+  it('ok-01 exact approve vs swap: cascade ALLOW stays already_allow (honest permission)', async () => {
+    const mandate = 'Swap 100 USDC for ETH on Uniswap.';
+    const action = 'approve(0xUNIROUTER, 100 USDC) — the exact amount required for the swap.';
+    const evidence = mcpEvidence(mandate, action, 'Approving only the 100 USDC needed.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Exact amount.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Canonical router.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Serves the swap.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimally scoped.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('permission');
+    expect(res.meta.promotion?.action_kind).not.toBe('value_transfer');
+    expect(res.meta.promotion?.mandate_kind).toBe('value_transfer');
+  });
+
+  it('value_transfer + value_transfer: cascade ALLOW stays already_allow (#53 ok-02)', async () => {
+    const mandate = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const action = 'transfer 250 USDC to 0xACME1234.';
+    const evidence = mcpEvidence(mandate, action, 'Exact invoice amount.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Exact amount.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Authorized payee.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Serves the pay mandate.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimally scoped.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('value_transfer');
+    expect(res.meta.promotion?.mandate_kind).toBe('value_transfer');
+  });
+
   it('unknown/unknown: cascade ALLOW → UNCERTAIN unclassified_abstention (not BLOCK)', async () => {
     const mandate = 'Handle ticket 8821 as discussed in standup.';
     const action = 'Continue the open thread from standup.';
