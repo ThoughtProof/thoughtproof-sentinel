@@ -38,9 +38,12 @@
  * (issue #49). Unknown or mismatched mandate fail-closes as BLOCK
  * `objective_mismatch_fail_closed` — same spirit as #38; the
  * high-blast kind must not have more room than an unknown action.
- * `value_transfer` / `permission` hit the financial gate only when a
- * structured `mandate` is supplied; prose-only MCP (no `req.mandate`)
- * is gold-step criteria (follow-up #53).
+ * A `value_transfer` action may public-ALLOW only when the mandate is
+ * **positively** `value_transfer`; a `permission` action only when the
+ * mandate is **positively** `permission` (issue #53). Else BLOCK
+ * `objective_mismatch_fail_closed`. Every action class needs a
+ * positively matching mandate on the prose path — MCP sends no
+ * structured `req.mandate`, so the financial gate never runs.
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`) plus a small DE informational set
@@ -273,13 +276,27 @@ function hasTransferVerbWithNumber(text: string): boolean {
   return TRANSFER_VERB_RE.test(text) && /\d/.test(text);
 }
 
+/** Blanket / unlimited grant — not an exact-amount approve (ok-01). */
+function isUnboundedPermission(text: string): boolean {
+  return /MAX_UINT256|unlimited\s+approval|blanket\s+permit/i.test(text);
+}
+
 function leadingKind(text: string): ActionKind {
   const head = text.trim();
   if (!head) return 'unknown';
   if (VALUE_HEAD_RE.test(head)) {
-    return /approve|grant|permit|sign/i.test(head.slice(0, 40))
-      ? 'permission'
-      : 'value_transfer';
+    if (/approve|grant|permit|sign/i.test(head.slice(0, 40))) {
+      // Exact-amount approve is spend execution (ok-01), not a blanket grant.
+      if (
+        /^(?:the\s+proposed\s+)?(?:approving|approve)\b/i.test(head) &&
+        !isUnboundedPermission(head) &&
+        (hasValueTransfer(head) || /\d/.test(head))
+      ) {
+        return 'value_transfer';
+      }
+      return 'permission';
+    }
+    return 'value_transfer';
   }
   if (DEPLOY_HEAD_RE.test(head)) return 'deploy_ship';
   if (INFO_HEAD_RE.test(head)) return 'informational';
@@ -322,7 +339,7 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic objective mismatch: public ALLOW requires positively derived kind fit. Informational/notify or unknown actions may ALLOW only when mandate_kind is informational; deploy/publish/pin actions may ALLOW only when mandate_kind is deploy_ship. Unknown or mismatched mandate, or notify/FYI against a named ship/pay/permission mandate, is objective_mismatch.';
+  'Deterministic objective mismatch: public ALLOW requires positively derived kind fit. Informational/notify or unknown actions may ALLOW only when mandate_kind is informational; deploy/publish/pin only when mandate_kind is deploy_ship; value_transfer only when mandate_kind is value_transfer; permission only when mandate_kind is permission. Unknown or mismatched mandate, or notify/FYI against a named ship/pay/permission mandate, is objective_mismatch.';
 
 export const UNCLASSIFIED_ABSTENTION_REASON =
   'Unclassified abstention: action_kind and mandate_kind are both unknown. No public ALLOW (fail-closed). Not a named objective mismatch — classify better (host-declared kind or prose markers).';
@@ -335,6 +352,40 @@ export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
 /** Trust is positively derived: only this kind may ALLOW a deploy/publish/pin action. */
 export function mandateIsPositivelyDeployShip(kind: ActionKind): boolean {
   return kind === 'deploy_ship';
+}
+
+/** Trust is positively derived: only this kind may ALLOW a value_transfer action. */
+export function mandateIsPositivelyValueTransfer(kind: ActionKind): boolean {
+  return kind === 'value_transfer';
+}
+
+/** Trust is positively derived: only this kind may ALLOW a permission action. */
+export function mandateIsPositivelyPermission(kind: ActionKind): boolean {
+  return kind === 'permission';
+}
+
+/**
+ * Public-ALLOW kind fit (issues #38 / #47 / #49 / #53).
+ * Every named action class requires a positively matching mandate.
+ * Unknown actions follow the informational allowlist (#47).
+ */
+export function mandatePositivelyMatchesAction(
+  actionKind: ActionKind,
+  mandateKind: ActionKind,
+): boolean {
+  if (actionKind === 'informational' || actionKind === 'unknown') {
+    return mandateIsPositivelyInformational(mandateKind);
+  }
+  if (actionKind === 'deploy_ship') {
+    return mandateIsPositivelyDeployShip(mandateKind);
+  }
+  if (actionKind === 'value_transfer') {
+    return mandateIsPositivelyValueTransfer(mandateKind);
+  }
+  if (actionKind === 'permission') {
+    return mandateIsPositivelyPermission(mandateKind);
+  }
+  return false;
 }
 
 /** Named non-informational mandates — a real conflict vs unknown/notify action. */
@@ -350,34 +401,30 @@ export function isUnclassifiedAbstention(
 }
 
 /**
- * Public-ALLOW allowlist (issues #38 / #47 / #49).
+ * Public-ALLOW allowlist (issues #38 / #47 / #49 / #53).
  * Returns false whenever public ALLOW is forbidden by kind pairing.
  *
  * - informational or unknown action → only when mandate is positively
  *   informational (#38 / #47)
  * - deploy_ship action → only when mandate is positively deploy_ship
  *   (#49)
+ * - value_transfer action → only when mandate is positively
+ *   value_transfer (#53)
+ * - permission action → only when mandate is positively permission
+ *   (#53)
  * - unknown/unknown is still not-allow (promotion maps it to UNCERTAIN
  *   `unclassified_abstention_fail_closed`, not BLOCK)
- * - value_transfer / permission stay out of this rule: financial gate
- *   only when a structured `mandate` is supplied; prose-only MCP
- *   (claim/evidence/mode/tier, no `req.mandate`) is gold-step
- *   criteria — follow-up #53
  *
- * Fail-closed reason for a blocked deploy/informational pair is
+ * Fail-closed reason for a blocked pair is
  * `objective_mismatch_fail_closed` (same promotion mapping as #38).
+ * Every action class needs a positively matching mandate on the prose
+ * path — MCP sends no structured `req.mandate`.
  */
 export function informationalActionMayPublicAllow(
   actionKind: ActionKind,
   mandateKind: ActionKind,
 ): boolean {
-  if (actionKind === 'informational' || actionKind === 'unknown') {
-    return mandateIsPositivelyInformational(mandateKind);
-  }
-  if (actionKind === 'deploy_ship') {
-    return mandateIsPositivelyDeployShip(mandateKind);
-  }
-  return true;
+  return mandatePositivelyMatchesAction(actionKind, mandateKind);
 }
 
 export interface ActionAuthUnknownKindCounts {
@@ -490,9 +537,11 @@ export function classifyActionAuthKind(
   // objective_mismatch. Independent of leadingKind on the mandate so
   // "After CI, ship. Also notify CoS" still mismatches. A deploy/publish
   // /pin *action* may ALLOW only when the mandate is positively
-  // deploy_ship (#49) — unknown or mismatched mandate is a named
-  // conflict, not cascade room. Spend/permission stay out of this
-  // allowlist (structured financial gate only; prose path is #53).
+  // deploy_ship (#49). A value_transfer *action* may ALLOW only when
+  // the mandate is positively value_transfer; permission only when
+  // positively permission (#53). Unknown or mismatched mandate is a
+  // named conflict, not cascade room — MCP prose has no structured
+  // `req.mandate`, so the financial gate never runs.
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&
@@ -504,11 +553,17 @@ export function classifyActionAuthKind(
     action_kind === 'unknown' && mandateIsNamedNonInformational(mandate_kind);
   const deployVsNonMatchingMandate =
     action_kind === 'deploy_ship' && !mandateIsPositivelyDeployShip(mandate_kind);
+  const valueTransferVsNonMatchingMandate =
+    action_kind === 'value_transfer' && !mandateIsPositivelyValueTransfer(mandate_kind);
+  const permissionVsNonMatchingMandate =
+    action_kind === 'permission' && !mandateIsPositivelyPermission(mandate_kind);
 
   const objective_mismatch =
     (actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind)) ||
     unknownActionVsNamedMandate ||
-    deployVsNonMatchingMandate;
+    deployVsNonMatchingMandate ||
+    valueTransferVsNonMatchingMandate ||
+    permissionVsNonMatchingMandate;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -516,9 +571,9 @@ export function classifyActionAuthKind(
     identifiersAreNotSpendAmounts(`${cleanClaim}\n${mandateText}\n${actionText}`);
 
   const silent =
-    mixedTransfer ||
-    action_kind === 'value_transfer' ||
-    action_kind === 'permission' ||
+    ((mixedTransfer || action_kind === 'value_transfer') &&
+      !valueTransferVsNonMatchingMandate) ||
+    (action_kind === 'permission' && !permissionVsNonMatchingMandate) ||
     (action_kind === 'unknown' && !unknownActionVsNamedMandate && !unclassified_abstention);
 
   let axisHint: string | null = null;
@@ -527,12 +582,14 @@ export function classifyActionAuthKind(
     (action_kind === 'informational' ||
       unknownActionVsNamedMandate ||
       unclassified_abstention ||
-      deployVsNonMatchingMandate)
+      deployVsNonMatchingMandate ||
+      valueTransferVsNonMatchingMandate ||
+      permissionVsNonMatchingMandate)
   ) {
     const parts = [
       `action_kind=${action_kind}`,
-      'value_transfer=false',
-      'permission_grant=false',
+      `value_transfer=${value_transfer}`,
+      `permission_grant=${permission_grant}`,
     ];
     if (identifiers_are_not_spend_amounts) {
       parts.push('identifiers_are_not_spend_amounts=true');

@@ -298,6 +298,101 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).not.toBe('already_allow');
   });
 
+  it('4e10. agreement_allow + value_transfer action + unknown mandate → BLOCK (#53)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'value_transfer',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e11. agreement_allow + value_transfer + deploy_ship → BLOCK (prod sent_8d3b27d9bda0475e)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'value_transfer',
+      mandateKind: 'deploy_ship',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e12. agreement_allow + permission action + unknown mandate → BLOCK (#53)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'permission',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e13. agreement_allow + permission + deploy_ship → BLOCK (mismatched pair)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'permission',
+      mandateKind: 'deploy_ship',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e14. agreement_allow + value_transfer + value_transfer stays already_allow', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'value_transfer',
+      mandateKind: 'value_transfer',
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
+  it('4e15. agreement_allow + permission + permission stays already_allow', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'permission',
+      mandateKind: 'permission',
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
   it('4e9. agreement_allow + deploy_ship + deploy_ship stays already_allow', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

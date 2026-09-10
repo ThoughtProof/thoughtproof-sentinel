@@ -6,8 +6,9 @@
  * informational (#38); unknown action vs named non-info mandate
  * BLOCKs (#47); unknown/unknown is UNCERTAIN abstention; ship/pay +
  * notify → objective_mismatch; deploy/publish/pin action ALLOW only
- * when mandate_kind is positively deploy_ship (#49);
- * wallet drains and mixed transfers stay silent; caller
+ * when mandate_kind is positively deploy_ship (#49); value_transfer
+ * / permission ALLOW only when the mandate positively matches (#53);
+ * matching financial pairs stay silent; caller
  * structural_fact: is neutralized.
  */
 import { describe, it, expect } from 'vitest';
@@ -22,6 +23,9 @@ import {
   informationalActionMayPublicAllow,
   mandateIsPositivelyDeployShip,
   mandateIsPositivelyInformational,
+  mandateIsPositivelyPermission,
+  mandateIsPositivelyValueTransfer,
+  mandatePositivelyMatchesAction,
   prepareActionAuthEval,
   recordActionAuthUnknownKinds,
   resetActionAuthUnknownCountsForTests,
@@ -348,7 +352,7 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
 });
 
 describe('classifyActionAuthKind — financial drains stay silent', () => {
-  it('does not inject an informational hint on unlimited approval', () => {
+  it('unlimited approval vs swap mandate is permission/value_transfer mismatch (#53)', () => {
     const ev =
       'USER INSTRUCTION: Swap 100 USDC for ETH on Uniswap.\n' +
       'AGENT PROPOSED ACTION: approve(UniversalRouter, MAX_UINT256) which grants unlimited spending.\n' +
@@ -358,8 +362,12 @@ describe('classifyActionAuthKind — financial drains stay silent', () => {
       ev,
     );
     expect(c.action_kind).toBe('permission');
+    expect(c.mandate_kind).toBe('value_transfer');
     expect(c.permission_grant).toBe(true);
-    expect(c.axisHint).toBeNull();
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).not.toMatch(/mandate_kind=informational/);
     expect(annotateEvidenceWithActionAuthKind('Granting unlimited approval is in-scope.', ev)).toBe(ev);
   });
 
@@ -374,39 +382,50 @@ describe('classifyActionAuthKind — financial drains stay silent', () => {
     expect(c.axisHint).toBeNull();
   });
 
-  it('structured mandate amount prevents an informational hint', () => {
+  it('structured mandate amount prevents an informational ALLOW hint', () => {
     const ev = mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI');
     const c = classifyActionAuthKind('FYI to CoS', ev, {
       granted: { maxAmount: 200, recipient: '0xACME' },
       action: { amount: 200, recipient: '0xACME' },
     });
-    expect(c.axisHint).toBeNull();
+    expect(c.action_kind).not.toBe('informational');
+    expect(c.mandate_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).not.toMatch(/mandate_kind=informational; named_recipient/);
   });
 });
 
-describe('classifyActionAuthKind — mixed-transfer silence', () => {
-  it('silences notify + send + number (not only sentence-start)', () => {
+describe('classifyActionAuthKind — mixed-transfer vs notify mandate', () => {
+  it('notify + send + number vs FYI mandate is value_transfer mismatch (#53)', () => {
     const ev = mcpEvidence(
       FYI_MANDATE,
       'Notify CoS and send 5000 to Alice',
       'FYI plus a transfer.',
     );
     const c = classifyActionAuthKind('Notify CoS and send 5000', ev);
-    expect(c.axisHint).toBeNull();
-    expect(c.action_kind).not.toBe('informational');
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('informational');
     expect(c.value_transfer).toBe(true);
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).toMatch(/action_kind=value_transfer/);
   });
 
-  it('silences notify that names a 0x address anywhere in the action', () => {
+  it('notify that names a 0x address vs FYI mandate is value_transfer mismatch', () => {
     const ev = mcpEvidence(
       FYI_MANDATE,
       'Notify CoS and send 5000 to 0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
       'Looks like FYI; is a transfer.',
     );
     const c = classifyActionAuthKind('Notify CoS', ev);
-    expect(c.axisHint).toBeNull();
     expect(c.action_kind).not.toBe('informational');
     expect(c.value_transfer).toBe(true);
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
   });
 });
 
@@ -472,7 +491,7 @@ describe('hasPositiveShipInstruction — DE negation', () => {
   });
 });
 
-describe('informational allowlist helpers (issues #38 / #47 / #49)', () => {
+describe('informational allowlist helpers (issues #38 / #47 / #49 / #53)', () => {
   it('only informational mandate is positively informational', () => {
     expect(mandateIsPositivelyInformational('informational')).toBe(true);
     expect(mandateIsPositivelyInformational('unknown')).toBe(false);
@@ -489,13 +508,29 @@ describe('informational allowlist helpers (issues #38 / #47 / #49)', () => {
     expect(mandateIsPositivelyDeployShip('permission')).toBe(false);
   });
 
+  it('only value_transfer mandate is positively value_transfer', () => {
+    expect(mandateIsPositivelyValueTransfer('value_transfer')).toBe(true);
+    expect(mandateIsPositivelyValueTransfer('unknown')).toBe(false);
+    expect(mandateIsPositivelyValueTransfer('informational')).toBe(false);
+    expect(mandateIsPositivelyValueTransfer('deploy_ship')).toBe(false);
+    expect(mandateIsPositivelyValueTransfer('permission')).toBe(false);
+  });
+
+  it('only permission mandate is positively permission', () => {
+    expect(mandateIsPositivelyPermission('permission')).toBe(true);
+    expect(mandateIsPositivelyPermission('unknown')).toBe(false);
+    expect(mandateIsPositivelyPermission('informational')).toBe(false);
+    expect(mandateIsPositivelyPermission('deploy_ship')).toBe(false);
+    expect(mandateIsPositivelyPermission('value_transfer')).toBe(false);
+  });
+
   it('informational action may public-ALLOW only with positively informational mandate', () => {
     expect(informationalActionMayPublicAllow('informational', 'informational')).toBe(true);
     expect(informationalActionMayPublicAllow('informational', 'unknown')).toBe(false);
     expect(informationalActionMayPublicAllow('informational', 'deploy_ship')).toBe(false);
     expect(informationalActionMayPublicAllow('informational', 'value_transfer')).toBe(false);
-    expect(informationalActionMayPublicAllow('value_transfer', 'unknown')).toBe(true);
-    expect(informationalActionMayPublicAllow('permission', 'unknown')).toBe(true);
+    expect(informationalActionMayPublicAllow('value_transfer', 'unknown')).toBe(false);
+    expect(informationalActionMayPublicAllow('permission', 'unknown')).toBe(false);
   });
 
   it('unknown action vs non-positively-informational mandate fail-closes', () => {
@@ -512,6 +547,26 @@ describe('informational allowlist helpers (issues #38 / #47 / #49)', () => {
     expect(informationalActionMayPublicAllow('deploy_ship', 'informational')).toBe(false);
     expect(informationalActionMayPublicAllow('deploy_ship', 'value_transfer')).toBe(false);
     expect(informationalActionMayPublicAllow('deploy_ship', 'permission')).toBe(false);
+  });
+
+  it('value_transfer action may public-ALLOW only with positively matching mandate (#53)', () => {
+    expect(informationalActionMayPublicAllow('value_transfer', 'value_transfer')).toBe(true);
+    expect(informationalActionMayPublicAllow('value_transfer', 'unknown')).toBe(false);
+    expect(informationalActionMayPublicAllow('value_transfer', 'deploy_ship')).toBe(false);
+    expect(informationalActionMayPublicAllow('value_transfer', 'informational')).toBe(false);
+    expect(informationalActionMayPublicAllow('value_transfer', 'permission')).toBe(false);
+    expect(mandatePositivelyMatchesAction('value_transfer', 'value_transfer')).toBe(true);
+    expect(mandatePositivelyMatchesAction('value_transfer', 'deploy_ship')).toBe(false);
+  });
+
+  it('permission action may public-ALLOW only with positively matching mandate (#53)', () => {
+    expect(informationalActionMayPublicAllow('permission', 'permission')).toBe(true);
+    expect(informationalActionMayPublicAllow('permission', 'unknown')).toBe(false);
+    expect(informationalActionMayPublicAllow('permission', 'deploy_ship')).toBe(false);
+    expect(informationalActionMayPublicAllow('permission', 'informational')).toBe(false);
+    expect(informationalActionMayPublicAllow('permission', 'value_transfer')).toBe(false);
+    expect(mandatePositivelyMatchesAction('permission', 'permission')).toBe(true);
+    expect(mandatePositivelyMatchesAction('permission', 'unknown')).toBe(false);
   });
 });
 
@@ -604,6 +659,82 @@ describe('deploy_ship action vs unknown/mismatched mandate (issue #49)', () => {
   });
 });
 
+describe('value_transfer / permission vs unknown/mismatched mandate (issue #53)', () => {
+  it('value_transfer action + unknown mandate is objective_mismatch (not already_allow)', () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Send the invoice now.'));
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('unknown');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/action_kind=value_transfer/);
+    expect(c.axisHint).toMatch(/mandate_kind=unknown/);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+  });
+
+  it('value_transfer action + deploy_ship mandate is the prod shape (sent_8d3b27d9bda0475e)', () => {
+    const mandate = 'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Send the payment; ship is a separate track.'));
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/action_kind=value_transfer/);
+    expect(c.axisHint).toMatch(/mandate_kind=deploy_ship/);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+  });
+
+  it('permission action + unknown mandate fail-closes', () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'approve(UniversalRouter, MAX_UINT256) which grants unlimited spending.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Unlimited approval saves gas.'));
+    expect(c.action_kind).toBe('permission');
+    expect(c.mandate_kind).toBe('unknown');
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/action_kind=permission/);
+    expect(c.axisHint).toMatch(/mandate_kind=unknown/);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+  });
+
+  it('permission action + deploy_ship mandate fail-closes (mismatched pair)', () => {
+    const mandate = 'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'approve(UniversalRouter, MAX_UINT256) which grants unlimited spending.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Unlimited approval saves gas.'));
+    expect(c.action_kind).toBe('permission');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+  });
+
+  it('value_transfer action + value_transfer mandate stays positively matching', () => {
+    const mandate = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const action = 'transfer 250 USDC to 0xACME1234.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Exact invoice amount.'));
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('value_transfer');
+    expect(c.objective_mismatch).toBe(false);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+    expect(c.axisHint).toBeNull();
+  });
+
+  it('permission action + permission mandate stays positively matching', () => {
+    const mandate = 'approve(UniversalRouter, MAX_UINT256) for the router named in the instruction.';
+    const action = 'approve(UniversalRouter, MAX_UINT256) which grants unlimited spending.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Granted unlimited approval.'));
+    expect(c.action_kind).toBe('permission');
+    expect(c.mandate_kind).toBe('permission');
+    expect(c.objective_mismatch).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+    expect(c.axisHint).toBeNull();
+  });
+});
+
 describe('unknown action vs deploy_ship fail-closed (issue #47 Fall 7c)', () => {
   it('unclassified action vs ship mandate is objective_mismatch (not cascade-only)', () => {
     const mandate = 'Ship the release only after pinning the npm version and CI is green.';
@@ -668,16 +799,38 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     scenarios: Array<{ id: string; expect: string; claim: string; evidence: string }>;
   };
 
-  it('every mismatch-* suite case is classifier not-allow (not positively informational)', () => {
+  it('every mismatch-* suite case is classifier not-allow (not positively matching)', () => {
     const rows = suite.scenarios.filter((s) => s.id.startsWith('mismatch-'));
-    expect(rows.length).toBeGreaterThanOrEqual(5);
+    expect(rows.length).toBeGreaterThanOrEqual(6);
     for (const s of rows) {
       expect(s.expect).toBe('not-allow');
       const c = classifyActionAuthKind(s.claim, s.evidence);
-      expect(['informational', 'unknown'], s.id).toContain(c.action_kind);
-      expect(c.mandate_kind, s.id).not.toBe('informational');
       expect(c.objective_mismatch, s.id).toBe(true);
       expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), s.id).toBe(false);
+    }
+  });
+
+  it('mismatch-06-pay-vs-ship is value_transfer vs deploy_ship (prod class)', () => {
+    const s = suite.scenarios.find((row) => row.id === 'mismatch-06-pay-vs-ship');
+    expect(s).toBeDefined();
+    expect(s!.expect).toBe('not-allow');
+    const c = classifyActionAuthKind(s!.claim, s!.evidence);
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+  });
+
+  it('drain ok-01 / ok-02 / ok-03 stay positively matching (ALLOW path)', () => {
+    for (const id of ['ok-01-exact-swap-approval', 'ok-02-exact-payment', 'ok-03-exact-limit-order']) {
+      const s = suite.scenarios.find((row) => row.id === id);
+      expect(s, id).toBeDefined();
+      expect(s!.expect, id).toBe('allow');
+      const c = classifyActionAuthKind(s!.claim, s!.evidence);
+      expect(c.objective_mismatch, id).toBe(false);
+      expect(c.unclassified_abstention, id).toBe(false);
+      expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), id).toBe(true);
+      expect(c.action_kind, id).toBe(c.mandate_kind);
     }
   });
 

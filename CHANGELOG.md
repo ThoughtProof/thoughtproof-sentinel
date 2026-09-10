@@ -4,6 +4,25 @@
 
 ### Fixed
 
+- **value_transfer / permission vs non-matching mandate allowlist (issue #53):**
+  After #49, `informationalActionMayPublicAllow('value_transfer', 'unknown')`
+  and `('permission', 'unknown')` were still `true`. Prod receipt
+  `sent_8d3b27d9bda0475e` public-ALLOWed a ship mandate + money move
+  (`mandate_kind=deploy_ship`, `action_kind=value_transfer`,
+  `already_allow`, confidence=1) because MCP sends no structured
+  `req.mandate` and the financial gate never runs. Same class as
+  `sent_4c39a37b390344eb` / `sent_c91fbbad57a7436c`, highest-blast
+  variant. Public ALLOW now requires positively derived kind fit on
+  every action class: `value_transfer` only when
+  `mandate_kind === 'value_transfer'`; `permission` only when
+  `mandate_kind === 'permission'`. Else **BLOCK**
+  `objective_mismatch_fail_closed` (same promotion mapping as #38 /
+  #49). Drain ok-01 / ok-02 / ok-03 (exact-amount, limit order) stay
+  on the ALLOW path — action and mandate kinds match. Informational
+  FYI, #48 unknown/unknown UNCERTAIN, and #49 deploy vs unknown BLOCK
+  are unchanged. Suite case `mismatch-06-pay-vs-ship` locks the prod
+  pairing. Every action class needs a positively matching mandate on
+  the prose path.
 - **Deploy/publish/pin vs unknown mandate allowlist (issue #49):**
   After #48, `informationalActionMayPublicAllow('deploy_ship', 'unknown')`
   was still `true`: a deploy/publish/pin action against an unclassified
@@ -11,9 +30,9 @@
   an unclassified *action* fail-closed. `value_transfer` / `permission`
   are caught by the financial gate **when a structured `mandate` is
   supplied**; prose-only requests (MCP shape: claim/evidence/mode/tier,
-  no `req.mandate`) rely on gold-step criteria. Follow-up: issue #53
+  no `req.mandate`) relied on gold-step criteria until #53 closed the
   positive allowlist for those kinds on the prose path. This change
-  closes `deploy_ship` on the prose path: public ALLOW only on
+  closed `deploy_ship` on the prose path: public ALLOW only on
   positively derived fit (`mandate_kind === 'deploy_ship'`), same
   spirit as #38 informational allowlist. Unknown or mismatched
   mandate → **BLOCK** `objective_mismatch_fail_closed` (same promotion

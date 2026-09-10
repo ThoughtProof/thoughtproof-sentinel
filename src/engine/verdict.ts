@@ -154,15 +154,17 @@ export interface ActionAuthPromotionInput {
    */
   objectiveMismatch?: boolean | null;
   /**
-   * Classifier kinds (issues #38 / #47 / #49 allowlist). When `actionKind`
-   * is informational, public ALLOW requires `mandateKind === 'informational'`.
-   * Unknown vs a named non-informational mandate BLOCKs
-   * (`objective_mismatch_fail_closed`). Unknown/unknown is UNCERTAIN
-   * (`unclassified_abstention_fail_closed`) — still no public ALLOW.
-   * `deploy_ship` requires `mandateKind === 'deploy_ship'` (#49);
-   * unknown or mismatched mandate BLOCKs `objective_mismatch_fail_closed`
-   * (same mapping as #38 informational + unknown). Omitted kinds do not
-   * apply this extra check (tests / other callers).
+   * Classifier kinds (issues #38 / #47 / #49 / #53 allowlist). When
+   * `actionKind` is informational, public ALLOW requires
+   * `mandateKind === 'informational'`. Unknown vs a named
+   * non-informational mandate BLOCKs (`objective_mismatch_fail_closed`).
+   * Unknown/unknown is UNCERTAIN (`unclassified_abstention_fail_closed`)
+   * — still no public ALLOW. `deploy_ship` requires
+   * `mandateKind === 'deploy_ship'` (#49); `value_transfer` requires
+   * `mandateKind === 'value_transfer'`; `permission` requires
+   * `mandateKind === 'permission'` (#53). Unknown or mismatched
+   * mandate BLOCKs `objective_mismatch_fail_closed` (same mapping as
+   * #38). Omitted kinds do not apply this extra check.
    */
   actionKind?: string | null;
   mandateKind?: string | null;
@@ -269,15 +271,16 @@ export function resolveActionAuthPromotion(
     return finish(input.mappedVerdict, false, 'not_action_authorization');
   }
 
-  // P0 2026-09-10 / #38 + #47 + #49: informational action may
+  // P0 2026-09-10 / #38 + #47 + #49 + #53: informational action may
   // public-ALLOW only when the mandate is positively informational.
   // Unknown action vs a named non-informational mandate
   // (ship/pay/permission) BLOCKs. Unknown/unknown is UNCERTAIN
   // unclassified_abstention — no ALLOW, but the receipt is not a named
-  // objective mismatch. deploy_ship may ALLOW only when the mandate is
-  // positively deploy_ship; unknown/mismatched → BLOCK
-  // objective_mismatch_fail_closed. Cascade agreement_allow must not
-  // fail-open. Omitted kinds skip this check.
+  // objective mismatch. deploy_ship / value_transfer / permission may
+  // ALLOW only when the mandate positively matches that class;
+  // unknown/mismatched → BLOCK objective_mismatch_fail_closed.
+  // Cascade agreement_allow must not fail-open. Omitted kinds skip
+  // this check.
   const kindsPresent = input.actionKind != null && input.mandateKind != null;
   const unclassifiedAbstention =
     kindsPresent &&
