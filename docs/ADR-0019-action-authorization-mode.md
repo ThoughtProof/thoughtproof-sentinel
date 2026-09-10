@@ -144,8 +144,12 @@ mandate"). #49 closes the remaining high-blast asymmetry: a
 when the mandate is **positively** `deploy_ship`. Unknown or mismatched
 mandate BLOCKs `objective_mismatch_fail_closed` — the same promotion
 mapping as #38 informational + unknown. ALLOW is reserved for
-positively derived fit on high-blast kinds, not only notify; the
-financial gate still covers `value_transfer` / `permission`. #37 remains mitigation lineage.
+positively derived fit on high-blast kinds, not only notify.
+`value_transfer` / `permission` are caught by the financial gate
+**when a structured `mandate` is supplied**; prose-only requests
+(MCP shape: claim/evidence/mode/tier, no `req.mandate`) rely on
+gold-step criteria. Follow-up: issue #53 positive allowlist for
+those kinds on the prose path. #37 remains mitigation lineage.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.
 

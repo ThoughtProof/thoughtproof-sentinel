@@ -9,15 +9,20 @@
   was still `true`: a deploy/publish/pin action against an unclassified
   mandate could public-ALLOW if cascade `agreement_allow` agreed, while
   an unclassified *action* fail-closed. `value_transfer` / `permission`
-  are caught by the financial gate; `deploy_ship` had no equivalent net.
-  Symmetry: high-blast kinds without a financial net may public-ALLOW
-  **only** on positively derived fit (`mandate_kind === 'deploy_ship'`),
-  same spirit as #38 informational allowlist. Unknown or mismatched
+  are caught by the financial gate **when a structured `mandate` is
+  supplied**; prose-only requests (MCP shape: claim/evidence/mode/tier,
+  no `req.mandate`) rely on gold-step criteria. Follow-up: issue #53
+  positive allowlist for those kinds on the prose path. This change
+  closes `deploy_ship` on the prose path: public ALLOW only on
+  positively derived fit (`mandate_kind === 'deploy_ship'`), same
+  spirit as #38 informational allowlist. Unknown or mismatched
   mandate → **BLOCK** `objective_mismatch_fail_closed` (same promotion
   mapping as informational + unknown). Informational FYI
   (`informational` / `informational`) is unchanged. Unknown/unknown
   stays UNCERTAIN `unclassified_abstention_fail_closed` (no #48
-  regression). The #47 CHANGELOG follow-up is closed.
+  regression). Bare `release` is omitted from action deploy heads
+  (same as #37 `POSITIVE_SHIP_RE`) so FYI "release notes" is not
+  `deploy_ship`. The #47 CHANGELOG follow-up is closed.
 
 ### Added
 

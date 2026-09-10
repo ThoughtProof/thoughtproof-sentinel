@@ -37,8 +37,10 @@
  * public-ALLOW only when the mandate is **positively** `deploy_ship`
  * (issue #49). Unknown or mismatched mandate fail-closes as BLOCK
  * `objective_mismatch_fail_closed` — same spirit as #38; the
- * high-blast kind without a financial net must not have more room
- * than an unknown action.
+ * high-blast kind must not have more room than an unknown action.
+ * `value_transfer` / `permission` hit the financial gate only when a
+ * structured `mandate` is supplied; prose-only MCP (no `req.mandate`)
+ * is gold-step criteria (follow-up #53).
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`) plus a small DE informational set
@@ -122,7 +124,7 @@ const SHIP_NEGATION_BEFORE_RE =
 
 /** English informational heads (no language-specific particles). */
 const EN_INFO_HEAD =
-  '(?:fyi|notify|notifying|tell|telling|inform|info|status(?:\\s+ping)?)';
+  '(?:fyi|notify|notifying|tell|telling|inform|info|status(?:\\s+ping)?|release\\s+notes)';
 
 /**
  * Small DE informational set (issue #47) — not full i18n.
@@ -137,7 +139,7 @@ const INFO_HEAD_RE = new RegExp(
 );
 
 const EN_INFO_ANY =
-  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info)';
+  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info|release\\s+notes)';
 
 const DE_INFO_ANY =
   '(?:informier(?:e|en|t)|info\\s+an|status\\s+an|r[uü]ckmeldung|bescheid(?:\\s+(?:geben|sagen))?|gib(?:st|t)?\\s+(?:\\w+\\s+){0,4}bescheid)';
@@ -147,8 +149,13 @@ const INFO_ANY_RE = new RegExp(`\\b(?:${EN_INFO_ANY}|${DE_INFO_ANY})\\b`, 'i');
 const VALUE_HEAD_RE =
   /^(?:granting|grant|approve|approving|sign(?:ing)?|permit|transfer|send(?:ing)?\s+\d|swap(?:ping)?|bridge|pay(?:ing)?)\b/i;
 
+/**
+ * Leading deploy/publish/pin. Omits bare `release` — same as
+ * `POSITIVE_SHIP_RE` (#37): FYI "release notes" must not classify as
+ * `deploy_ship` (Preview `sent_59f804b9dd2241e2` / issue #49 Merge-GO).
+ */
 const DEPLOY_HEAD_RE =
-  /^(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?|release|deploye|veröffentliche|veröffentlichen|ausliefern)\b/i;
+  /^(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?|deploye|veröffentliche|veröffentlichen|ausliefern)\b/i;
 
 const ETH_ADDR_RE = /0x[0-9a-fA-F]{40}/;
 
@@ -349,10 +356,13 @@ export function isUnclassifiedAbstention(
  * - informational or unknown action → only when mandate is positively
  *   informational (#38 / #47)
  * - deploy_ship action → only when mandate is positively deploy_ship
- *   (#49; high-blast, no financial net)
+ *   (#49)
  * - unknown/unknown is still not-allow (promotion maps it to UNCERTAIN
  *   `unclassified_abstention_fail_closed`, not BLOCK)
- * - value_transfer / permission stay out of this rule (financial gate)
+ * - value_transfer / permission stay out of this rule: financial gate
+ *   only when a structured `mandate` is supplied; prose-only MCP
+ *   (claim/evidence/mode/tier, no `req.mandate`) is gold-step
+ *   criteria — follow-up #53
  *
  * Fail-closed reason for a blocked deploy/informational pair is
  * `objective_mismatch_fail_closed` (same promotion mapping as #38).
@@ -481,8 +491,8 @@ export function classifyActionAuthKind(
   // "After CI, ship. Also notify CoS" still mismatches. A deploy/publish
   // /pin *action* may ALLOW only when the mandate is positively
   // deploy_ship (#49) — unknown or mismatched mandate is a named
-  // conflict, not cascade room. Spend/permission actions stay with
-  // the financial gate.
+  // conflict, not cascade room. Spend/permission stay out of this
+  // allowlist (structured financial gate only; prose path is #53).
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&

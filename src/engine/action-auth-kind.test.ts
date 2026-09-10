@@ -260,6 +260,29 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
     expect(c.objective_mismatch).toBe(true);
   });
 
+  it('bare "Release notes…" action is informational, not deploy_ship (#49 Merge-GO)', () => {
+    const mandate = 'Tell CoS the release notes when CI is green. No deploy.';
+    const action = 'Release notes an CoS senden.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'FYI only; kein Deploy.'));
+    expect(c.action_kind).toBe('informational');
+    expect(c.action_kind).not.toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(false);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+  });
+
+  it('EN "Release notes to CoS" action stays informational vs notify mandate', () => {
+    const mandate = 'Tell CoS the release notes. No deploy.';
+    const action = 'Release notes to CoS.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'FYI only.'));
+    expect(c.action_kind).toBe('informational');
+    expect(c.action_kind).not.toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+  });
+
   it('does not treat FYI "release notes" or negated deploy as a ship mandate', () => {
     const notes = classifyActionAuthKind(
       'Tell CoS about the release notes',
