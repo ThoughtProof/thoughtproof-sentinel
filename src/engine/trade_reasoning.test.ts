@@ -91,6 +91,7 @@ describe('trade_reasoning mode (ADR-0018)', () => {
 
     const res = await verify(req());
     expect(res.verdict).toBe('UNCERTAIN'); // factual step weak → stays gated
+    expect(res.meta.promotion).toBeUndefined();
   });
 
   it('promotes UNCERTAIN → ALLOW when only step_2 is weak (facts pass)', async () => {
@@ -110,6 +111,13 @@ describe('trade_reasoning mode (ADR-0018)', () => {
 
     const res = await verify(req());
     expect(res.verdict).toBe('ALLOW'); // step_2-only → promoted
+    expect(res.meta.promotion).toBeDefined();
+    expect(res.meta.promotion?.promoted).toBe(true);
+    expect(res.meta.promotion?.reason).toBe('inferential_step_promoted');
+    expect(res.meta.promotion?.mapped_verdict).toBe('UNCERTAIN');
+    expect(res.meta.promotion?.public_verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.decision_basis).toBe('cascade');
+    expect(res.meta.promotion?.policy).toBe('adr-0018-trade-reasoning-step2-promotion');
   });
 
   it('does NOT promote in trade_execution mode (same weak-step_2 shape)', async () => {
@@ -127,6 +135,7 @@ describe('trade_reasoning mode (ADR-0018)', () => {
 
     const res = await verify(req({ mode: 'trade_execution' }));
     expect(res.verdict).toBe('UNCERTAIN'); // trade_execution never promotes
+    expect(res.meta.promotion).toBeUndefined();
   });
 
   it('never promotes a BLOCK', async () => {
@@ -142,5 +151,6 @@ describe('trade_reasoning mode (ADR-0018)', () => {
 
     const res = await verify(req());
     expect(res.verdict).toBe('BLOCK');
+    expect(res.meta.promotion).toBeUndefined();
   });
 });
