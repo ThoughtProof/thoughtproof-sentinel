@@ -7,9 +7,11 @@
 - **Health `rate_limit` + limiter-aware `ready` (issue #43):**
   `GET /sentinel/health` now includes `rate_limit: "redis" | "in_memory" |
   "unavailable"`. `ready` is false when Redis is configured-but-invalid
-  (fail-closed limiter) **or** when `SERV_API_KEY` is missing. `ok`
-  stays liveness-only; `serv_key` is unchanged (`present` | `missing`,
-  never the value). Dogfood: `curl -sS https://sentinel.thoughtproof.ai/sentinel/health`
+  (fail-closed limiter), when `SERV_API_KEY` is missing, **or** (ADR-0021
+  hard variant) when `VERCEL_ENV=production` and `rate_limit` is
+  `in_memory`. Preview/dev may still be `in_memory` + `ready: true`.
+  No `degraded` field. `ok` stays liveness-only; `serv_key` is unchanged
+  (`present` | `missing`, never the value). Dogfood: `curl -sS https://sentinel.thoughtproof.ai/sentinel/health`
   (or a Preview URL) and read `rate_limit`. Optional Preview-only check
   of the 503 branch: branch-bound invalid `UPSTASH_REDIS_REST_TOKEN`,
   expect `rate_limit: "unavailable"` + `ready: false` and authenticated

@@ -476,7 +476,7 @@ const spec = {
                     ready: {
                       type: 'boolean',
                       description:
-                        'Readiness. false when SERV_API_KEY is missing or the rate-limit store is unavailable (Redis configured-but-invalid). ok remains liveness-only.',
+                        'Readiness. false when SERV_API_KEY is missing, rate_limit is unavailable, or VERCEL_ENV=production and rate_limit is in_memory. ok remains liveness-only.',
                     },
                     serv_key: {
                       type: 'string',

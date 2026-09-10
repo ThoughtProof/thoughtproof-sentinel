@@ -26,7 +26,11 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
     // crashed Preview health at load (FUNCTION_INVOCATION_FAILED on c944f5b).
     const { ready: modelReady, serv_key } = getModelReadiness();
     const { rate_limit } = getRateLimitReadiness();
-    const ready = modelReady && rate_limit !== 'unavailable';
+    // ADR-0021 hard variant: Production in-memory fallback is not ready.
+    // Preview/dev may still report in_memory + ready (no Upstash vars).
+    const prod = process.env.VERCEL_ENV === 'production';
+    const ready =
+      modelReady && rate_limit !== 'unavailable' && !(prod && rate_limit === 'in_memory');
 
     res.status(200).json({
       ok: true,

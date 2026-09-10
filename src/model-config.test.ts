@@ -115,9 +115,11 @@ describe('GET /sentinel/health readiness', () => {
   const original = process.env.SERV_API_KEY;
   const originalUrl = process.env.UPSTASH_REDIS_REST_URL;
   const originalToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const originalVercelEnv = process.env.VERCEL_ENV;
 
   beforeEach(() => {
     _resetLimiters();
+    delete process.env.VERCEL_ENV;
   });
 
   afterEach(() => {
@@ -127,10 +129,13 @@ describe('GET /sentinel/health readiness', () => {
     else process.env.UPSTASH_REDIS_REST_URL = originalUrl;
     if (originalToken === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
     else process.env.UPSTASH_REDIS_REST_TOKEN = originalToken;
+    if (originalVercelEnv === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = originalVercelEnv;
     _resetLimiters();
   });
 
-  it('reports serv_key present and ready when the key is set and Redis is unset', () => {
+  it('reports serv_key present and ready when the key is set and Redis is unset (non-prod)', () => {
+    process.env.VERCEL_ENV = 'preview';
     process.env.SERV_API_KEY = SECRET;
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -182,6 +187,58 @@ describe('GET /sentinel/health readiness', () => {
   });
 
   it('reports rate_limit redis when Upstash credentials resolve', () => {
+    process.env.SERV_API_KEY = SECRET;
+    process.env.UPSTASH_REDIS_REST_URL = 'https://example.upstash.io';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'tok';
+    const ctx = mockRes();
+    healthHandler({ method: 'GET' } as never, ctx.res as never);
+
+    expect(ctx.statusCode).toBe(200);
+    expect(ctx.body).toMatchObject({
+      ok: true,
+      ready: true,
+      serv_key: 'present',
+      rate_limit: 'redis',
+    });
+  });
+
+  it('ADR-0021: Production + in_memory is ready false (no degraded field)', () => {
+    process.env.VERCEL_ENV = 'production';
+    process.env.SERV_API_KEY = SECRET;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    const ctx = mockRes();
+    healthHandler({ method: 'GET' } as never, ctx.res as never);
+
+    expect(ctx.statusCode).toBe(200);
+    expect(ctx.body).toMatchObject({
+      ok: true,
+      ready: false,
+      serv_key: 'present',
+      rate_limit: 'in_memory',
+    });
+    expect(ctx.body).not.toHaveProperty('degraded');
+  });
+
+  it('ADR-0021: non-prod + in_memory stays ready true when SERV_API_KEY is set', () => {
+    process.env.VERCEL_ENV = 'preview';
+    process.env.SERV_API_KEY = SECRET;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    const ctx = mockRes();
+    healthHandler({ method: 'GET' } as never, ctx.res as never);
+
+    expect(ctx.statusCode).toBe(200);
+    expect(ctx.body).toMatchObject({
+      ok: true,
+      ready: true,
+      serv_key: 'present',
+      rate_limit: 'in_memory',
+    });
+  });
+
+  it('ADR-0021: Production + redis stays ready true', () => {
+    process.env.VERCEL_ENV = 'production';
     process.env.SERV_API_KEY = SECRET;
     process.env.UPSTASH_REDIS_REST_URL = 'https://example.upstash.io';
     process.env.UPSTASH_REDIS_REST_TOKEN = 'tok';
