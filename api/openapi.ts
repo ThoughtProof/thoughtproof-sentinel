@@ -312,6 +312,27 @@ const spec = {
           },
           '400': { description: 'Invalid request (missing required fields or invalid mode/tier)' },
           '401': { description: 'Missing or invalid X-Sentinel-Key' },
+          '503': {
+            description:
+              'Verifier model config missing (e.g. SERV_API_KEY unset). Gate-down — not a verdict and not model uncertainty. Distinct from 500 INTERNAL_ERROR.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['error', 'code', 'request_id'],
+                  properties: {
+                    error: { type: 'string', example: 'Verification service temporarily unavailable' },
+                    code: {
+                      type: 'string',
+                      enum: ['MODEL_CONFIG_MISSING'],
+                      description: 'Dedicated code so MCP hosts treat gate-down ≠ cascade UNCERTAIN',
+                    },
+                    request_id: { type: 'string' },
+                  },
+                },
+              },
+            },
+          },
           '402': {
             description:
               'x402 payment required. Live challenges dual-advertise network base + eip155:8453 for facilitator compatibility; discovery catalog (/.well-known/x402) is CAIP-2-only.',
@@ -442,7 +463,21 @@ const spec = {
                 schema: {
                   type: 'object',
                   properties: {
-                    ok: { type: 'boolean' },
+                    ok: {
+                      type: 'boolean',
+                      description: 'Liveness: process answered. Not a cascade readiness signal.',
+                    },
+                    ready: {
+                      type: 'boolean',
+                      description:
+                        'Cascade readiness. false when required model env is incomplete (SERV_API_KEY missing).',
+                    },
+                    serv_key: {
+                      type: 'string',
+                      enum: ['present', 'missing'],
+                      description:
+                        'SERV_API_KEY presence only. Never the key value. missing ⇒ ready=false.',
+                    },
                     version: { type: 'string', description: 'Sentinel service version' },
                     pot_cli: {
                       type: 'string',

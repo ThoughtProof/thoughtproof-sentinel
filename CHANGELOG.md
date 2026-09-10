@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- **Health readiness + verify config errors (issue #32):**
+  `GET /sentinel/health` now reports `ready` and `serv_key` (`present` |
+  `missing`) without emitting the key value. `ok` remains liveness only —
+  `ok: true` is not a cascade readiness signal. Missing `SERV_API_KEY`
+  (and pot-cli `Missing env: *_API_KEY`) on `POST /sentinel/verify` returns
+  HTTP 503 `MODEL_CONFIG_MISSING` instead of 500 `INTERNAL_ERROR`, so MCP
+  hosts can treat gate-down as distinct from model uncertainty. Fail-closed
+  unchanged: no ALLOW without a real ALLOW.
 - **Mitigation (not a closed #36) — English ship-mismatch fail-open on
   MCP `verify_before_action` (after #34):**
   thoughtproof-mcp `buildSentinelVerifyBody` sets `claim` to
