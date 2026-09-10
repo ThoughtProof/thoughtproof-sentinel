@@ -37,10 +37,9 @@ export {
   RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S,
   RATE_LIMIT_WINDOW,
   RATE_LIMIT_WINDOW_SECONDS,
-  type RateLimitBackend,
 } from './rate-limit-policy.js';
 
-export { getRateLimitReadiness } from './upstash-env.js';
+export { getRateLimitReadiness, type RateLimitBackend } from './upstash-env.js';
 
 // --- API Key Store ---
 // Phase 1: Move to Vercel KV or Supabase. For now, env-var based.

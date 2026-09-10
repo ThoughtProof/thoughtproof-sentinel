@@ -264,6 +264,55 @@ describe('ADR-0019 resolveActionAuthPromotion (pure)', () => {
     expect(d.reason).not.toBe('already_allow');
   });
 
+  it('4e7. agreement_allow + deploy_ship action + unknown mandate → BLOCK (#49)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'deploy_ship',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+    expect(d.reason).not.toBe('unclassified_abstention_fail_closed');
+  });
+
+  it('4e8. agreement_allow + deploy_ship + informational mandate → BLOCK (mismatch)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'deploy_ship',
+      mandateKind: 'informational',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+  });
+
+  it('4e9. agreement_allow + deploy_ship + deploy_ship stays already_allow', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      objectiveMismatch: false,
+      actionKind: 'deploy_ship',
+      mandateKind: 'deploy_ship',
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
   it('4e4. agreement_allow + unknown action + informational mandate stays already_allow', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

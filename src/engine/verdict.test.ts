@@ -150,6 +150,38 @@ describe('resolveActionAuthPromotion addendum', () => {
     expect(d.reason).not.toBe('already_block');
   });
 
+  it('never public-ALLOWs deploy_ship action vs unknown mandate (#49)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      actionKind: 'deploy_ship',
+      mandateKind: 'unknown',
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+    expect(d.reason).not.toBe('already_allow');
+    expect(d.reason).not.toBe('unclassified_abstention_fail_closed');
+    expect(d.decision_basis).toBe('deterministic');
+  });
+
+  it('deploy_ship + deploy_ship stays already_allow when cascade agrees (#49)', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      actionKind: 'deploy_ship',
+      mandateKind: 'deploy_ship',
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+
   it('unknown/unknown is UNCERTAIN unclassified_abstention (not BLOCK)', () => {
     const d = resolveActionAuthPromotion({
       mode: 'action_authorization',

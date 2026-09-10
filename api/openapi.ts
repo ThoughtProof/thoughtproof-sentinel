@@ -488,7 +488,7 @@ const spec = {
                       type: 'string',
                       enum: ['redis', 'in_memory', 'unavailable'],
                       description:
-                        'Limiter store. redis = Upstash configured; in_memory = Redis unset (dev fallback); unavailable = configured-but-invalid (fail-closed). unavailable ⇒ ready=false.',
+                        'Limiter store from env probe only — not connectivity-checked (no Redis PING). redis = Upstash REST URL+token configured; in_memory = Redis unset (dev fallback); unavailable = configured-but-invalid (fail-closed). unavailable ⇒ ready=false. redis does not prove limit() will succeed.',
                     },
                     version: { type: 'string', description: 'Sentinel service version' },
                     pot_cli: {

@@ -21,9 +21,11 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
     // ready = cascade (serv_key) AND limiter store. Fail-closed Redis
     // (configured-but-invalid) makes ready false so health matches verify 503.
     // serv_key presence only — never the key value.
-    // Readiness comes from upstash-env (env probe only). Do not import
-    // auth / rate-limit-policy.json / @upstash/ratelimit here — those
-    // crashed Preview health at load (FUNCTION_INVOCATION_FAILED on c944f5b).
+    // Readiness comes from upstash-env (env probe only — no PING).
+    // rate_limit "redis" means configured, not connectivity-checked.
+    // Do not import auth / rate-limit-policy.json / @upstash/ratelimit
+    // here — those crashed Preview health at load
+    // (FUNCTION_INVOCATION_FAILED on c944f5b).
     const { ready: modelReady, serv_key } = getModelReadiness();
     const { rate_limit } = getRateLimitReadiness();
     // ADR-0021 hard variant: Production in-memory fallback is not ready.

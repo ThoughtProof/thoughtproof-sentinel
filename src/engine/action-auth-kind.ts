@@ -33,7 +33,12 @@
  * BLOCK `objective_mismatch_fail_closed` (issue #47). Unknown/unknown
  * is UNCERTAIN `unclassified_abstention_fail_closed` — still no public
  * ALLOW, but the receipt says "classify better", not "action exceeds
- * mandate".
+ * mandate". A `deploy_ship` action (deploy / publish / pin) may
+ * public-ALLOW only when the mandate is **positively** `deploy_ship`
+ * (issue #49). Unknown or mismatched mandate fail-closes as BLOCK
+ * `objective_mismatch_fail_closed` — same spirit as #38; the
+ * high-blast kind without a financial net must not have more room
+ * than an unknown action.
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`) plus a small DE informational set
@@ -310,7 +315,7 @@ export function hasPositiveShipInstruction(text: string): boolean {
 }
 
 export const OBJECTIVE_MISMATCH_BLOCK_REASON =
-  'Deterministic objective mismatch: an informational/notify or unknown action may public-ALLOW only when mandate_kind is positively informational. Mandate is ship/pin/deploy/publish or value-transfer/permission — action is notify/FYI only or unclassified against a named non-informational mandate (objective_mismatch).';
+  'Deterministic objective mismatch: public ALLOW requires positively derived kind fit. Informational/notify or unknown actions may ALLOW only when mandate_kind is informational; deploy/publish/pin actions may ALLOW only when mandate_kind is deploy_ship. Unknown or mismatched mandate, or notify/FYI against a named ship/pay/permission mandate, is objective_mismatch.';
 
 export const UNCLASSIFIED_ABSTENTION_REASON =
   'Unclassified abstention: action_kind and mandate_kind are both unknown. No public ALLOW (fail-closed). Not a named objective mismatch — classify better (host-declared kind or prose markers).';
@@ -318,6 +323,11 @@ export const UNCLASSIFIED_ABSTENTION_REASON =
 /** Trust is positively derived: only this kind may ALLOW an informational action. */
 export function mandateIsPositivelyInformational(kind: ActionKind): boolean {
   return kind === 'informational';
+}
+
+/** Trust is positively derived: only this kind may ALLOW a deploy/publish/pin action. */
+export function mandateIsPositivelyDeployShip(kind: ActionKind): boolean {
+  return kind === 'deploy_ship';
 }
 
 /** Named non-informational mandates — a real conflict vs unknown/notify action. */
@@ -333,20 +343,31 @@ export function isUnclassifiedAbstention(
 }
 
 /**
- * Public-ALLOW allowlist for informational *and* unknown actions
- * (issues #38 / #47). Returns false whenever public ALLOW is forbidden.
- * Unknown/unknown is still not-allow (promotion maps it to UNCERTAIN
- * `unclassified_abstention_fail_closed`, not BLOCK).
- * value_transfer / permission / deploy_ship actions stay out of scope
- * for this rule (cascade / financial gate). Deploy-action vs unknown
- * mandate allowlist asymmetry is a follow-up — not closed here.
+ * Public-ALLOW allowlist (issues #38 / #47 / #49).
+ * Returns false whenever public ALLOW is forbidden by kind pairing.
+ *
+ * - informational or unknown action → only when mandate is positively
+ *   informational (#38 / #47)
+ * - deploy_ship action → only when mandate is positively deploy_ship
+ *   (#49; high-blast, no financial net)
+ * - unknown/unknown is still not-allow (promotion maps it to UNCERTAIN
+ *   `unclassified_abstention_fail_closed`, not BLOCK)
+ * - value_transfer / permission stay out of this rule (financial gate)
+ *
+ * Fail-closed reason for a blocked deploy/informational pair is
+ * `objective_mismatch_fail_closed` (same promotion mapping as #38).
  */
 export function informationalActionMayPublicAllow(
   actionKind: ActionKind,
   mandateKind: ActionKind,
 ): boolean {
-  if (actionKind !== 'informational' && actionKind !== 'unknown') return true;
-  return mandateIsPositivelyInformational(mandateKind);
+  if (actionKind === 'informational' || actionKind === 'unknown') {
+    return mandateIsPositivelyInformational(mandateKind);
+  }
+  if (actionKind === 'deploy_ship') {
+    return mandateIsPositivelyDeployShip(mandateKind);
+  }
+  return true;
 }
 
 export interface ActionAuthUnknownKindCounts {
@@ -457,8 +478,11 @@ export function classifyActionAuthKind(
   // positively informational. Ship/pay/permission fail closed as a
   // named conflict. Unknown/unknown is abstention (UNCERTAIN), not
   // objective_mismatch. Independent of leadingKind on the mandate so
-  // "After CI, ship. Also notify CoS" still mismatches. An action that
-  // *is* a ship or spend stays its own kind and does not trip this rule.
+  // "After CI, ship. Also notify CoS" still mismatches. A deploy/publish
+  // /pin *action* may ALLOW only when the mandate is positively
+  // deploy_ship (#49) — unknown or mismatched mandate is a named
+  // conflict, not cascade room. Spend/permission actions stay with
+  // the financial gate.
   const actionIsNotifyOnly =
     action_kind === 'informational' &&
     !hasValueTransfer(actionText) &&
@@ -468,10 +492,13 @@ export function classifyActionAuthKind(
   const unclassified_abstention = isUnclassifiedAbstention(action_kind, mandate_kind);
   const unknownActionVsNamedMandate =
     action_kind === 'unknown' && mandateIsNamedNonInformational(mandate_kind);
+  const deployVsNonMatchingMandate =
+    action_kind === 'deploy_ship' && !mandateIsPositivelyDeployShip(mandate_kind);
 
   const objective_mismatch =
     (actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind)) ||
-    unknownActionVsNamedMandate;
+    unknownActionVsNamedMandate ||
+    deployVsNonMatchingMandate;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -485,7 +512,13 @@ export function classifyActionAuthKind(
     (action_kind === 'unknown' && !unknownActionVsNamedMandate && !unclassified_abstention);
 
   let axisHint: string | null = null;
-  if (!silent && (action_kind === 'informational' || unknownActionVsNamedMandate || unclassified_abstention)) {
+  if (
+    !silent &&
+    (action_kind === 'informational' ||
+      unknownActionVsNamedMandate ||
+      unclassified_abstention ||
+      deployVsNonMatchingMandate)
+  ) {
     const parts = [
       `action_kind=${action_kind}`,
       'value_transfer=false',

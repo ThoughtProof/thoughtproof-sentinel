@@ -5,6 +5,7 @@
  * SDK or a JSON policy module failed to load on Vercel Node.
  */
 
+/** Single source for health `rate_limit` values. Re-exported from types.ts / auth.ts. */
 export type RateLimitBackend = 'redis' | 'in_memory' | 'unavailable';
 
 const URL_ENV = 'UPSTASH_' + 'REDIS_' + 'REST_' + 'URL';
@@ -91,7 +92,9 @@ export function isUpstashConfigured(env: NodeJS.ProcessEnv = process.env): boole
 
 /**
  * Limiter-store readiness for `/sentinel/health` (issue #43).
- * Config probe only — no Redis I/O.
+ * Config probe only — no Redis I/O / PING.
+ * `redis` means Upstash REST URL+token **configured**, not that
+ * connectivity was checked. `limit()` can still 503.
  */
 export function getRateLimitReadiness(
   env: NodeJS.ProcessEnv = process.env,
