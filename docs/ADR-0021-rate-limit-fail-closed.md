@@ -46,11 +46,13 @@ Root cause: `UPSTASH_REDIS_REST_TOKEN` Production env had a **trailing newline**
 
 | `rate_limit` | Meaning |
 |---|---|
-| `redis` | `UPSTASH_REDIS_REST_*` resolve to a usable client |
+| `redis` | `UPSTASH_REDIS_REST_*` resolve (configured). Env probe only — **not** a Redis PING / connectivity check. `limit()` can still 503. |
 | `in_memory` | Redis env unset (dev fallback; not the production path) |
 | `unavailable` | configured-but-invalid (fail-closed) |
 
-`ready` is **false** when `rate_limit === "unavailable"` **or** `serv_key === "missing"`. `ok` remains liveness-only.
+`ready` is **false** when `rate_limit === "unavailable"` **or** `serv_key === "missing"` **or** (`VERCEL_ENV === "production"` and `rate_limit === "in_memory"`). `ok` remains liveness-only.
+
+`RateLimitBackend` (`"redis" | "in_memory" | "unavailable"`) is defined once in `src/upstash-env.ts` and re-exported from `src/types.ts` / `src/auth.ts`.
 
 ### Limits — single source
 
@@ -77,4 +79,5 @@ When `SENTINEL_AUTH_REQUIRED=true`, keyless `POST /sentinel/verify` returns **40
 - Rotating the Upstash token solely for whitespace (trim + re-set of same secret is enough when PING works).
 - Changing per-key numeric limits (still 120/min auth, 30/min global default — now one constant).
 - Production `SERV_API_KEY` / Upstash Production-token experiments.
-- #36 / #49 deploy-action vs unknown-mandate allowlist symmetry.
+- #36. #49 deploy-action vs unknown-mandate allowlist symmetry is a
+  separate ADR-0019 change (not this rate-limit ADR).

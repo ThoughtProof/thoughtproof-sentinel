@@ -17,5 +17,3 @@ export const RATE_LIMIT_WINDOW = `${RATE_LIMIT_WINDOW_SECONDS} s` as const;
 export const RATE_LIMIT_UNAVAILABLE_RETRY_AFTER_S = 30;
 /** Burst script default — must sit above AUTHENTICATED_RATE_LIMIT_PER_MINUTE. */
 export const BURST_CHECK_DEFAULT_N = 140;
-
-export type RateLimitBackend = 'redis' | 'in_memory' | 'unavailable';

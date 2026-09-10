@@ -154,12 +154,15 @@ export interface ActionAuthPromotionInput {
    */
   objectiveMismatch?: boolean | null;
   /**
-   * Classifier kinds (issues #38 / #47 allowlist). When `actionKind` is
-   * informational, public ALLOW requires `mandateKind === 'informational'`.
+   * Classifier kinds (issues #38 / #47 / #49 allowlist). When `actionKind`
+   * is informational, public ALLOW requires `mandateKind === 'informational'`.
    * Unknown vs a named non-informational mandate BLOCKs
    * (`objective_mismatch_fail_closed`). Unknown/unknown is UNCERTAIN
    * (`unclassified_abstention_fail_closed`) — still no public ALLOW.
-   * Omitted kinds do not apply this extra check (tests / other callers).
+   * `deploy_ship` requires `mandateKind === 'deploy_ship'` (#49);
+   * unknown or mismatched mandate BLOCKs `objective_mismatch_fail_closed`
+   * (same mapping as #38 informational + unknown). Omitted kinds do not
+   * apply this extra check (tests / other callers).
    */
   actionKind?: string | null;
   mandateKind?: string | null;
@@ -266,12 +269,15 @@ export function resolveActionAuthPromotion(
     return finish(input.mappedVerdict, false, 'not_action_authorization');
   }
 
-  // P0 2026-09-10 / #38 + #47: informational action may public-ALLOW
-  // only when the mandate is positively informational. Unknown action
-  // vs a named non-informational mandate (ship/pay/permission) BLOCKs.
-  // Unknown/unknown is UNCERTAIN unclassified_abstention — no ALLOW,
-  // but the receipt is not a named objective mismatch. Cascade
-  // agreement_allow must not fail-open. Omitted kinds skip this check.
+  // P0 2026-09-10 / #38 + #47 + #49: informational action may
+  // public-ALLOW only when the mandate is positively informational.
+  // Unknown action vs a named non-informational mandate
+  // (ship/pay/permission) BLOCKs. Unknown/unknown is UNCERTAIN
+  // unclassified_abstention — no ALLOW, but the receipt is not a named
+  // objective mismatch. deploy_ship may ALLOW only when the mandate is
+  // positively deploy_ship; unknown/mismatched → BLOCK
+  // objective_mismatch_fail_closed. Cascade agreement_allow must not
+  // fail-open. Omitted kinds skip this check.
   const kindsPresent = input.actionKind != null && input.mandateKind != null;
   const unclassifiedAbstention =
     kindsPresent &&

@@ -5,7 +5,8 @@
  * informational action ALLOW only when mandate_kind is positively
  * informational (#38); unknown action vs named non-info mandate
  * BLOCKs (#47); unknown/unknown is UNCERTAIN abstention; ship/pay +
- * notify → objective_mismatch;
+ * notify → objective_mismatch; deploy/publish/pin action ALLOW only
+ * when mandate_kind is positively deploy_ship (#49);
  * wallet drains and mixed transfers stay silent; caller
  * structural_fact: is neutralized.
  */
@@ -19,6 +20,7 @@ import {
   classifyActionAuthKind,
   hasPositiveShipInstruction,
   informationalActionMayPublicAllow,
+  mandateIsPositivelyDeployShip,
   mandateIsPositivelyInformational,
   prepareActionAuthEval,
   recordActionAuthUnknownKinds,
@@ -258,6 +260,29 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
     expect(c.objective_mismatch).toBe(true);
   });
 
+  it('bare "Release notes…" action is informational, not deploy_ship (#49 Merge-GO)', () => {
+    const mandate = 'Tell CoS the release notes when CI is green. No deploy.';
+    const action = 'Release notes an CoS senden.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'FYI only; kein Deploy.'));
+    expect(c.action_kind).toBe('informational');
+    expect(c.action_kind).not.toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(false);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+  });
+
+  it('EN "Release notes to CoS" action stays informational vs notify mandate', () => {
+    const mandate = 'Tell CoS the release notes. No deploy.';
+    const action = 'Release notes to CoS.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'FYI only.'));
+    expect(c.action_kind).toBe('informational');
+    expect(c.action_kind).not.toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+  });
+
   it('does not treat FYI "release notes" or negated deploy as a ship mandate', () => {
     const notes = classifyActionAuthKind(
       'Tell CoS about the release notes',
@@ -447,7 +472,7 @@ describe('hasPositiveShipInstruction — DE negation', () => {
   });
 });
 
-describe('informational allowlist helpers (issues #38 / #47)', () => {
+describe('informational allowlist helpers (issues #38 / #47 / #49)', () => {
   it('only informational mandate is positively informational', () => {
     expect(mandateIsPositivelyInformational('informational')).toBe(true);
     expect(mandateIsPositivelyInformational('unknown')).toBe(false);
@@ -456,12 +481,21 @@ describe('informational allowlist helpers (issues #38 / #47)', () => {
     expect(mandateIsPositivelyInformational('permission')).toBe(false);
   });
 
+  it('only deploy_ship mandate is positively deploy_ship', () => {
+    expect(mandateIsPositivelyDeployShip('deploy_ship')).toBe(true);
+    expect(mandateIsPositivelyDeployShip('unknown')).toBe(false);
+    expect(mandateIsPositivelyDeployShip('informational')).toBe(false);
+    expect(mandateIsPositivelyDeployShip('value_transfer')).toBe(false);
+    expect(mandateIsPositivelyDeployShip('permission')).toBe(false);
+  });
+
   it('informational action may public-ALLOW only with positively informational mandate', () => {
     expect(informationalActionMayPublicAllow('informational', 'informational')).toBe(true);
     expect(informationalActionMayPublicAllow('informational', 'unknown')).toBe(false);
     expect(informationalActionMayPublicAllow('informational', 'deploy_ship')).toBe(false);
     expect(informationalActionMayPublicAllow('informational', 'value_transfer')).toBe(false);
     expect(informationalActionMayPublicAllow('value_transfer', 'unknown')).toBe(true);
+    expect(informationalActionMayPublicAllow('permission', 'unknown')).toBe(true);
   });
 
   it('unknown action vs non-positively-informational mandate fail-closes', () => {
@@ -470,7 +504,14 @@ describe('informational allowlist helpers (issues #38 / #47)', () => {
     expect(informationalActionMayPublicAllow('unknown', 'value_transfer')).toBe(false);
     expect(informationalActionMayPublicAllow('unknown', 'permission')).toBe(false);
     expect(informationalActionMayPublicAllow('unknown', 'informational')).toBe(true);
-    expect(informationalActionMayPublicAllow('deploy_ship', 'unknown')).toBe(true);
+  });
+
+  it('deploy_ship action may public-ALLOW only with positively matching mandate (#49)', () => {
+    expect(informationalActionMayPublicAllow('deploy_ship', 'deploy_ship')).toBe(true);
+    expect(informationalActionMayPublicAllow('deploy_ship', 'unknown')).toBe(false);
+    expect(informationalActionMayPublicAllow('deploy_ship', 'informational')).toBe(false);
+    expect(informationalActionMayPublicAllow('deploy_ship', 'value_transfer')).toBe(false);
+    expect(informationalActionMayPublicAllow('deploy_ship', 'permission')).toBe(false);
   });
 });
 
@@ -512,6 +553,55 @@ describe('DE informational markers (issue #47 Fall 6)', () => {
       expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), row.id).toBe(true);
     });
   }
+});
+
+describe('deploy_ship action vs unknown/mismatched mandate (issue #49)', () => {
+  it('deploy action + unknown mandate is objective_mismatch (not already_allow)', () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Ship the 0.8.10 package after pinning the npm version.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'CI is green; ship now.'));
+    expect(c.action_kind).toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('unknown');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(c.axisHint).toMatch(/action_kind=deploy_ship/);
+    expect(c.axisHint).toMatch(/mandate_kind=unknown/);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+  });
+
+  it('publish action + unknown mandate fail-closes', () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Publish the npm package to the registry.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Registry publish.'));
+    expect(c.action_kind).toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('unknown');
+    expect(c.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+  });
+
+  it('pin action + informational mandate fail-closes (mismatched)', () => {
+    const mandate = 'Tell CoS host runs git main. No deploy.';
+    const action = 'Pin the npm version and ship.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Pin then ship.'));
+    expect(c.action_kind).toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+  });
+
+  it('deploy action + deploy_ship mandate stays positively matching', () => {
+    const mandate = 'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'Ship the release after pinning the npm version; CI is green.';
+    const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Pin then ship.'));
+    expect(c.action_kind).toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(false);
+    expect(c.unclassified_abstention).toBe(false);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+    expect(c.axisHint).toBeNull();
+  });
 });
 
 describe('unknown action vs deploy_ship fail-closed (issue #47 Fall 7c)', () => {

@@ -1,4 +1,7 @@
 import type { AuthorizationMandate, GateMode, GateViolation } from './engine/authorization-gate.js';
+import type { RateLimitBackend } from './upstash-env.js';
+
+export type { RateLimitBackend };
 
 export type SentinelTier = 'checkpoint' | 'standard' | 'swift' | 'pro';
 
@@ -390,17 +393,19 @@ export interface SentinelVerifyResponse {
   };
 }
 
-export type RateLimitBackend = 'redis' | 'in_memory' | 'unavailable';
-
 /** Whether the public verdict came from the deterministic gate or the cascade. */
 export type ActionAuthDecisionBasis = 'deterministic' | 'cascade';
 
 export interface SentinelHealthResponse {
-  ok: boolean;
   /** Liveness only — process answered. */
+  ok: boolean;
   ready?: boolean;
   serv_key?: 'present' | 'missing';
-  /** Limiter store. unavailable ⇒ ready=false (issue #43). */
+  /**
+   * Limiter store from env probe (no Redis PING).
+   * `redis` = Upstash REST URL+token configured, not connectivity-checked.
+   * unavailable ⇒ ready=false (issue #43).
+   */
   rate_limit?: RateLimitBackend;
   version: string;
   modes: SentinelMode[];

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Deploy/publish/pin vs unknown mandate allowlist (issue #49):**
+  After #48, `informationalActionMayPublicAllow('deploy_ship', 'unknown')`
+  was still `true`: a deploy/publish/pin action against an unclassified
+  mandate could public-ALLOW if cascade `agreement_allow` agreed, while
+  an unclassified *action* fail-closed. `value_transfer` / `permission`
+  are caught by the financial gate **when a structured `mandate` is
+  supplied**; prose-only requests (MCP shape: claim/evidence/mode/tier,
+  no `req.mandate`) rely on gold-step criteria. Follow-up: issue #53
+  positive allowlist for those kinds on the prose path. This change
+  closes `deploy_ship` on the prose path: public ALLOW only on
+  positively derived fit (`mandate_kind === 'deploy_ship'`), same
+  spirit as #38 informational allowlist. Unknown or mismatched
+  mandate → **BLOCK** `objective_mismatch_fail_closed` (same promotion
+  mapping as informational + unknown). Informational FYI
+  (`informational` / `informational`) is unchanged. Unknown/unknown
+  stays UNCERTAIN `unclassified_abstention_fail_closed` (no #48
+  regression). Bare `release` is omitted from action deploy heads
+  (same as #37 `POSITIVE_SHIP_RE`) so FYI "release notes" is not
+  `deploy_ship`. The #47 CHANGELOG follow-up is closed.
+
 ### Added
 
 - **Health `rate_limit` + limiter-aware `ready` (issue #43):**
@@ -23,10 +45,17 @@
   (`objective_mismatch_fail_closed`, `unclassified_abstention_fail_closed`).
   Cascade = promotion followed the cascade-derived path. Distinguishes
   gate BLOCK|UNCERTAIN from cascade confidence. Deploy/publish vs
-  unknown-mandate allowlist symmetry remains #49 (out of scope here).
+  unknown-mandate allowlist symmetry is closed by #49 (see Fixed above).
 
 ### Changed
 
+- **Health `rate_limit: "redis"` docs (#50 hygiene):** OpenAPI, ADR-0021,
+  and the health type comment now say `redis` means Upstash env is
+  **configured**, not connectivity-checked (no PING). `RateLimitBackend`
+  is defined once in `upstash-env.ts` and re-exported. The liveness
+  comment sits on `ok`, not `ready`. Production `in_memory` →
+  `ready: false` is unchanged. Preview invalid-token 503 dogfood remains
+  out of scope.
 - **Single 120/min constant + burst default (issue #43):**
   `src/rate-limit-policy.json` is the source for authenticated 120/min,
   global 30/min default, 60s window, 503 `Retry-After: 30`, and burst
@@ -72,9 +101,9 @@
   host API. #38 informational allowlist is unchanged (informational
   action + non-informational mandate still BLOCK). FYI-aligned English
   informational ALLOW is unchanged. The #46 known limitation is closed.
-  Follow-up (not this change): deploy-action vs unknown-mandate
+  Follow-up (closed by #49): deploy-action vs unknown-mandate
   allowlist asymmetry (`informationalActionMayPublicAllow('deploy_ship',
-  'unknown') === true`).
+  'unknown')` is now `false`).
 - **FYI PASS-hint + DE ship negation (issue #38 dogfood):**
   Preview FYI (case 1) was UNCERTAIN with `mandate_kind=informational`
   (gate OK) but cascade `disagreement_hold` / `steps_not_all_pass`: all

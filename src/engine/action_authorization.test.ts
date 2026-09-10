@@ -229,6 +229,34 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(evalInput.question).toMatch(/objective_mismatch=true/);
   });
 
+  it('Release notes FYI (bare release head): cascade ALLOW stays ALLOW (#49 Merge-GO)', async () => {
+    const mandate = 'Tell CoS the release notes when CI is green. No deploy.';
+    const action = 'Release notes an CoS senden.';
+    const evidence = mcpEvidence(mandate, action, 'FYI only; kein Deploy.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'CoS is the mandate recipient.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Release notes FYI, not a ship.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.85, quote: action, reasoning: 'Notify is minimally scoped.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind).not.toBe('deploy_ship');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+  });
+
   it('MCP FYI-aligned: claim=proposed_action + cascade ALLOW stays ALLOW', async () => {
     const evidence = mcpEvidence(
       FYI_MANDATE,
@@ -512,6 +540,68 @@ describe('action_authorization engine — FYI ALLOW + Ship BLOCK', () => {
     expect(res.meta.promotion?.reason).not.toBe('already_allow');
     expect(res.meta.promotion?.action_kind).toBe('unknown');
     expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
+  });
+
+  it('deploy action + unknown mandate: cascade ALLOW → BLOCK (not already_allow, #49)', async () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Ship the 0.8.10 package after pinning the npm version.';
+    const evidence = mcpEvidence(mandate, action, 'CI is green; ship now.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Looks in scope.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named none.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agrees.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).not.toBe('already_allow');
+    expect(res.meta.promotion?.reason).not.toBe('unclassified_abstention_fail_closed');
+    expect(res.meta.promotion?.decision_basis).toBe('deterministic');
+    expect(res.meta.promotion?.action_kind).toBe('deploy_ship');
+    expect(res.meta.promotion?.mandate_kind).toBe('unknown');
+    expect(res.meta.promotion?.unclassified_abstention).toBe(false);
+    const step2 = res.objections.find((o) => o.step_id === 'step_2');
+    expect(step2?.predicate).toBe('unfaithful');
+    expect(step2?.objection_source).toBe('deterministic_gate');
+  });
+
+  it('publish action + unknown mandate: cascade ALLOW → BLOCK (#49)', async () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Publish the npm package to the registry.';
+    const evidence = mcpEvidence(mandate, action, 'Registry publish.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Looks in scope.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named none.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agrees.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).not.toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('deploy_ship');
+    expect(res.meta.promotion?.mandate_kind).toBe('unknown');
   });
 
   it('unknown/unknown: cascade ALLOW → UNCERTAIN unclassified_abstention (not BLOCK)', async () => {

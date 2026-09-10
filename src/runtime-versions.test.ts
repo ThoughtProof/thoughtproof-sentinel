@@ -38,6 +38,23 @@ describe('health handler import graph', () => {
   });
 });
 
+describe('RateLimitBackend single source (#50 hygiene)', () => {
+  it('is declared only in upstash-env.ts', () => {
+    const decl = /export type RateLimitBackend\s*=/;
+    const env = readFileSync(join(process.cwd(), 'src/upstash-env.ts'), 'utf8');
+    const policy = readFileSync(join(process.cwd(), 'src/rate-limit-policy.ts'), 'utf8');
+    const types = readFileSync(join(process.cwd(), 'src/types.ts'), 'utf8');
+    expect(env).toMatch(decl);
+    expect(policy).not.toMatch(decl);
+    expect(types).not.toMatch(decl);
+    expect(types).toMatch(/Liveness only — process answered/);
+    expect(types).toMatch(/ok: boolean;/);
+    const afterOk = types.split('export interface SentinelHealthResponse')[1] ?? '';
+    const okBlock = afterOk.slice(0, afterOk.indexOf('ready?'));
+    expect(okBlock).toMatch(/Liveness only — process answered/);
+  });
+});
+
 describe('GET /sentinel/health', () => {
   it('includes pot_cli from the installed package', () => {
     const potCli = getPotCliVersion();

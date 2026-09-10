@@ -74,8 +74,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       ? runAuthorizationGate(req.mandate, gateMode)
       : null;
 
-  // Deterministic informational allowlist (issue #38): notify/FYI may
-  // public-ALLOW only when mandate_kind is positively informational.
+  // Deterministic kind allowlist (issues #38 / #47 / #49): notify/FYI
+  // may public-ALLOW only when mandate_kind is positively informational;
+  // deploy/publish/pin only when mandate_kind is positively deploy_ship.
   // Computed before the cascade so budget-exhaust and agreement_allow cannot
   // fail-open. Same classifier the mode handler uses for SENTINEL_AXIS_HINT.
   const actionAuthKind =
