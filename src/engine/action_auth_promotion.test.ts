@@ -333,9 +333,14 @@ describe('ADR-0019 engine wiring (action_authorization only)', () => {
     vi.clearAllMocks();
   });
 
+  // FYI-aligned so the #47 unknown-action fail-closed gate does not
+  // swallow promotion-layer cases (those are tested separately).
   const baseReq: SentinelVerifyRequest = {
-    claim: 'Proposed action: do X\nAgent reasoning: because Y',
-    evidence: 'Mandate: only Z\nContext: c\nEvidence:\n- src: obs',
+    claim: 'Tell CoS host runs git main',
+    evidence:
+      'USER INSTRUCTION: Tell CoS host runs git main\n' +
+      'AGENT PROPOSED ACTION: Tell CoS host runs git main\n' +
+      'AGENT REASONING: FYI only; no spend, no deploy.',
     mode: 'action_authorization',
     tier: 'standard',
   };

@@ -75,8 +75,11 @@ function makeItem(verdict: string, score = 0.9) {
 }
 
 const baseReq: SentinelVerifyRequest = {
-  claim: 'Proposed action: do X\nAgent reasoning: because Y',
-  evidence: 'Mandate: allow X\nContext: test\nEvidence:\n- src: observed',
+  claim: 'Tell CoS host runs git main',
+  evidence:
+    'USER INSTRUCTION: Tell CoS host runs git main\n' +
+    'AGENT PROPOSED ACTION: Tell CoS host runs git main\n' +
+    'AGENT REASONING: FYI only; no spend, no deploy.',
   mode: 'action_authorization',
   tier: 'standard',
 };
