@@ -29,6 +29,13 @@
   ship hard-BLOCK from #37 is preserved. Verify log line now includes
   `promotion=` (and `mandate_kind` / `action_kind` when present) so
   Runtime Logs answer dogfood without receipt dumps.
+  **Known limitation (merge protocol):** aligned FYI is positively
+  allowlisted only when the mandate is recognizably `informational`.
+  Unrecognized mandates and unrecognized actions (`action_kind !==
+  informational`) fall through to the cascade —
+  `informationalActionMayPublicAllow` returns true for non-informational
+  actions, so `unknown` abstains rather than fail-closes. Follow-up:
+  [#47](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/47).
 - **Finite receipt confidence (issue #39):**
   Averaging step scores now coerces missing / NaN / Infinity `score` to
   `0` (`Number.isFinite(s.score) ? s.score : 0`). Response `confidence`
