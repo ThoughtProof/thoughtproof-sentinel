@@ -420,7 +420,7 @@ describe('Sentinel Engine', () => {
       mockEvaluateItem.mockResolvedValueOnce(result as any);
 
       const res = await verify({
-        claim: 'test', evidence: 'test', mode: 'trade_execution', tier: 'checkpoint',
+        claim: 'test', evidence: 'the test quote is in the source', mode: 'trade_execution', tier: 'checkpoint',
       });
 
       expect(Array.isArray(res.objections)).toBe(true);
@@ -429,6 +429,7 @@ describe('Sentinel Engine', () => {
       expect(obj.step_id).toBe('step_0');
       expect(obj.predicate).toBe('supported');
       expect(obj.quote).toBe('test quote');
+      expect(obj.quote_source).toBe('cascade');
       expect(obj.reasoning).toBe('step reasoning'); // evaluator prose preserved
       expect(obj.score).toBe(0.2);
       // criterion is attached from the trade_execution gold step 0
@@ -444,7 +445,7 @@ describe('Sentinel Engine', () => {
       mockEvaluateItem.mockResolvedValueOnce(result as any);
 
       const res = await verify({
-        claim: 'test', evidence: 'test', mode: 'trade_execution', tier: 'checkpoint',
+        claim: 'test', evidence: 'the test quote is in the source', mode: 'trade_execution', tier: 'checkpoint',
       });
 
       const obj = res.objections[0];

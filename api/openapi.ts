@@ -256,6 +256,18 @@ const spec = {
                             enum: ['supported', 'partial', 'unsupported'],
                           },
                           quote: { type: ['string', 'null'] },
+                          quote_source: {
+                            type: ['string', 'null'],
+                            enum: ['cascade', 'recovered_mandate', null],
+                            description:
+                              'cascade: evaluator cited this span. recovered_mandate: Sentinel filled a missing cite from the MCP Principal mandate (verbatim quote) span. Null when quote is null.',
+                          },
+                          quote_match_mode: {
+                            type: 'string',
+                            enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none'],
+                            description:
+                              'How quote matched evidence. unicode/whitespace matches return the evidence span, not the LLM folding.',
+                          },
                           reasoning: { type: 'string' },
                         },
                       },
@@ -434,7 +446,8 @@ const spec = {
                     version: { type: 'string', description: 'Sentinel service version' },
                     pot_cli: {
                       type: 'string',
-                      description: 'Installed pot-cli package version (from pot-cli/package.json)',
+                      description:
+                        'Installed pot-cli package version (from pot-cli/package.json). ThoughtProof vendor patches use a prerelease suffix (e.g. 0.8.10-tp.1), never a colliding upstream 0.8.10.',
                     },
                     modes: { type: 'array', items: { type: 'string' } },
                     tiers: { type: 'array', items: { type: 'string' } },

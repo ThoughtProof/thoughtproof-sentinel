@@ -71,6 +71,14 @@ const OUTPUT_PROPERTIES = {
         score: { type: 'number' },
         predicate: { type: 'string' },
         quote: { type: ['string', 'null'] },
+        quote_source: {
+          type: ['string', 'null'],
+          enum: ['cascade', 'recovered_mandate', null],
+        },
+        quote_match_mode: {
+          type: 'string',
+          enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none'],
+        },
         reasoning: { type: 'string' },
       },
     },
