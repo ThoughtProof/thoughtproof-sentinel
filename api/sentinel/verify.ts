@@ -8,6 +8,11 @@ import { x402Gate } from '../../src/middleware/x402.js';
 import { processSignedEvidence, applyEvidenceEffects } from '../../src/evidence-processing.js';
 import type { PaymentPlatform } from '../../src/types.js';
 import { runShadowObservability } from '../../src/adr0020/shadow.js';
+import {
+  isModelConfigError,
+  isModelConfigReady,
+  modelConfigUnavailablePayload,
+} from '../../src/model-config.js';
 
 const VERSION = '0.1.0';
 const VALID_PLATFORMS: PaymentPlatform[] = ['openserv', 'acp', 'direct'];
@@ -46,6 +51,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const authResult = validateApiKey(req.headers['x-sentinel-key'] as string | undefined);
     if (!authResult.valid) {
       return res.status(401).json({ error: authResult.error, code: 'UNAUTHORIZED' });
+    }
+
+    // --- Model config (SERV_API_KEY). Fail before x402 so a down gate is not billed. ---
+    // 503 MODEL_CONFIG_MISSING = gate-down, not cascade UNCERTAIN / 500 INTERNAL_ERROR.
+    if (!isModelConfigReady()) {
+      return res.status(503).json(modelConfigUnavailablePayload(requestId));
     }
 
     // --- x402 Payment Gate (after auth, before engine) ---
@@ -162,6 +173,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(finalResponse);
   } catch (error) {
     console.error(`[sentinel/verify:${requestId}] error:`, error);
+    if (isModelConfigError(error)) {
+      return res.status(503).json(modelConfigUnavailablePayload(requestId));
+    }
     const message = error instanceof Error ? error.message : 'Internal server error';
     // Never expose internal error details to clients
     const safeMessage = message.includes('SERV') || message.includes('ATTESTER')

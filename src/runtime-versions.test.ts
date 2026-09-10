@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import handler from '../api/sentinel/health.js';
+import { getModelReadiness } from './model-config.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 function installedPotCliVersion(): string {
@@ -58,7 +59,10 @@ describe('GET /sentinel/health', () => {
       ok: true,
       version: '0.1.0',
       pot_cli: potCli,
+      ...getModelReadiness(),
     });
     expect((body as { pot_cli: string }).pot_cli).toMatch(/^\d+\.\d+\.\d+/);
+    expect(['present', 'missing']).toContain((body as { serv_key: string }).serv_key);
+    expect(typeof (body as { ready: boolean }).ready).toBe('boolean');
   });
 });

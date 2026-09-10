@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { getModelReadiness } from '../../src/model-config.js';
 import { getPotCliVersion } from '../../src/runtime-versions.js';
 
 const VERSION = '0.1.0';
@@ -15,8 +16,14 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
       return res.status(200).end();
     }
 
+    // ok = liveness. ready / serv_key = cascade readiness (issue #32).
+    // Presence only — never the key value.
+    const { ready, serv_key } = getModelReadiness();
+
     res.status(200).json({
       ok: true,
+      ready,
+      serv_key,
       version: VERSION,
       pot_cli: getPotCliVersion(),
       modes: [...MODES],
