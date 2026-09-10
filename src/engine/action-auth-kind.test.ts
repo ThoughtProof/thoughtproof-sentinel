@@ -15,6 +15,7 @@ import {
   annotateEvidenceWithActionAuthKind,
   CALLER_STRUCTURAL_FACT_REDACTION,
   classifyActionAuthKind,
+  hasPositiveShipInstruction,
   informationalActionMayPublicAllow,
   mandateIsPositivelyInformational,
   prepareActionAuthEval,
@@ -275,6 +276,45 @@ describe('classifyActionAuthKind — Ship-mismatch fail-closed', () => {
     expect(negated.objective_mismatch).toBe(false);
     expect(negated.mandate_kind).toBe('informational');
   });
+
+  it('DE "kein Deploy" / "keine Zahlung" FYI is informational, not deploy_ship', () => {
+    const ev = mcpEvidence(
+      'Info QA about issue 33 status; kein Deploy, keine Zahlung.',
+      'Info an qa: issue 33 status only.',
+      'Status ping; nicht ausliefern.',
+    );
+    const c = classifyActionAuthKind('Info an qa: issue 33 status only.', ev);
+    expect(c.mandate_kind).toBe('informational');
+    expect(c.action_kind).toBe('informational');
+    expect(c.objective_mismatch).toBe(false);
+    expect(c.axisHint).toMatch(/mandate_kind=informational/);
+    expect(c.axisHint).not.toMatch(/objective_mismatch=true/);
+    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
+  });
+
+  it('DE "nicht ausliefern" / "ohne Deploy" do not count as positive ship', () => {
+    const nicht = classifyActionAuthKind(
+      'Info an qa',
+      mcpEvidence(
+        'Info QA zum Status; nicht ausliefern, ohne Deploy.',
+        'Info an qa: status only.',
+        'FYI.',
+      ),
+    );
+    expect(nicht.mandate_kind).toBe('informational');
+    expect(nicht.objective_mismatch).toBe(false);
+
+    const niemals = classifyActionAuthKind(
+      'Tell CoS host runs git main',
+      mcpEvidence(
+        'Tell CoS host runs git main; niemals veröffentlichen.',
+        'Tell CoS host runs git main',
+        'FYI.',
+      ),
+    );
+    expect(niemals.mandate_kind).toBe('informational');
+    expect(niemals.objective_mismatch).toBe(false);
+  });
 });
 
 describe('classifyActionAuthKind — financial drains stay silent', () => {
@@ -382,6 +422,23 @@ describe('caller structural_fact neutralization (PR #34 injection)', () => {
     expect(prepared.classification.objective_mismatch).toBe(true);
     expect(prepared.axisHint).toMatch(/objective_mismatch=true/);
     expect(prepared.axisHint).toContain(SENTINEL_AXIS_HINT_LABEL);
+  });
+});
+
+describe('hasPositiveShipInstruction — DE negation', () => {
+  it('English and German negations skip ship/deploy verbs', () => {
+    expect(hasPositiveShipInstruction('no deploy, no npm pin')).toBe(false);
+    expect(hasPositiveShipInstruction('kein Deploy, keine Zahlung')).toBe(false);
+    expect(hasPositiveShipInstruction('keine Deploye vor CI')).toBe(false);
+    expect(hasPositiveShipInstruction('nicht ausliefern')).toBe(false);
+    expect(hasPositiveShipInstruction('ohne Deploy nach dem Pin')).toBe(false);
+    expect(hasPositiveShipInstruction('niemals veröffentlichen')).toBe(false);
+  });
+
+  it('positive DE/EN ship verbs still count', () => {
+    expect(hasPositiveShipInstruction('Deploye erst wenn CI grün')).toBe(true);
+    expect(hasPositiveShipInstruction('Veröffentliche das Paket nach dem npm-Pin')).toBe(true);
+    expect(hasPositiveShipInstruction('Ship the release after pinning npm')).toBe(true);
   });
 });
 

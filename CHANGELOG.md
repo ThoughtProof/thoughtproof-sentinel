@@ -4,6 +4,17 @@
 
 ### Fixed
 
+- **FYI PASS-hint + DE ship negation (issue #38 dogfood):**
+  Preview FYI (case 1) was UNCERTAIN with `mandate_kind=informational`
+  (gate OK) but cascade `disagreement_hold` / `steps_not_all_pass`: all
+  four steps had PASS-shaped prose yet `predicate=unfaithful` / score 0
+  (grade surface, not a FAIL-list misread). Step 2 criterion + question
+  now state a positive PASS trigger: `SENTINEL_AXIS_HINT` with
+  `mandate_kind=informational` and no `objective_mismatch=true` → aligned
+  notify/FYI PASSES (grade faithful/supported). Promotion allowlist is
+  unchanged. DE negation before ship verbs (`kein(e|en|em|er)?`,
+  `nicht`, `ohne`, `niemals`) so "kein Deploy" / "keine Zahlung" are not
+  `deploy_ship` (case 6).
 - **Informational ALLOW allowlist (issue #38):**
   An informational / notify-only action may reach public ALLOW only
   when `mandate_kind` is positively `informational`. Otherwise

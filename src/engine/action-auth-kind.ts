@@ -88,17 +88,11 @@ const PERMISSION_RE =
 
 const DE_SHIP_VERBS = 'deploye|veröffentliche|veröffentlichen|ausliefern';
 
-const DEPLOY_RE =
-  new RegExp(
-    `\\b(?:ship(?:ping)?|deploy(?:ing)?|publish(?:ing)?|pin(?:ning)?(?:\\s+the)?\\s+npm|npm\\s+(?:version\\s+)?pin|send-to-prod|release|${DE_SHIP_VERBS})\\b`,
-    'i',
-  );
-
 /**
  * Positive ship/pin/deploy/publish for Ship-mismatch. Omits bare `release`
  * (FYI "release notes" must not flip a notify mandate). Negated mentions
- * ("no deploy", "do not pin npm") do not count. Small DE verb set only —
- * not full i18n.
+ * ("no deploy", "kein Deploy", "do not pin npm") do not count. Small DE
+ * verb set only — not full i18n.
  */
 const POSITIVE_SHIP_RE =
   new RegExp(
@@ -107,7 +101,7 @@ const POSITIVE_SHIP_RE =
   );
 
 const SHIP_NEGATION_BEFORE_RE =
-  /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b)\s+(?:\w+\s+){0,4}$/i;
+  /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b|\bkein(?:e|en|em|er)?\b|\bnicht\b|\bohne\b|\bniemals\b)\s+(?:\w+\s+){0,4}$/i;
 
 /** English-only informational heads (no language-specific particles). */
 const INFO_HEAD_RE =
@@ -256,11 +250,12 @@ function classifyBlob(text: string): ActionKind {
   if (lead !== 'unknown') return lead;
   if (hasPermissionGrant(text)) return 'permission';
   if (hasValueTransfer(text)) return 'value_transfer';
-  if (DEPLOY_RE.test(text) && !INFO_ANY_RE.test(text)) return 'deploy_ship';
+  // Positive ship only — "kein Deploy" / "no deploy" must not win over FYI.
+  if (hasPositiveShipInstruction(text) && !INFO_ANY_RE.test(text)) return 'deploy_ship';
   if (INFO_ANY_RE.test(text) && !hasValueTransfer(text) && !hasPermissionGrant(text)) {
     return 'informational';
   }
-  if (DEPLOY_RE.test(text)) return 'deploy_ship';
+  if (hasPositiveShipInstruction(text)) return 'deploy_ship';
   return 'unknown';
 }
 
@@ -355,13 +350,21 @@ export function classifyActionAuthKind(
   if (permission_grant && action_kind === 'unknown') action_kind = 'permission';
   if (value_transfer && action_kind === 'unknown') action_kind = 'value_transfer';
 
-  // Positive ship/pin instruction only — do not flip "no deploy" FYI
-  // mandates just because the word "deploy" appears in a negation.
+  // Positive ship/pin instruction only — do not flip "no deploy" / "kein
+  // Deploy" FYI mandates just because the word "deploy" appears in a negation.
   const mandateHasPositiveShip = hasPositiveShipInstruction(mandateText);
   if (mandateHasPositiveShip && mandate_kind !== 'value_transfer' && mandate_kind !== 'permission') {
     mandate_kind = 'deploy_ship';
+  } else if (mandate_kind === 'deploy_ship' && !mandateHasPositiveShip) {
+    // leadingKind saw a deploy head that was only a negated mention, or
+    // classifyBlob raced ahead of negation. Prefer informational when the
+    // mandate also has an info axis; otherwise unknown (allowlist fail-closed).
+    mandate_kind =
+      INFO_HEAD_RE.test(mandateText.trim()) || INFO_ANY_RE.test(mandateText)
+        ? 'informational'
+        : 'unknown';
   } else if (mandate_kind === 'unknown' && DEPLOY_HEAD_RE.test(mandateText.trim())) {
-    mandate_kind = 'deploy_ship';
+    if (mandateHasPositiveShip) mandate_kind = 'deploy_ship';
   }
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
