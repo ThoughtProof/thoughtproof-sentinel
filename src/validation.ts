@@ -503,7 +503,7 @@ function parseMandateKind(
 /**
  * Accept common aliases used in demos/docs (maxAmountUsd, amountUsd) so the
  * deterministic gate can fire. Prefer canonical maxAmount/amount when both set.
- * Preserves host-declared `mandate.kind` / `mandate.action.kind` (issue #51).
+ * Preserves caller-declared `mandate.kind` / `mandate.action.kind` (issue #51).
  */
 function normalizeMandate(
   raw: unknown,

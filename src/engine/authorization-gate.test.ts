@@ -15,7 +15,7 @@ describe('runAuthorizationGate — fail toward silence', () => {
     expect(r.wouldBlock).toBe(false);
   });
 
-  it('is silent when only host-declared kinds are present (issue #51)', () => {
+  it('is silent when only caller-declared kinds are present (issue #51)', () => {
     const r = runAuthorizationGate(
       { kind: 'value_transfer', action: { kind: 'value_transfer' } },
       'enforce',

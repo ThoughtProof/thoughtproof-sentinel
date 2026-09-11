@@ -4,20 +4,33 @@
 
 ### Added
 
-- **Host-declared `mandate.kind` / `action.kind` (issue #51):** optional
+- **Caller-declared `mandate.kind` / `action.kind` (issue #51):** optional
   `ActionKind` on the verify mandate (`informational` | `value_transfer` |
-  `permission` | `deploy_ship` | `unknown`). Present + valid host kinds
-  win over prose classification; omitted → prose fallback; declared
-  `unknown` stays fail-closed (no public ALLOW — #48/#49). MCP
-  `verify_before_action` maps `action.kind` → `mandate.action.kind`.
-  Receipts record `mandate_kind_source` / `action_kind_source`
-  (`host` | `prose`) on promotion meta. Structured
-  `granted.maxAmount` / `action.amount` / recipient / allowance are
-  preferred for the authorization gate and financial-axis hints when
-  present (amounts and addresses as data — no new regex dual). Gate
-  may ADD BLOCKs / UNCERTAIN only; no `financial_pair_pass` /
-  `informational_pair_pass` ALLOW. Trust-first, coverage-later.
+  `permission` | `deploy_ship` | `unknown`). MCP `verify_before_action`
+  maps `action.kind` → `mandate.action.kind` (an LLM claim in schema
+  form — same class as #34 `structural_fact`). Asymmetric rule:
+  **BLOCK** — caller kind always applies; declared `unknown` stays
+  `unknown` (no prose rescue); named mismatches BLOCK.
+  **ALLOW** — kind-pair unlocks public ALLOW only when prose does not
+  contradict: prose-derived kinds agree, **or** prose is `unknown`
+  and the mandate carries structured financial fields
+  (`granted.maxAmount` / recipient, etc.). Informational has no
+  structured equivalent: caller and prose must agree; unknown or
+  mismatch does not ALLOW on caller informational alone (caller
+  informational / informational + prose `deploy_ship` mandate is
+  not-allow). Fail-closed when caller would widen. Omitted → prose
+  fallback. Receipts record `mandate_kind_source` / `action_kind_source`
+  (`caller` | `prose`) — `caller` is the API caller (often the model),
+  not trusted infrastructure. Structured `granted.maxAmount` /
+  `action.amount` / recipient / allowance are preferred for the
+  authorization gate and financial-axis hints when present (amounts
+  and addresses as data — no new regex dual). Gate may ADD BLOCKs /
+  UNCERTAIN only; no `financial_pair_pass` / `informational_pair_pass`
+  ALLOW. No promotion ALLOW short-circuit. Trust-first, coverage-later.
   Companion: thoughtproof-mcp#21 (claim framing + passing kinds).
+  **Nightly `FALSE_BLOCK_BASELINE` may need re-baseline after MCP
+  starts sending kinds (policy effect).** This entry does not change
+  the constant (still 4) without measurement.
   Trade modes untouched.
 
 ### Changed

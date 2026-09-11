@@ -119,7 +119,7 @@ describe('validateVerifyRequest', () => {
     expect(result.valid).toBe(false);
   });
 
-  it('preserves host-declared mandate.kind / action.kind with financial fields', () => {
+  it('preserves caller-declared mandate.kind / action.kind with financial fields', () => {
     const result = validateVerifyRequest({
       ...validBody,
       mode: 'action_authorization',

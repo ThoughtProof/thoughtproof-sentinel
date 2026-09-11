@@ -21,10 +21,12 @@ import {
   annotateEvidenceWithActionAuthKind,
   CALLER_STRUCTURAL_FACT_REDACTION,
   amountAtOrBelowGranted,
+  callerDeclaredKindsDoNotWiden,
   classifyActionAuthKind,
   financialRecipientAuthorized,
   hasPositiveShipInstruction,
   informationalActionMayPublicAllow,
+  mandateCarriesStructuredFinancialFields,
   mandateIsPositivelyDeployShip,
   mandateIsPositivelyInformational,
   mandateIsPositivelyPermission,
@@ -45,6 +47,19 @@ import {
   MCP_EVIDENCE_REASONING_LABEL,
   MCP_EVIDENCE_USER_MANDATE_LABEL,
 } from '../step-quote-provenance.js';
+
+function allowlistFrom(
+  c: ReturnType<typeof classifyActionAuthKind>,
+  mandate?: Parameters<typeof classifyActionAuthKind>[2],
+) {
+  return informationalActionMayPublicAllow(c.action_kind, c.mandate_kind, {
+    proseActionKind: c.prose_action_kind,
+    proseMandateKind: c.prose_mandate_kind,
+    actionKindSource: c.action_kind_source,
+    mandateKindSource: c.mandate_kind_source,
+    mandate,
+  });
+}
 
 function mcpEvidence(mandate: string, action: string, reasoning: string): string {
   return [
@@ -1081,11 +1096,12 @@ describe('financial PASS helpers (issue #55)', () => {
   });
 });
 
-describe('host-declared kinds (issue #51)', () => {
+describe('caller-declared kinds (issue #51, asymmetric narrow-only)', () => {
   const standupMandate = 'Handle ticket 8821 as discussed in standup.';
   const standupAction = 'Continue the open thread from standup.';
+  const shipMandate = 'Ship the release only after pinning the npm version and CI is green.';
 
-  it('prefers host informational/informational over unclassified prose', () => {
+  it('caller informational/informational does not ALLOW unclassified standup prose (no widen)', () => {
     const ev = mcpEvidence(standupMandate, standupAction, 'No further detail.');
     const prose = classifyActionAuthKind(standupAction, ev);
     expect(prose.action_kind).toBe('unknown');
@@ -1093,19 +1109,63 @@ describe('host-declared kinds (issue #51)', () => {
     expect(prose.action_kind_source).toBe('prose');
     expect(prose.mandate_kind_source).toBe('prose');
     expect(prose.unclassified_abstention).toBe(true);
-    expect(informationalActionMayPublicAllow(prose.action_kind, prose.mandate_kind)).toBe(false);
+    expect(allowlistFrom(prose)).toBe(false);
 
-    const host = classifyActionAuthKind(standupAction, ev, {
+    const caller = classifyActionAuthKind(standupAction, ev, {
       kind: 'informational',
       action: { kind: 'informational' },
     });
-    expect(host.action_kind).toBe('informational');
-    expect(host.mandate_kind).toBe('informational');
-    expect(host.action_kind_source).toBe('host');
-    expect(host.mandate_kind_source).toBe('host');
-    expect(host.objective_mismatch).toBe(false);
-    expect(host.unclassified_abstention).toBe(false);
-    expect(informationalActionMayPublicAllow(host.action_kind, host.mandate_kind)).toBe(true);
+    expect(caller.action_kind).toBe('informational');
+    expect(caller.mandate_kind).toBe('informational');
+    expect(caller.action_kind_source).toBe('caller');
+    expect(caller.mandate_kind_source).toBe('caller');
+    expect(caller.prose_action_kind).toBe('unknown');
+    expect(caller.prose_mandate_kind).toBe('unknown');
+    expect(caller.unclassified_abstention).toBe(false);
+    expect(caller.objective_mismatch).toBe(true);
+    expect(allowlistFrom(caller)).toBe(false);
+  });
+
+  it('caller informational/informational ALLOWs when prose is also informational', () => {
+    const ev = mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS');
+    const caller = classifyActionAuthKind(FYI_MANDATE, ev, {
+      kind: 'informational',
+      action: { kind: 'informational' },
+    });
+    expect(caller.action_kind).toBe('informational');
+    expect(caller.mandate_kind).toBe('informational');
+    expect(caller.prose_action_kind).toBe('informational');
+    expect(caller.prose_mandate_kind).toBe('informational');
+    expect(caller.action_kind_source).toBe('caller');
+    expect(caller.mandate_kind_source).toBe('caller');
+    expect(caller.objective_mismatch).toBe(false);
+    expect(allowlistFrom(caller)).toBe(true);
+  });
+
+  it('caller informational/informational vs prose deploy_ship mandate must not ALLOW', () => {
+    const ev = mcpEvidence(shipMandate, standupAction, 'Continue the open thread.');
+    const prose = classifyActionAuthKind(standupAction, ev);
+    expect(prose.mandate_kind).toBe('deploy_ship');
+
+    const caller = classifyActionAuthKind(standupAction, ev, {
+      kind: 'informational',
+      action: { kind: 'informational' },
+    });
+    expect(caller.action_kind).toBe('informational');
+    expect(caller.mandate_kind).toBe('informational');
+    expect(caller.action_kind_source).toBe('caller');
+    expect(caller.mandate_kind_source).toBe('caller');
+    expect(caller.prose_mandate_kind).toBe('deploy_ship');
+    expect(caller.objective_mismatch).toBe(true);
+    expect(allowlistFrom(caller)).toBe(false);
+    expect(
+      mandatePositivelyMatchesAction(caller.action_kind, caller.mandate_kind, {
+        proseActionKind: caller.prose_action_kind,
+        proseMandateKind: caller.prose_mandate_kind,
+        actionKindSource: caller.action_kind_source,
+        mandateKindSource: caller.mandate_kind_source,
+      }),
+    ).toBe(false);
   });
 
   it('declared unknown stays unknown (no prose FYI rescue)', () => {
@@ -1114,37 +1174,33 @@ describe('host-declared kinds (issue #51)', () => {
     expect(prose.action_kind).toBe('informational');
     expect(prose.mandate_kind).toBe('informational');
 
-    const host = classifyActionAuthKind(FYI_MANDATE, ev, {
+    const caller = classifyActionAuthKind(FYI_MANDATE, ev, {
       kind: 'unknown',
       action: { kind: 'unknown' },
     });
-    expect(host.action_kind).toBe('unknown');
-    expect(host.mandate_kind).toBe('unknown');
-    expect(host.action_kind_source).toBe('host');
-    expect(host.mandate_kind_source).toBe('host');
-    expect(host.unclassified_abstention).toBe(true);
-    expect(host.objective_mismatch).toBe(false);
-    expect(informationalActionMayPublicAllow(host.action_kind, host.mandate_kind)).toBe(false);
+    expect(caller.action_kind).toBe('unknown');
+    expect(caller.mandate_kind).toBe('unknown');
+    expect(caller.action_kind_source).toBe('caller');
+    expect(caller.mandate_kind_source).toBe('caller');
+    expect(caller.unclassified_abstention).toBe(true);
+    expect(caller.objective_mismatch).toBe(false);
+    expect(allowlistFrom(caller)).toBe(false);
   });
 
-  it('mixed sources: host action kind + prose mandate kind', () => {
-    const ev = mcpEvidence(
-      'Ship the release only after pinning the npm version and CI is green.',
-      standupAction,
-      'Continue the open thread.',
-    );
+  it('mixed sources: caller action kind + prose mandate kind', () => {
+    const ev = mcpEvidence(shipMandate, standupAction, 'Continue the open thread.');
     const c = classifyActionAuthKind(standupAction, ev, {
       action: { kind: 'informational' },
     });
     expect(c.action_kind).toBe('informational');
-    expect(c.action_kind_source).toBe('host');
+    expect(c.action_kind_source).toBe('caller');
     expect(c.mandate_kind).toBe('deploy_ship');
     expect(c.mandate_kind_source).toBe('prose');
     expect(c.objective_mismatch).toBe(true);
-    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(allowlistFrom(c)).toBe(false);
   });
 
-  it('invalid host kind is ignored (prose fallback)', () => {
+  it('invalid caller kind is ignored (prose fallback)', () => {
     const ev = mcpEvidence(standupMandate, standupAction, 'No further detail.');
     const c = classifyActionAuthKind(standupAction, ev, {
       kind: 'not_a_kind' as never,
@@ -1157,7 +1213,7 @@ describe('host-declared kinds (issue #51)', () => {
     expect(c.unclassified_abstention).toBe(true);
   });
 
-  it('host value_transfer vs deploy_ship is still not-allow (drain/mismatch regression)', () => {
+  it('caller value_transfer vs deploy_ship is still not-allow (drain/mismatch regression)', () => {
     const ev = mcpEvidence(
       'Ship the release only after pinning the npm version.',
       'Handle standup leftovers.',
@@ -1169,10 +1225,47 @@ describe('host-declared kinds (issue #51)', () => {
     });
     expect(c.action_kind).toBe('value_transfer');
     expect(c.mandate_kind).toBe('deploy_ship');
-    expect(c.action_kind_source).toBe('host');
-    expect(c.mandate_kind_source).toBe('host');
+    expect(c.action_kind_source).toBe('caller');
+    expect(c.mandate_kind_source).toBe('caller');
     expect(c.objective_mismatch).toBe(true);
-    expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
+    expect(allowlistFrom(c)).toBe(false);
+  });
+
+  it('unknown prose + structured financial fields may unlock financial ALLOW pair', () => {
+    const ev = mcpEvidence(standupMandate, standupAction, 'No money language.');
+    const structured = {
+      kind: 'value_transfer' as const,
+      granted: { maxAmount: 250, recipient: '0xACME1234' },
+      action: { kind: 'value_transfer' as const, amount: 250, recipient: '0xACME1234' },
+    };
+    expect(mandateCarriesStructuredFinancialFields(structured)).toBe(true);
+    const c = classifyActionAuthKind(standupAction, ev, structured);
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('value_transfer');
+    expect(c.prose_mandate_kind).toBe('unknown');
+    expect(allowlistFrom(c, structured)).toBe(true);
+    expect(
+      callerDeclaredKindsDoNotWiden(c.action_kind, c.mandate_kind, {
+        proseActionKind: c.prose_action_kind,
+        proseMandateKind: c.prose_mandate_kind,
+        actionKindSource: c.action_kind_source,
+        mandateKindSource: c.mandate_kind_source,
+        mandate: structured,
+      }),
+    ).toBe(true);
+  });
+
+  it('unknown prose financial pair without structured fields does not ALLOW', () => {
+    const ev = mcpEvidence(standupMandate, standupAction, 'No money language.');
+    const callerOnly = {
+      kind: 'value_transfer' as const,
+      action: { kind: 'value_transfer' as const },
+    };
+    expect(mandateCarriesStructuredFinancialFields(callerOnly)).toBe(false);
+    const c = classifyActionAuthKind(standupAction, ev, callerOnly);
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('value_transfer');
+    expect(allowlistFrom(c, callerOnly)).toBe(false);
   });
 
   it('prefers structured amounts / recipients over prose (no regex dual)', () => {

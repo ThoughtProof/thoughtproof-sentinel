@@ -55,9 +55,10 @@ export type GateMode = 'shadow' | 'enforce';
  * with confidence and stays silent otherwise. */
 export interface AuthorizationMandate {
   /**
-   * Host-declared mandate kind (issue #51). When present and a valid
-   * `ActionKind`, classification prefers this over prose. Omitted →
-   * prose fallback. `unknown` is valid and fail-closed (no public ALLOW).
+   * Caller-declared mandate kind (issue #51). BLOCK: present + valid
+   * `ActionKind` always applies (declared `unknown` stays `unknown`).
+   * ALLOW: unlocks only when prose does not contradict. Omitted →
+   * prose fallback. `unknown` is fail-closed (no public ALLOW).
    */
   kind?: ActionKind;
   /** What the principal authorized. */
@@ -74,10 +75,10 @@ export interface AuthorizationMandate {
   /** What the agent proposes to do. */
   action?: {
     /**
-     * Host-declared action kind (issue #51). Sentinel contract for MCP
-     * `action.kind`: map onto `mandate.action.kind`. Same rules as
-     * `mandate.kind` — present+valid wins; omitted → prose; `unknown`
-     * fail-closed.
+     * Caller-declared action kind (issue #51). Sentinel contract for MCP
+     * `action.kind`: map onto `mandate.action.kind`. Same asymmetric
+     * rule as `mandate.kind` — BLOCK always applies; ALLOW needs prose
+     * agreement. Omitted → prose; declared `unknown` stays `unknown`.
      */
     kind?: ActionKind;
     /** Amount the action moves/spends (in the asset's units). */

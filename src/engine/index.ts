@@ -226,7 +226,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
                     : {}),
                   release_id: releaseId,
                   policy:
-                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-host-declared-kinds',
+                    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+engine-budget-45s+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-caller-declared-kinds',
                 },
               }
             : {}),
@@ -309,6 +309,11 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       actionKind: actionAuthKind?.action_kind ?? null,
       mandateKind: actionAuthKind?.mandate_kind ?? null,
       boundedPermissionCompatible: actionAuthKind?.bounded_permission_compatible === true,
+      proseActionKind: actionAuthKind?.prose_action_kind ?? null,
+      proseMandateKind: actionAuthKind?.prose_mandate_kind ?? null,
+      actionKindSource: actionAuthKind?.action_kind_source ?? null,
+      mandateKindSource: actionAuthKind?.mandate_kind_source ?? null,
+      mandate: req.mandate,
     });
     verdict = decision.publicVerdict;
     promotionMeta = {
@@ -340,7 +345,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         process.env.RELEASE_ID ||
         undefined,
       policy:
-        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-host-declared-kinds',
+        'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-caller-declared-kinds',
     };
   }
 

@@ -1187,7 +1187,7 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(hint).not.toMatch(/financial_pair_match=true/);
   });
 
-  it('host-declared informational/informational: cascade ALLOW stays ALLOW (source=host)', async () => {
+  it('caller informational/informational on unclassified standup prose does not ALLOW (no widen)', async () => {
     const mandate = 'Handle ticket 8821 as discussed in standup.';
     const action = 'Continue the open thread from standup.';
     const evidence = mcpEvidence(mandate, action, 'No further detail.');
@@ -1208,13 +1208,72 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
       mandate: { kind: 'informational', action: { kind: 'informational' } },
     });
 
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+    expect(res.meta.promotion?.unclassified_abstention).toBe(false);
+  });
+
+  it('caller informational/informational when prose is also informational: cascade ALLOW stays ALLOW', async () => {
+    const evidence = mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'FYI axis.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Named recipient.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Aligned.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.85, quote: FYI_MANDATE, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: FYI_MANDATE,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: { kind: 'informational', action: { kind: 'informational' } },
+    });
+
     expect(res.verdict).toBe('ALLOW');
     expect(res.meta.promotion?.reason).toBe('already_allow');
     expect(res.meta.promotion?.action_kind).toBe('informational');
     expect(res.meta.promotion?.mandate_kind).toBe('informational');
-    expect(res.meta.promotion?.action_kind_source).toBe('host');
-    expect(res.meta.promotion?.mandate_kind_source).toBe('host');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
     expect(res.meta.promotion?.unclassified_abstention).toBe(false);
+  });
+
+  it('caller informational/informational vs prose deploy_ship mandate must not ALLOW', async () => {
+    const mandate = 'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'Continue the open thread from standup.';
+    const evidence = mcpEvidence(mandate, action, 'No further detail.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: { kind: 'informational', action: { kind: 'informational' } },
+    });
+
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
   });
 
   it('undeclared standup prose stays unclassified abstention (source=prose)', async () => {
@@ -1246,7 +1305,7 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(res.meta.promotion?.mandate_kind_source).toBe('prose');
   });
 
-  it('host-declared unknown/unknown is fail-closed UNCERTAIN (source=host)', async () => {
+  it('caller-declared unknown/unknown is fail-closed UNCERTAIN (source=caller)', async () => {
     const evidence = mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS');
     mockRunCascade.mockResolvedValueOnce(
       cascade('ALLOW', 'agreement_allow', [
@@ -1271,12 +1330,12 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(res.meta.promotion?.decision_basis).toBe('deterministic');
     expect(res.meta.promotion?.action_kind).toBe('unknown');
     expect(res.meta.promotion?.mandate_kind).toBe('unknown');
-    expect(res.meta.promotion?.action_kind_source).toBe('host');
-    expect(res.meta.promotion?.mandate_kind_source).toBe('host');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
     expect(res.meta.promotion?.unclassified_abstention).toBe(true);
   });
 
-  it('host-declared value_transfer vs deploy_ship still not-allow (mismatch regression)', async () => {
+  it('caller-declared value_transfer vs deploy_ship still not-allow (mismatch regression)', async () => {
     const mandate = 'Ship the release only after pinning the npm version.';
     const action = 'Handle standup leftovers.';
     const evidence = mcpEvidence(mandate, action, 'No money language.');
@@ -1302,8 +1361,8 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
     expect(res.meta.promotion?.action_kind).toBe('value_transfer');
     expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
-    expect(res.meta.promotion?.action_kind_source).toBe('host');
-    expect(res.meta.promotion?.mandate_kind_source).toBe('host');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
   });
 
   it('structured overshoot still enforce-BLOCKs (drain regression; no pair-pass ALLOW)', async () => {

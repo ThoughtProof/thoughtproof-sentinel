@@ -362,12 +362,15 @@ export interface SentinelVerifyResponse {
       action_kind?: string;
       mandate_kind?: string;
       /**
-       * Where each kind came from (issue #51). `host` = declared on
-       * `mandate.kind` / `mandate.action.kind` and valid. `prose` = classifier
-       * fallback. Independent per side (mixed host+prose is allowed).
+       * Where each kind came from (issue #51). `caller` = declared on
+       * `mandate.kind` / `mandate.action.kind` and valid (API caller, often
+       * the model — not trusted infrastructure). `prose` = classifier
+       * fallback. Independent per side (mixed caller+prose is allowed).
+       * Caller kinds always apply on BLOCK; ALLOW requires prose not to
+       * contradict (fail-closed widen).
        */
-      action_kind_source?: 'host' | 'prose';
-      mandate_kind_source?: 'host' | 'prose';
+      action_kind_source?: 'caller' | 'prose';
+      mandate_kind_source?: 'caller' | 'prose';
       /** Per-request unknown-kind flags (issue #47 abstention counters). */
       unknown_action?: boolean;
       unknown_mandate?: boolean;

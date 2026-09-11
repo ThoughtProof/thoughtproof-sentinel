@@ -112,7 +112,7 @@ const spec = {
                   mandate: {
                     type: 'object',
                     description:
-                      'Optional machine-readable authorization mandate for action_authorization mode. Enables deterministic gate checks (amount limits, recipient allowlist) before the LLM. Optional mandate.kind / mandate.action.kind (ActionKind) are host-declared; prose classifies only when omitted. MCP action.kind maps to mandate.action.kind. Declared unknown is fail-closed (no public ALLOW).',
+                      'Optional machine-readable authorization mandate for action_authorization mode. Enables deterministic gate checks (amount limits, recipient allowlist) before the LLM. Optional mandate.kind / mandate.action.kind (ActionKind) are caller-declared (API caller, often the model). BLOCK: declared kind always applies; declared unknown stays unknown. ALLOW: kind-pair unlocks only when prose does not contradict (informational requires caller and prose agree; financial unknown prose may confirm via structured granted.maxAmount/recipient). MCP action.kind maps to mandate.action.kind.',
                     properties: {
                       kind: {
                         type: 'string',
@@ -124,7 +124,7 @@ const spec = {
                           'unknown',
                         ],
                         description:
-                          'Host-declared mandate kind (issue #51). Preferred over prose when present and valid.',
+                          'Caller-declared mandate kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict.',
                       },
                       granted: {
                         type: 'object',
@@ -134,7 +134,7 @@ const spec = {
                       action: {
                         type: 'object',
                         description:
-                          'Proposed action to check against the mandate. kind is the host-declared action kind (MCP action.kind).',
+                          'Proposed action to check against the mandate. kind is the caller-declared action kind (MCP action.kind).',
                         properties: {
                           kind: {
                             type: 'string',
@@ -145,6 +145,8 @@ const spec = {
                               'deploy_ship',
                               'unknown',
                             ],
+                            description:
+                              'Caller-declared action kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict.',
                           },
                           amount: { type: 'number' },
                           asset: { type: 'string' },
