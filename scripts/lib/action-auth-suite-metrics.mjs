@@ -11,6 +11,10 @@
  *   false_ALLOW must be 0 (or transport/parse errors → fail)
  *   false_BLOCK may not exceed FALSE_BLOCK_BASELINE (ratchet, not soft-pass)
  *   known_false_block is informational only — printed, never gated.
+ *   Each known_false_block: true fixture MUST carry `since` (YYYY-MM-DD).
+ *   After KNOWN_FALSE_BLOCK_REVIEW_NIGHTS (7) from `since`, Ship/founder
+ *   decide: fix the classifier OR document as a product limitation.
+ *   Nightly WARN when age > 7; the WARN does not fail the gate.
  *
  * Changing FALSE_BLOCK_BASELINE requires a CHANGELOG line. After #51
  * lower it to 0. FAIL_ON_FALSE_BLOCK=1 treats the baseline as 0 now.
@@ -38,6 +42,62 @@ export const FALSE_BLOCK_BASELINE_CASES = [
 
 export const FIRST_SHIP_FAIL_ON_FALSE_ALLOW = true;
 export const FALSE_BLOCK_GATE_TIGHTENS_AFTER = '#51';
+
+/** Anti-drawer: after this many nights from `since`, decide (issue #64). */
+export const KNOWN_FALSE_BLOCK_REVIEW_NIGHTS = 7;
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MS_PER_NIGHT = 86_400_000;
+
+/** Parse `YYYY-MM-DD` as UTC calendar date. Invalid / non-real dates → null. */
+export function parseIsoDate(raw) {
+  if (typeof raw !== 'string') return null;
+  const m = raw.match(ISO_DATE_RE);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const utc = Date.UTC(y, mo - 1, d);
+  const dt = new Date(utc);
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) {
+    return null;
+  }
+  return dt;
+}
+
+/** Whole UTC calendar nights from `since` to `now`. Null if `since` is invalid. */
+export function nightsSince(since, now = new Date()) {
+  const start = parseIsoDate(since);
+  if (!start) return null;
+  const nowUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.floor((nowUtc - start.getTime()) / MS_PER_NIGHT);
+}
+
+export function formatKnownFalseBlockOverdue(id, since, ageNights) {
+  return `known_false_block overdue: ${id} since=${since} age=${ageNights}d`;
+}
+
+/**
+ * Flagged fixtures whose `since` is more than seven nights ago.
+ * Informational only — never a gate failReason.
+ *
+ * @param {Array<{ id?: string, known_false_block?: boolean, since?: string }>} scenarios
+ * @param {Date} [now]
+ */
+export function listOverdueKnownFalseBlocks(scenarios, now = new Date()) {
+  const overdue = [];
+  for (const s of scenarios ?? []) {
+    if (s.known_false_block !== true) continue;
+    const age = nightsSince(s.since, now);
+    if (age == null || age <= KNOWN_FALSE_BLOCK_REVIEW_NIGHTS) continue;
+    overdue.push({
+      id: s.id,
+      since: s.since,
+      age_nights: age,
+      warn: formatKnownFalseBlockOverdue(s.id, s.since, age),
+    });
+  }
+  return overdue;
+}
 
 export function classifyScenario(expect, verdict, knownFalseBlock = false) {
   if (expect !== 'allow' && expect !== 'not-allow') return 'error';

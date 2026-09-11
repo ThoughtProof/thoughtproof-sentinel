@@ -30,7 +30,9 @@ import {
   FALSE_BLOCK_BASELINE,
   classifyScenario,
   formatFailureList,
+  listOverdueKnownFalseBlocks,
   parseFailOnFalseBlock,
+  parseIsoDate,
   resolveGate,
   scoreRows,
 } from './lib/action-auth-suite-metrics.mjs';
@@ -76,6 +78,11 @@ export function loadSuite(path = DEFAULT_SUITE) {
     }
     if (s.known_false_block != null && typeof s.known_false_block !== 'boolean') {
       throw new Error(`scenario ${s.id} known_false_block must be boolean`);
+    }
+    if (s.known_false_block === true && !parseIsoDate(s.since)) {
+      throw new Error(
+        `scenario ${s.id} known_false_block requires since as ISO date (YYYY-MM-DD)`,
+      );
     }
     if (typeof s.claim !== 'string' || typeof s.evidence !== 'string') {
       throw new Error(`scenario ${s.id} missing claim/evidence`);
@@ -203,7 +210,7 @@ function printRow(row) {
 function writeStepSummary(report) {
   const path = process.env.GITHUB_STEP_SUMMARY;
   if (!path) return;
-  const { score, gate } = report;
+  const { score, gate, overdue = [] } = report;
   const lines = [
     '## action_authorization suite',
     '',
@@ -234,6 +241,11 @@ function writeStepSummary(report) {
     for (const f of formatFailureList(score.known_false_block_failures)) lines.push(`- ${f}`);
     lines.push('');
   }
+  if (overdue.length) {
+    lines.push('### known_false_block overdue (WARN; does not fail the gate)', '');
+    for (const o of overdue) lines.push(`- ${o.warn}`);
+    lines.push('');
+  }
   if (score.error_failures.length) {
     lines.push('### errors', '');
     for (const f of formatFailureList(score.error_failures)) lines.push(`- ${f}`);
@@ -258,7 +270,9 @@ export async function runSuite(opts = {}) {
       id: s.id,
       expect: s.expect,
       known_false_block: s.known_false_block === true,
+      since: s.known_false_block === true ? s.since : undefined,
     }));
+    const overdue = listOverdueKnownFalseBlocks(suite.scenarios);
     console.log(
       JSON.stringify(
         {
@@ -276,13 +290,15 @@ export async function runSuite(opts = {}) {
             false_BLOCK_baseline: failOnFalseBlock ? 0 : FALSE_BLOCK_BASELINE,
             fail_on_false_BLOCK: failOnFalseBlock,
             false_BLOCK_tightens_after: '#51',
+            known_false_block_overdue: overdue.map((o) => o.warn),
           },
         },
         null,
         2,
       ),
     );
-    return { dryRun: true, score: emptyish(plan.length), gate: resolveGate({ errors: 0, false_ALLOW: 0, false_BLOCK: 0, known_false_block: 0 }, { failOnFalseBlock }) };
+    for (const o of overdue) console.warn(o.warn);
+    return { dryRun: true, score: emptyish(plan.length), gate: resolveGate({ errors: 0, false_ALLOW: 0, false_BLOCK: 0, known_false_block: 0 }, { failOnFalseBlock }), overdue };
   }
 
   if (!key) {
@@ -327,6 +343,7 @@ export async function runSuite(opts = {}) {
 
   const score = scoreRows(rows);
   const gate = resolveGate(score, { failOnFalseBlock });
+  const overdue = listOverdueKnownFalseBlocks(suite.scenarios);
   const report = {
     ts: new Date().toISOString(),
     base,
@@ -354,10 +371,12 @@ export async function runSuite(opts = {}) {
       fail_reasons: gate.failReasons,
       exit_code: gate.exitCode,
       first_ship_note:
-        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After #51 lower false_BLOCK baseline to 0.`,
+        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. After #51 lower false_BLOCK baseline to 0.`,
     },
+    known_false_block_overdue: overdue.map((o) => o.warn),
     rows,
     score,
+    overdue,
   };
 
   console.log('');
@@ -372,6 +391,9 @@ export async function runSuite(opts = {}) {
   }
   if (score.known_false_block_failures.length) {
     console.log(`known_false_block: ${formatFailureList(score.known_false_block_failures).join('; ')}`);
+  }
+  for (const o of overdue) {
+    console.warn(o.warn);
   }
   if (score.error_failures.length) {
     console.log(`errors: ${formatFailureList(score.error_failures).join('; ')}`);
@@ -390,10 +412,11 @@ export async function runSuite(opts = {}) {
     false_ALLOW_receipts: report.false_ALLOW_receipts,
     false_BLOCK_receipts: report.false_BLOCK_receipts,
     known_false_block_receipts: report.known_false_block_receipts,
+    known_false_block_overdue: report.known_false_block_overdue,
     gate: report.gate,
   }));
 
-  writeStepSummary({ score, gate });
+  writeStepSummary({ score, gate, overdue });
   return report;
 }
 

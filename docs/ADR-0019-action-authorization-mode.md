@@ -240,7 +240,11 @@ Gate (ratchet, not a permanent soft-pass):
   (informational-path fragility: incidental Deploy/ship verbs on an
   FYI / notify-after-pay mandate). Nightly prints the count. The flag
   does **not** enter the false_BLOCK gate. Do not raise
-  `FALSE_BLOCK_BASELINE` to hide these.
+  `FALSE_BLOCK_BASELINE` to hide these. Every flagged fixture MUST
+  carry `since` (ISO date). After **seven nights** from `since`,
+  Ship/founder decide: fix the classifier **or** document as a
+  product limitation with rationale (anti-drawer). Nightly WARN when
+  age > 7; WARN does not fail the gate.
 - **After #51:** lower `FALSE_BLOCK_BASELINE` to **0** (CHANGELOG).
   Dispatch `fail_on_false_block` treats the baseline as 0 now.
 

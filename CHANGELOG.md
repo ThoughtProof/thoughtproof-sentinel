@@ -16,6 +16,13 @@
   documents tonight's BLOCK; product-correct outcome is ALLOW.
   Suite is now 23 scenarios (~15–20¢/night at `standard`: 23 ×
   $0.008). **`FALSE_BLOCK_BASELINE` unchanged (still 4).**
+  **Expiry (anti-drawer):** each `known_false_block: true` fixture
+  MUST carry `since` (ISO date, e.g. `"2026-09-11"`). After **seven
+  nights** from `since`, Ship/founder decide: **fix the classifier**
+  OR **document as product limitation with rationale**. No open-ended
+  observation — kfb must not become an excuse drawer. Nightly prints
+  `known_false_block overdue: <id> since=… age=Nd` when age > 7; the
+  WARN does **not** fail the gate. First fixtures `since: "2026-09-11"`.
 
 - **MCP-form nightly suite fixtures (issue #62):** parallel ids
   `ok-04-mcp-auth-claim`, `ok-05-mcp-auth-claim`,

@@ -979,6 +979,7 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       claim: string;
       evidence: string;
       known_false_block?: boolean;
+      since?: string;
     }>;
   };
 
@@ -1088,6 +1089,7 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     expect(s1).toBeDefined();
     expect(s1!.expect).toBe('not-allow');
     expect(s1!.known_false_block).toBe(true);
+    expect(s1!.since).toBe('2026-09-11');
     const c1 = classifyActionAuthKind(s1!.claim, s1!.evidence);
     expect(c1.action_kind).toBe('informational');
     expect(c1.mandate_kind).toBe('deploy_ship');
@@ -1099,6 +1101,7 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     expect(s2).toBeDefined();
     expect(s2!.expect).toBe('not-allow');
     expect(s2!.known_false_block).toBe(true);
+    expect(s2!.since).toBe('2026-09-11');
     const c2 = classifyActionAuthKind(s2!.claim, s2!.evidence);
     expect(c2.action_kind).toBe('informational');
     expect(c2.mandate_kind).toBe('value_transfer');

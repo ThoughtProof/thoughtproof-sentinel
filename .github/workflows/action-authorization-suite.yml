@@ -28,6 +28,9 @@
 #   constant requires a CHANGELOG line. After #51 lower baseline to 0.
 #   known_false_block is printed every night and does not enter this
 #   gate — do not raise FALSE_BLOCK_BASELINE to hide those fixtures (#64).
+#   Each kfb fixture requires since (YYYY-MM-DD). After 7 nights,
+#   decide: fix classifier or document product limitation. Overdue
+#   WARN (age > 7) does not fail the gate.
 #   Dispatch fail_on_false_block treats baseline as 0 now.
 #
 # Attribution (filter 23 runs/night from organic):

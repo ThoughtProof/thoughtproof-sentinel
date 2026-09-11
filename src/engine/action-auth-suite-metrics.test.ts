@@ -2,7 +2,8 @@
  * Issue #56 — labeled suite scoring + false_BLOCK ratchet.
  * Live HTTP is not exercised here; the runner imports the same helpers.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -11,9 +12,14 @@ import {
   FALSE_BLOCK_BASELINE_CASES,
   FALSE_BLOCK_GATE_TIGHTENS_AFTER,
   FIRST_SHIP_FAIL_ON_FALSE_ALLOW,
+  KNOWN_FALSE_BLOCK_REVIEW_NIGHTS,
   classifyScenario,
   formatFailureList,
+  formatKnownFalseBlockOverdue,
+  listOverdueKnownFalseBlocks,
+  nightsSince,
   parseFailOnFalseBlock,
+  parseIsoDate,
   resolveGate,
   scoreRows,
 } from '../../scripts/lib/action-auth-suite-metrics.mjs';
@@ -234,7 +240,62 @@ describe('suite file + runner helpers', () => {
     ]);
     expect(kfbs.every((s) => s.expect === 'not-allow')).toBe(true);
     expect(kfbs.every((s) => typeof s.comment === 'string' && s.comment.length > 0)).toBe(true);
+    expect(kfbs.every((s) => s.since === '2026-09-11')).toBe(true);
     expect(FALSE_BLOCK_BASELINE_CASES.some((id) => kfbs.some((s) => s.id === id))).toBe(false);
+  });
+
+  it('known_false_block requires since; overdue WARN is past seven nights and not a gate fail', () => {
+    expect(KNOWN_FALSE_BLOCK_REVIEW_NIGHTS).toBe(7);
+    expect(parseIsoDate('2026-09-11')).toEqual(new Date(Date.UTC(2026, 8, 11)));
+    expect(parseIsoDate('2026-13-01')).toBeNull();
+    expect(parseIsoDate('2026-09-31')).toBeNull();
+    expect(parseIsoDate('11-09-2026')).toBeNull();
+    expect(parseIsoDate('')).toBeNull();
+
+    const since = '2026-09-11';
+    expect(nightsSince(since, new Date('2026-09-11T22:00:00Z'))).toBe(0);
+    expect(nightsSince(since, new Date('2026-09-18T08:00:00Z'))).toBe(7);
+    expect(nightsSince(since, new Date('2026-09-19T00:00:00Z'))).toBe(8);
+
+    const fixtures = [
+      { id: 'kfb-01-de-fyi-after-deploy', known_false_block: true, since },
+      { id: 'kfb-02-pay-incidental-deploy-fyi', known_false_block: true, since },
+    ];
+    expect(listOverdueKnownFalseBlocks(fixtures, new Date('2026-09-18T12:00:00Z'))).toEqual([]);
+    const overdue = listOverdueKnownFalseBlocks(fixtures, new Date('2026-09-19T12:00:00Z'));
+    expect(overdue.map((o) => o.warn)).toEqual([
+      formatKnownFalseBlockOverdue('kfb-01-de-fyi-after-deploy', since, 8),
+      formatKnownFalseBlockOverdue('kfb-02-pay-incidental-deploy-fyi', since, 8),
+    ]);
+    expect(overdue[0]!.warn).toBe(
+      'known_false_block overdue: kfb-01-de-fyi-after-deploy since=2026-09-11 age=8d',
+    );
+    expect(resolveGate({ errors: 0, false_ALLOW: 0, false_BLOCK: 0, known_false_block: 2 }).exitCode).toBe(
+      0,
+    );
+
+    const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
+    expect(changelog).toMatch(/seven\s+nights/);
+    expect(changelog).toMatch(/excuse drawer/);
+    const readme = readFileSync(join(root, 'README.md'), 'utf8');
+    expect(readme).toMatch(/seven nights/);
+
+    const missing = join(tmpdir(), `kfb-missing-since-${process.pid}.json`);
+    writeFileSync(
+      missing,
+      JSON.stringify({
+        scenarios: [
+          {
+            id: 'kfb-no-since',
+            expect: 'not-allow',
+            known_false_block: true,
+            claim: 'c',
+            evidence: 'e',
+          },
+        ],
+      }),
+    );
+    expect(() => loadSuite(missing)).toThrow(/known_false_block requires since/);
   });
 
   it('defaults to production; prefers dedicated nightly key; tags nightly-suite', () => {
@@ -269,6 +330,7 @@ describe('suite file + runner helpers', () => {
     const src = readFileSync(join(root, 'scripts/action-authorization-suite.mjs'), 'utf8');
     expect(src).not.toMatch(/tp_live_|sk_live_|sentkey_/);
     expect(src).toContain('known_false_block');
+    expect(src).toContain('listOverdueKnownFalseBlocks');
     expect(src).toMatch(/false_ALLOW=\$\{score\.false_ALLOW\}  false_BLOCK=\$\{score\.false_BLOCK\}  known_false_block=/);
   });
 

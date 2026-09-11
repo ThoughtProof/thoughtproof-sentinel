@@ -61,7 +61,12 @@ lower the baseline to 0. Counts are reported honestly (no quarantine).
 [#64](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/64)):
 incidental Deploy/ship verbs on an FYI mandate that BLOCKs today. Flagged
 scenarios are counted and printed; they do **not** enter the false_BLOCK
-gate. Do not raise `FALSE_BLOCK_BASELINE` to hide them.
+gate. Do not raise `FALSE_BLOCK_BASELINE` to hide them. Each flagged
+scenario MUST carry `since` (`YYYY-MM-DD`). After **seven nights** from
+`since`, Ship/founder decide: fix the classifier **or** document as a
+product limitation with rationale — no open-ended observation. Nightly
+prints a WARN when age > 7 (`known_false_block overdue: …`); that WARN
+does not fail the gate.
 
 **GitHub secrets / variables** (see comments in
 `.github/workflows/action-authorization-suite.yml`):
