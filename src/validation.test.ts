@@ -119,6 +119,66 @@ describe('validateVerifyRequest', () => {
     expect(result.valid).toBe(false);
   });
 
+  it('preserves caller-declared mandate.kind / action.kind with financial fields', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      mode: 'action_authorization',
+      mandate: {
+        kind: 'value_transfer',
+        granted: { maxAmountUsd: 250, recipient: '0xACME' },
+        action: { kind: 'value_transfer', amountUsd: 250, recipient: '0xACME' },
+      },
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.mandate?.kind).toBe('value_transfer');
+      expect(result.data.mandate?.action?.kind).toBe('value_transfer');
+      expect(result.data.mandate?.granted?.maxAmount).toBe(250);
+      expect(result.data.mandate?.action?.amount).toBe(250);
+    }
+  });
+
+  it('accepts kind-only mandate (no financial fields)', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      mode: 'action_authorization',
+      mandate: { kind: 'informational', action: { kind: 'informational' } },
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.mandate).toEqual({
+        kind: 'informational',
+        action: { kind: 'informational' },
+      });
+    }
+  });
+
+  it('rejects invalid mandate.kind', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      mode: 'action_authorization',
+      mandate: { kind: 'fyi' },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      const err = result.errors.find((e) => e.field === 'mandate.kind');
+      expect(err).toBeDefined();
+      expect(err!.message).toContain('informational');
+    }
+  });
+
+  it('rejects invalid mandate.action.kind', () => {
+    const result = validateVerifyRequest({
+      ...validBody,
+      mode: 'action_authorization',
+      mandate: { action: { kind: 'pay' } },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.errors.some((e) => e.field === 'mandate.action.kind')).toBe(true);
+    }
+  });
+
   it('normalizes mandate maxAmountUsd/amountUsd aliases for the gate', () => {
     const result = validateVerifyRequest({
       ...validBody,

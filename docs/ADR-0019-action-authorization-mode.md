@@ -186,9 +186,32 @@ Trade modes untouched.
 MCP `claim === proposed_action` is not papered over — companion
 thoughtproof-mcp#21. #36 stays open until that claim rewrite lands.
 
-**Target architecture (issue #47, not a host API in this ADR):** the host
-declares `mandate.kind` / `action.kind`; prose classifiers are a fallback;
-`unknown` → fail-closed. Sentinel does not invent that host contract here.
+**Caller-declared kinds (issue #51, implements the #47 target):** the
+caller MAY declare `mandate.kind` and `mandate.action.kind` on
+`POST /sentinel/verify` (`ActionKind`: `informational` | `value_transfer`
+| `permission` | `deploy_ship` | `unknown`). MCP `verify_before_action`
+maps `action.kind` → `mandate.action.kind` (companion thoughtproof-mcp#21
+— claim framing + passing kinds; do not block on MCP merge). The value
+is an LLM claim in schema form (same class as #34 `structural_fact`),
+not trusted infrastructure. **Asymmetric:** BLOCK — caller kind always
+applies; declared `unknown` stays `unknown`; named mismatches BLOCK.
+ALLOW — kind-pair unlocks public ALLOW only when prose does not
+contradict (prose kinds agree, or prose is `unknown` and the mandate
+carries structured financial fields). Informational has no structured
+equivalent: caller and prose must agree; unknown/mismatch does not
+ALLOW on caller informational alone. Fail-closed when caller would
+widen. Omitted → prose fallback. Receipts record `mandate_kind_source`
+/ `action_kind_source` (`caller` | `prose`). Structured financial fields
+already on the mandate (`granted.maxAmount`, `action.amount` /
+recipient / allowance) are preferred for the deterministic
+authorization gate when present — amounts and addresses as data, not a
+second regex. **Trust-first, coverage-later.** No
+`financial_pair_pass` / `informational_pair_pass` ALLOW promotion.
+The gate may ADD BLOCKs / UNCERTAIN; it never upgrades cascade BLOCK →
+ALLOW via prose predicates.
+Nightly `FALSE_BLOCK_BASELINE` may need re-baseline after MCP starts
+sending kinds (policy effect); do not change the constant without
+measurement.
 
 **Validation gate (before any live gating)**
 - A labeled scenario suite (in-scope ALLOWs + over-scope/injection BLOCKs) with

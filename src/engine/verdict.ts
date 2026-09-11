@@ -13,7 +13,9 @@ import {
   informationalActionMayPublicAllow,
   isUnclassifiedAbstention,
   type ActionKind,
+  type ActionKindSource,
 } from './action-auth-kind.js';
+import type { AuthorizationMandate } from './authorization-gate.js';
 
 /**
  * Mode-specific verdict overrides.
@@ -176,6 +178,13 @@ export interface ActionAuthPromotionInput {
    * already_allow (decimal MaxUint256 hole).
    */
   boundedPermissionCompatible?: boolean | null;
+  /** Prose kinds + caller source — ALLOW must not widen past prose (#51). */
+  proseActionKind?: string | null;
+  proseMandateKind?: string | null;
+  actionKindSource?: string | null;
+  mandateKindSource?: string | null;
+  /** Structured mandate (financial fields confirm unknown-prose financial pairs). */
+  mandate?: AuthorizationMandate | null;
 }
 
 /**
@@ -305,7 +314,14 @@ export function resolveActionAuthPromotion(
     !informationalActionMayPublicAllow(
       input.actionKind as ActionKind,
       input.mandateKind as ActionKind,
-      { boundedPermissionCompatible: input.boundedPermissionCompatible },
+      {
+        boundedPermissionCompatible: input.boundedPermissionCompatible,
+        proseActionKind: (input.proseActionKind as ActionKind | null) ?? null,
+        proseMandateKind: (input.proseMandateKind as ActionKind | null) ?? null,
+        actionKindSource: (input.actionKindSource as ActionKindSource | null) ?? null,
+        mandateKindSource: (input.mandateKindSource as ActionKindSource | null) ?? null,
+        mandate: input.mandate,
+      },
     );
   if (input.objectiveMismatch === true || informationalAllowlistBlocked) {
     return finish('BLOCK', false, 'objective_mismatch_fail_closed');

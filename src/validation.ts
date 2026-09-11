@@ -1,5 +1,6 @@
 import type { AgentContext, SentinelVerifyRequest, SentinelMode, SentinelTier, SignedEventEvidence, KeyManifest, RequiredCondition, EvidenceBinding } from './types.js';
 import type { AuthorizationMandate, GateMode } from './engine/authorization-gate.js';
+import { ACTION_KINDS, type ActionKind } from './engine/action-auth-kind.js';
 import { TIER_CONFIGS } from './tiers.js';
 
 export interface ValidationError {
@@ -423,7 +424,7 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
     errors.push({ field: 'gateMode', message: `Must be one of: ${VALID_GATE_MODES.join(', ')}` });
   }
   if (b.mandate !== undefined && (typeof b.mandate !== 'object' || b.mandate === null || Array.isArray(b.mandate))) {
-    errors.push({ field: 'mandate', message: 'Must be an object with optional { granted, action }' });
+    errors.push({ field: 'mandate', message: 'Must be an object with optional { kind, granted, action }' });
   }
 
   // Validate signed evidence (F1)
@@ -458,6 +459,8 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
     errors.push({ field: 'evidence', message: 'Evidence exceeds 500KB limit' });
   }
 
+  const mandate = normalizeMandate(b.mandate, errors);
+
   if (errors.length > 0) {
     return { valid: false, errors };
   }
@@ -470,7 +473,7 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       evidence: (b.evidence as string).trim(),
       mode: b.mode as SentinelMode,
       tier: (b.tier as SentinelTier | undefined) ?? 'standard',
-      mandate: normalizeMandate(b.mandate),
+      mandate,
       gateMode: b.gateMode as GateMode | undefined,
       agent_context,
       signed_evidence: signedEvidence,
@@ -481,11 +484,31 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
   };
 }
 
+function parseMandateKind(
+  raw: unknown,
+  field: string,
+  errors: ValidationError[],
+): ActionKind | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'string' || !(ACTION_KINDS as readonly string[]).includes(raw)) {
+    errors.push({
+      field,
+      message: `Must be one of: ${ACTION_KINDS.join(', ')}`,
+    });
+    return undefined;
+  }
+  return raw as ActionKind;
+}
+
 /**
  * Accept common aliases used in demos/docs (maxAmountUsd, amountUsd) so the
  * deterministic gate can fire. Prefer canonical maxAmount/amount when both set.
+ * Preserves caller-declared `mandate.kind` / `mandate.action.kind` (issue #51).
  */
-function normalizeMandate(raw: unknown): AuthorizationMandate | undefined {
+function normalizeMandate(
+  raw: unknown,
+  errors: ValidationError[],
+): AuthorizationMandate | undefined {
   if (raw === undefined || raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     return undefined;
   }
@@ -496,6 +519,9 @@ function normalizeMandate(raw: unknown): AuthorizationMandate | undefined {
   const actionIn = (m.action && typeof m.action === 'object' && !Array.isArray(m.action)
     ? (m.action as Record<string, unknown>)
     : undefined);
+
+  const kind = parseMandateKind(m.kind, 'mandate.kind', errors);
+  const actionKind = parseMandateKind(actionIn?.kind, 'mandate.action.kind', errors);
 
   const num = (v: unknown): number | undefined =>
     typeof v === 'number' && Number.isFinite(v) ? v : undefined;
@@ -546,8 +572,10 @@ function normalizeMandate(raw: unknown): AuthorizationMandate | undefined {
     (action.amount !== undefined ||
       action.asset !== undefined ||
       action.recipient !== undefined ||
-      action.allowance !== undefined)
+      action.allowance !== undefined ||
+      actionKind !== undefined)
       ? {
+          ...(actionKind !== undefined ? { kind: actionKind } : {}),
           ...(action.amount !== undefined ? { amount: action.amount } : {}),
           ...(action.asset !== undefined ? { asset: action.asset } : {}),
           ...(action.recipient !== undefined ? { recipient: action.recipient } : {}),
@@ -555,8 +583,12 @@ function normalizeMandate(raw: unknown): AuthorizationMandate | undefined {
         }
       : undefined;
 
-  if (!g && !a) return m as AuthorizationMandate;
-  return { granted: g, action: a };
+  if (!kind && !g && !a) return undefined;
+  return {
+    ...(kind !== undefined ? { kind } : {}),
+    ...(g !== undefined ? { granted: g } : {}),
+    ...(a !== undefined ? { action: a } : {}),
+  };
 }
 
 /**

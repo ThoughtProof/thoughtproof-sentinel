@@ -112,15 +112,47 @@ const spec = {
                   mandate: {
                     type: 'object',
                     description:
-                      'Optional machine-readable authorization mandate for action_authorization mode. Enables deterministic gate checks (amount limits, recipient allowlist) before the LLM.',
+                      'Optional machine-readable authorization mandate for action_authorization mode. Enables deterministic gate checks (amount limits, recipient allowlist) before the LLM. Optional mandate.kind / mandate.action.kind (ActionKind) are caller-declared (API caller, often the model). BLOCK: declared kind always applies; declared unknown stays unknown. ALLOW: kind-pair unlocks only when prose does not contradict (informational requires caller and prose agree; financial unknown prose may confirm via structured granted.maxAmount/recipient). MCP action.kind maps to mandate.action.kind.',
                     properties: {
+                      kind: {
+                        type: 'string',
+                        enum: [
+                          'informational',
+                          'value_transfer',
+                          'permission',
+                          'deploy_ship',
+                          'unknown',
+                        ],
+                        description:
+                          'Caller-declared mandate kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict.',
+                      },
                       granted: {
                         type: 'object',
-                        description: 'Authorized parameters (maxAmount, allowedRecipients, etc.)',
+                        description:
+                          'Authorized parameters (maxAmount, asset, recipient, allowUnlimited). Preferred for the financial gate when present — amounts and addresses as data.',
                       },
                       action: {
                         type: 'object',
-                        description: 'Proposed action to check against the mandate',
+                        description:
+                          'Proposed action to check against the mandate. kind is the caller-declared action kind (MCP action.kind).',
+                        properties: {
+                          kind: {
+                            type: 'string',
+                            enum: [
+                              'informational',
+                              'value_transfer',
+                              'permission',
+                              'deploy_ship',
+                              'unknown',
+                            ],
+                            description:
+                              'Caller-declared action kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict.',
+                          },
+                          amount: { type: 'number' },
+                          asset: { type: 'string' },
+                          recipient: { type: 'string' },
+                          allowance: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                        },
                       },
                     },
                   },

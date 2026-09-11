@@ -1187,6 +1187,209 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(hint).not.toMatch(/financial_pair_match=true/);
   });
 
+  it('caller informational/informational on unclassified standup prose does not ALLOW (no widen)', async () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Continue the open thread from standup.';
+    const evidence = mcpEvidence(mandate, action, 'No further detail.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'FYI axis.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Named recipient.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Aligned.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.85, quote: action, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: { kind: 'informational', action: { kind: 'informational' } },
+    });
+
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+    expect(res.meta.promotion?.unclassified_abstention).toBe(false);
+  });
+
+  it('caller informational/informational when prose is also informational: cascade ALLOW stays ALLOW', async () => {
+    const evidence = mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'FYI axis.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Named recipient.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Aligned.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.85, quote: FYI_MANDATE, reasoning: 'Minimal.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: FYI_MANDATE,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: { kind: 'informational', action: { kind: 'informational' } },
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+    expect(res.meta.promotion?.unclassified_abstention).toBe(false);
+  });
+
+  it('caller informational/informational vs prose deploy_ship mandate must not ALLOW', async () => {
+    const mandate = 'Ship the release only after pinning the npm version and CI is green.';
+    const action = 'Continue the open thread from standup.';
+    const evidence = mcpEvidence(mandate, action, 'No further detail.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: { kind: 'informational', action: { kind: 'informational' } },
+    });
+
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+  });
+
+  it('undeclared standup prose stays unclassified abstention (source=prose)', async () => {
+    const mandate = 'Handle ticket 8821 as discussed in standup.';
+    const action = 'Continue the open thread from standup.';
+    const evidence = mcpEvidence(mandate, action, 'No further detail.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('unclassified_abstention_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('unknown');
+    expect(res.meta.promotion?.mandate_kind).toBe('unknown');
+    expect(res.meta.promotion?.action_kind_source).toBe('prose');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('prose');
+  });
+
+  it('caller-declared unknown/unknown is fail-closed UNCERTAIN (source=caller)', async () => {
+    const evidence = mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Cascade agreed.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: FYI_MANDATE,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: { kind: 'unknown', action: { kind: 'unknown' } },
+    });
+
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('unclassified_abstention_fail_closed');
+    expect(res.meta.promotion?.decision_basis).toBe('deterministic');
+    expect(res.meta.promotion?.action_kind).toBe('unknown');
+    expect(res.meta.promotion?.mandate_kind).toBe('unknown');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+    expect(res.meta.promotion?.unclassified_abstention).toBe(true);
+  });
+
+  it('caller-declared value_transfer vs deploy_ship still not-allow (mismatch regression)', async () => {
+    const mandate = 'Ship the release only after pinning the npm version.';
+    const action = 'Handle standup leftovers.';
+    const evidence = mcpEvidence(mandate, action, 'No money language.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', [
+        { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+        { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Cascade agreed.' },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: { kind: 'deploy_ship', action: { kind: 'value_transfer' } },
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('value_transfer');
+    expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+  });
+
+  it('structured overshoot still enforce-BLOCKs (drain regression; no pair-pass ALLOW)', async () => {
+    const mandate = 'Pay 250 USDC to Acme at 0xACME1234.';
+    const action = 'transfer 2,000 USDC to 0xACME1234.';
+    const evidence = mcpEvidence(mandate, action, 'Pre-pay 10 months.');
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      gateMode: 'enforce',
+      mandate: {
+        kind: 'value_transfer',
+        granted: { maxAmount: 250, recipient: '0xACME1234', asset: 'USDC' },
+        action: { kind: 'value_transfer', amount: 2000, recipient: '0xACME1234', asset: 'USDC' },
+      },
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.gate?.enforced).toBe(true);
+    expect(res.gate?.violations.some((v) => v.kind === 'amount_overshoot')).toBe(true);
+    expect(mockRunCascade).not.toHaveBeenCalled();
+  });
+
   function weakTeSteps(quote: string) {
     return [
       { step_id: 'step_0', predicate: 'unfaithful', score: 0.5, quote, reasoning: 'TE weak.' },
