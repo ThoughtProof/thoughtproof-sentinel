@@ -223,18 +223,21 @@ measurement.
 ALLOWs** bar is paired with in-scope **false-BLOCK measurement** on
 suite `ok-*` (verdict ∉ {ALLOW} when `expect: allow`). Nightly GitHub
 Action `action-authorization-suite.yml` hits **production**
-`https://sentinel.thoughtproof.ai` `/sentinel/verify` (~10–15¢/night
-at `standard`) and emits both counters plus failing scenario ids and
-receipt ids. Preview is an optional dispatch/PR override only.
+`https://sentinel.thoughtproof.ai` `/sentinel/verify` (~20–25¢/night
+at `standard`, 26 × $0.008) and emits both counters plus failing
+scenario ids and receipt ids. Preview is an optional dispatch/PR
+override only.
 
 Gate (ratchet, not a permanent soft-pass):
 
 - **Fail** if `false_ALLOW > 0` (or transport/parse errors).
 - **Fail** if `false_BLOCK` **exceeds** named `FALSE_BLOCK_BASELINE`
-  (first ship = **4**: known cascade false_BLOCKs ok-01 / ok-02 /
-  ok-03 / ok-06 after prompt-only #57). Counts are reported honestly;
-  ok-* are not quarantined. Changing the constant requires a
-  CHANGELOG line.
+  (first ship = **4**: named cases ok-01 / ok-02 / ok-03 / ok-06).
+  Suite-format ok-01/02/03 false_BLOCKs were a format artifact
+  (#66 Track 1b: quote recovery only saw MCP labels). Do not ratchet
+  4→1 until ≥3 green nights + founder GO; remaining case is ok-06 /
+  #64 class. Counts are reported honestly; ok-* are not quarantined.
+  Changing the constant requires a CHANGELOG line.
 - **`known_false_block` (issue #64):** optional scenario flag for
   classifier false BLOCKs that are **not** the cascade ok-* ratchet
   (informational-path fragility: incidental Deploy/ship verbs on an
@@ -251,10 +254,11 @@ Gate (ratchet, not a permanent soft-pass):
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;
 `agent_context.agent_id` on the receipt) using a dedicated
-`SENTINEL_NIGHTLY_API_KEY`. The 23 nightly receipts also sample
+`SENTINEL_NIGHTLY_API_KEY`. The 26 nightly receipts also sample
 FYI-ALLOW rate (promotion / kinds / `decision_basis`), including
-MCP auth-claim variants (issue #62); after #51 the financial axis
-time series shows ok-01/02/03 flipping false_BLOCK → ALLOW.
+MCP auth-claim variants (issues #62 / #66). After #66 Track 1b,
+MCP ok-01/02/03 measure the live financial ALLOW path; suite
+originals remain format-regression controls.
 
 ---
 

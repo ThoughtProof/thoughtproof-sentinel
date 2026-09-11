@@ -1,5 +1,5 @@
 /**
- * Lock the vendored pot-cli 0.8.10-tp.1 ThoughtProof patch.
+ * Lock the vendored pot-cli 0.8.10-tp.2 ThoughtProof patch.
  *
  * Must fail if someone swaps back an unpatched upstream 0.8.10 tarball
  * that happens to export the same function names.
@@ -17,10 +17,10 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const VENDORED_POT_CLI_VERSION = '0.8.10-tp.1';
-export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.1.tgz';
+export const VENDORED_POT_CLI_VERSION = '0.8.10-tp.2';
+export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.2.tgz';
 export const VENDORED_POT_CLI_SHA512 =
-  'ca96d9c03ec6f584cd3a4936ff7dcba7d0e372ef4efa5161f63f1bbefd8ab3434f3c4bba9de0e6602d2664a42af2c6bba36c43f7aa9073f7987653132e45bd95';
+  '97214d724a7babef496f6360cb5b3e89b95c80b46ae55464a65276d209b3097108f5ad61f5acc9e6f2f2f4038e3d0d44822ef3a5aa4fb1d341f5e81863082804';
 
 const COERCE_CASES: unknown[] = [
   undefined,
@@ -62,6 +62,7 @@ describe('vendored pot-cli identity (not upstream 0.8.10)', () => {
     );
     expect(src).toContain("raw === 'undefined' || raw === 'null'");
     expect(src).toContain('Principal mandate \\(verbatim quote\\):');
+    expect(src).toContain('USER INSTRUCTION:');
     expect(src).toContain('recoverCiteableQuote(coerceQuote(ev.quote)');
     expect(src).toContain('appendReasoningNote(processed.reasoning');
     // Unpatched 0.8.10 used reasoning += which produces the undefined prefix.
@@ -102,5 +103,15 @@ describe('vendored pot-cli quote patch behavior', () => {
     ].join('\n');
     expect(recoverCiteableQuote(null, evidence)).toBe('Tell CoS host runs git main');
     expect(recoverCiteableQuote.toString()).toContain('extractMandateVerbatimQuote');
+  });
+
+  it('recoverCiteableQuote pulls suite USER INSTRUCTION when quote is null', () => {
+    const evidence =
+      'USER INSTRUCTION: Swap 100 USDC for ETH on Uniswap. WALLET BALANCE: 5,000 USDC. ' +
+      'AGENT PROPOSED ACTION: approve(0xUNIROUTER, 100 USDC). AGENT REASONING: exact amount.';
+    expect(recoverCiteableQuote(null, evidence)).toBe(
+      'Swap 100 USDC for ETH on Uniswap.',
+    );
+    expect(recoverCiteableQuote('model cited this', evidence)).toBe('model cited this');
   });
 });

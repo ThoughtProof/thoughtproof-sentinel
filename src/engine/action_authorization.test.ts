@@ -1020,8 +1020,11 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
   it('prepared question mounts SENTINEL_AXIS_HINT on exact suite ok-01/02/03', () => {
     for (const id of [
       'ok-01-exact-swap-approval',
+      'ok-01-mcp-auth-claim',
       'ok-02-exact-payment',
+      'ok-02-mcp-auth-claim',
       'ok-03-exact-limit-order',
+      'ok-03-mcp-auth-claim',
     ]) {
       const s = suiteRow(id);
       const out = actionAuthorization({
@@ -1052,8 +1055,11 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
 
   for (const id of [
     'ok-01-exact-swap-approval',
+    'ok-01-mcp-auth-claim',
     'ok-02-exact-payment',
+    'ok-02-mcp-auth-claim',
     'ok-03-exact-limit-order',
+    'ok-03-mcp-auth-claim',
   ]) {
     it(`${id}: cascade ALLOW → public ALLOW with financial PASS hint`, async () => {
       const s = suiteRow(id);
@@ -1507,8 +1513,11 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
 
   for (const id of [
     'ok-01-exact-swap-approval',
+    'ok-01-mcp-auth-claim',
     'ok-02-exact-payment',
+    'ok-02-mcp-auth-claim',
     'ok-03-exact-limit-order',
+    'ok-03-mcp-auth-claim',
     'ok-06-de-fyi-informiere',
   ]) {
     it(`${id}: cascade BLOCK stays already_block (no prose-pair ALLOW upgrade)`, async () => {

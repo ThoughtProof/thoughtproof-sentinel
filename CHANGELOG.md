@@ -1,6 +1,20 @@
 ## Unreleased
 
 ### Added
+- **MCP-form financial ok-01/02/03 fixtures (issue #66 Track 1b):**
+  parallel ids `ok-01-mcp-auth-claim`, `ok-02-mcp-auth-claim`,
+  `ok-03-mcp-auth-claim` so nightly measures the live MCP claim
+  (`"<proposed_action> is authorized by the principal's mandate"`)
+  plus MCP evidence labels. Same spirit as #63 / thoughtproof-mcp#30
+  for FYI. Originals (`ok-01-exact-swap-approval`,
+  `ok-02-exact-payment`, `ok-03-exact-limit-order`) stay as
+  format-regression controls. Suite is now **26** scenarios
+  (~20–25¢/night at `standard`: 26 × $0.008).
+  **`FALSE_BLOCK_BASELINE` unchanged (still 4).** Do not ratchet
+  4→1 in this change. Remaining named baseline case after the
+  format artifact is fixed is ok-06 / #64 class. Founder GO to
+  lower the constant only after ≥3 green nights.
+
 - **Nightly `known_false_block` metric (issue #64):** third suite
   category for informational-path fragility (incidental Deploy/ship
   verbs on an FYI mandate → `mandate_kind=deploy_ship` →
@@ -42,6 +56,28 @@
   under the new claim.
 
 ### Fixed
+- **Suite-label mandate quote + spend-span recovery (issue #66
+  Track 1b + drain MCP probe):** this was a **format-artifact
+  false_BLOCK**, not a calibration / ML / few-shot fix. Prod
+  2026-09-11: suite-format ok-01/02/03 BLOCK because
+  `extractMandateVerbatimQuote` only recovered MCP
+  `Principal mandate (verbatim quote):` — `USER INSTRUCTION:`
+  → quote=null → all steps `weakly_faithful@0.25`. Same cases
+  in MCP form + auth claim ALLOW @ conf=1 (`sent_c0da4541cb6143f6`,
+  `sent_4eb39b3147ef48dd`, `sent_51554d41ced54e7a`). Drain MCP
+  probe drain-02..05 ×2 = 8/8 BLOCK on real judgments / kind
+  gate (not quote-null), so extending recovery is safe for
+  drains. Recovery now also recognizes suite labels
+  (`USER INSTRUCTION:` / `AGENT PROPOSED ACTION:` /
+  `AGENT REASONING:` / `WALLET BALANCE:`). Spend-span cuts
+  both suite and MCP action/reasoning labels so a pasted
+  action 0x cannot authorize itself. Vendored pot-cli
+  `0.8.10-tp.2` recovers the same suite span before
+  `PROV_FAIL_01` (cascade-time; Sentinel surface stays in
+  lockstep). No deterministic ALLOW for financials. Drain
+  FAIL paths unchanged (same-line suite cut makes drain-04
+  hit the same unbounded-permission kind gate as the MCP
+  drain probe — stronger FAIL, not weaker).
 - Nightly action-authorization suite workflow: stop using `secrets.*` in `if:` (GitHub 422 Unrecognized named-value). Gate missing key in bash after mapping secrets → env. Repo secret `SENTINEL_NIGHTLY_API_KEY` is set; dedicated allowlist entry `nightly-suite` on prod.
 - Nightly suite runner: `process.exit` read `gate.exitCode` but report exposes `gate.exit_code` → always exit 1 after PASS.
 
