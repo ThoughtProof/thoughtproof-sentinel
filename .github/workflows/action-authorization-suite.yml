@@ -1,8 +1,9 @@
 # Nightly (and on-demand) labeled action_authorization suite vs live /sentinel/verify.
 # Issue #56 — dual counters: false_ALLOW (drain / mismatch) + false_BLOCK (ok-*).
+# Issue #64 — third metric: known_false_block (informational only; not gated).
 #
 # Default target is PRODUCTION https://sentinel.thoughtproof.ai
-# (~15–20¢/night at standard: 21 × $0.008). Preview is an optional
+# (~15–20¢/night at standard: 23 × $0.008). Preview is an optional
 # override for workflow_dispatch / PR only — nightly does not follow
 # rotating Preview URLs or SSO bypass.
 #
@@ -25,13 +26,18 @@
 #   fail if false_BLOCK > FALSE_BLOCK_BASELINE (named constant = 4:
 #   ok-01/02/03 + ok-06). Not a permanent soft-pass. Changing the
 #   constant requires a CHANGELOG line. After #51 lower baseline to 0.
+#   known_false_block is printed every night and does not enter this
+#   gate — do not raise FALSE_BLOCK_BASELINE to hide those fixtures (#64).
+#   Each kfb fixture requires since (YYYY-MM-DD). After 7 nights,
+#   decide: fix classifier or document product limitation. Overdue
+#   WARN (age > 7) does not fail the gate.
 #   Dispatch fail_on_false_block treats baseline as 0 now.
 #
-# Attribution (filter 21 runs/night from organic):
+# Attribution (filter 23 runs/night from organic):
 #   X-Sentinel-Agent-Id: nightly-suite  → billing agent_id + verify log agent=
 #   body agent_context.agent_id         → receipt meta.agent_context
 #
-# Side benefit: 21 receipts/night carry promotion / kinds / decision_basis,
+# Side benefit: 23 receipts/night carry promotion / kinds / decision_basis,
 # so FYI-ALLOW rate sampling rides along (including MCP auth-claim
 # variants, issue #62). After #51 the financial axis time series shows
 # ok-01/02/03 flipping false_BLOCK → ALLOW.
@@ -69,7 +75,7 @@ permissions:
 
 jobs:
   suite:
-    name: Live suite (false_ALLOW / false_BLOCK)
+    name: Live suite (false_ALLOW / false_BLOCK / known_false_block)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

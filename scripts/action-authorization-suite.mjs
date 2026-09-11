@@ -6,13 +6,13 @@
  *     node scripts/action-authorization-suite.mjs
  *
  * Defaults to production https://sentinel.thoughtproof.ai (~15–20¢/night
- * at standard: 21 × $0.008). Preview is an optional override for
+ * at standard: 23 × $0.008). Preview is an optional override for
  * PR / workflow_dispatch only (SENTINEL_BASE_URL).
  *
  * Dedicated key: prefer SENTINEL_NIGHTLY_API_KEY (not a customer key).
  * Every request sets X-Sentinel-Agent-Id + agent_context.agent_id =
  * `nightly-suite` so billing events and verify logs (`agent=`) can
- * filter these 21 runs away from organic traffic.
+ * filter these 23 runs away from organic traffic.
  *
  * Optional:
  *   SENTINEL_TIER                 default standard
@@ -30,7 +30,9 @@ import {
   FALSE_BLOCK_BASELINE,
   classifyScenario,
   formatFailureList,
+  listOverdueKnownFalseBlocks,
   parseFailOnFalseBlock,
+  parseIsoDate,
   resolveGate,
   scoreRows,
 } from './lib/action-auth-suite-metrics.mjs';
@@ -73,6 +75,14 @@ export function loadSuite(path = DEFAULT_SUITE) {
   for (const s of parsed.scenarios) {
     if (!s.id || (s.expect !== 'allow' && s.expect !== 'not-allow')) {
       throw new Error(`invalid scenario ${JSON.stringify(s.id)} expect=${s.expect}`);
+    }
+    if (s.known_false_block != null && typeof s.known_false_block !== 'boolean') {
+      throw new Error(`scenario ${s.id} known_false_block must be boolean`);
+    }
+    if (s.known_false_block === true && !parseIsoDate(s.since)) {
+      throw new Error(
+        `scenario ${s.id} known_false_block requires since as ISO date (YYYY-MM-DD)`,
+      );
     }
     if (typeof s.claim !== 'string' || typeof s.evidence !== 'string') {
       throw new Error(`scenario ${s.id} missing claim/evidence`);
@@ -149,6 +159,7 @@ function rowFromResponse(scenario, res) {
   const base = {
     id: scenario.id,
     expect: scenario.expect,
+    known_false_block: scenario.known_false_block === true,
     http_status: res.status,
     verdict: res.json?.verdict ?? null,
     receipt_id: res.json?.id ?? null,
@@ -174,7 +185,7 @@ function rowFromResponse(scenario, res) {
   }
   return {
     ...base,
-    class: classifyScenario(scenario.expect, base.verdict),
+    class: classifyScenario(scenario.expect, base.verdict, scenario.known_false_block === true),
   };
 }
 
@@ -182,6 +193,7 @@ function printRow(row) {
   const bits = [
     row.id,
     `expect=${row.expect}`,
+    row.known_false_block ? 'known_false_block' : null,
     `verdict=${row.verdict ?? '—'}`,
     `class=${row.class}`,
     row.receipt_id ? `receipt=${row.receipt_id}` : null,
@@ -198,7 +210,7 @@ function printRow(row) {
 function writeStepSummary(report) {
   const path = process.env.GITHUB_STEP_SUMMARY;
   if (!path) return;
-  const { score, gate } = report;
+  const { score, gate, overdue = [] } = report;
   const lines = [
     '## action_authorization suite',
     '',
@@ -208,9 +220,10 @@ function writeStepSummary(report) {
     `| ok | ${score.ok} |`,
     `| **false_ALLOW** | **${score.false_ALLOW}** |`,
     `| false_BLOCK | ${score.false_BLOCK} |`,
+    `| known_false_block | ${score.known_false_block} |`,
     `| errors | ${score.errors} |`,
     '',
-    `Gate: false_ALLOW=0 · false_BLOCK≤${gate.falseBlockBaseline} → **${gate.exitCode === 0 ? 'PASS' : 'FAIL'}**`,
+    `Gate: false_ALLOW=0 · false_BLOCK≤${gate.falseBlockBaseline} · known_false_block informational → **${gate.exitCode === 0 ? 'PASS' : 'FAIL'}**`,
     '',
   ];
   if (score.false_ALLOW_failures.length) {
@@ -221,6 +234,16 @@ function writeStepSummary(report) {
   if (score.false_BLOCK_failures.length) {
     lines.push(`### false_BLOCK (baseline ≤${gate.falseBlockBaseline}; ratchet, not soft-pass)`, '');
     for (const f of formatFailureList(score.false_BLOCK_failures)) lines.push(`- ${f}`);
+    lines.push('');
+  }
+  if (score.known_false_block_failures.length) {
+    lines.push('### known_false_block (informational only; not gated)', '');
+    for (const f of formatFailureList(score.known_false_block_failures)) lines.push(`- ${f}`);
+    lines.push('');
+  }
+  if (overdue.length) {
+    lines.push('### known_false_block overdue (WARN; does not fail the gate)', '');
+    for (const o of overdue) lines.push(`- ${o.warn}`);
     lines.push('');
   }
   if (score.error_failures.length) {
@@ -243,7 +266,13 @@ export async function runSuite(opts = {}) {
   const failOnFalseBlock = parseFailOnFalseBlock(env.FAIL_ON_FALSE_BLOCK);
 
   if (dryRun) {
-    const plan = suite.scenarios.map((s) => ({ id: s.id, expect: s.expect }));
+    const plan = suite.scenarios.map((s) => ({
+      id: s.id,
+      expect: s.expect,
+      known_false_block: s.known_false_block === true,
+      since: s.known_false_block === true ? s.since : undefined,
+    }));
+    const overdue = listOverdueKnownFalseBlocks(suite.scenarios);
     console.log(
       JSON.stringify(
         {
@@ -261,13 +290,15 @@ export async function runSuite(opts = {}) {
             false_BLOCK_baseline: failOnFalseBlock ? 0 : FALSE_BLOCK_BASELINE,
             fail_on_false_BLOCK: failOnFalseBlock,
             false_BLOCK_tightens_after: '#51',
+            known_false_block_overdue: overdue.map((o) => o.warn),
           },
         },
         null,
         2,
       ),
     );
-    return { dryRun: true, score: emptyish(plan.length), gate: resolveGate({ errors: 0, false_ALLOW: 0, false_BLOCK: 0 }, { failOnFalseBlock }) };
+    for (const o of overdue) console.warn(o.warn);
+    return { dryRun: true, score: emptyish(plan.length), gate: resolveGate({ errors: 0, false_ALLOW: 0, false_BLOCK: 0, known_false_block: 0 }, { failOnFalseBlock }), overdue };
   }
 
   if (!key) {
@@ -294,6 +325,7 @@ export async function runSuite(opts = {}) {
       const row = {
         id: scenario.id,
         expect: scenario.expect,
+        known_false_block: scenario.known_false_block === true,
         verdict: null,
         receipt_id: null,
         http_status: null,
@@ -311,6 +343,7 @@ export async function runSuite(opts = {}) {
 
   const score = scoreRows(rows);
   const gate = resolveGate(score, { failOnFalseBlock });
+  const overdue = listOverdueKnownFalseBlocks(suite.scenarios);
   const report = {
     ts: new Date().toISOString(),
     base,
@@ -319,13 +352,16 @@ export async function runSuite(opts = {}) {
     mode: MODE,
     false_ALLOW: score.false_ALLOW,
     false_BLOCK: score.false_BLOCK,
+    known_false_block: score.known_false_block,
     errors: score.errors,
     ok: score.ok,
     ran: score.ran,
     false_ALLOW_ids: score.false_ALLOW_failures.map((f) => f.id),
     false_BLOCK_ids: score.false_BLOCK_failures.map((f) => f.id),
+    known_false_block_ids: score.known_false_block_failures.map((f) => f.id),
     false_ALLOW_receipts: score.false_ALLOW_failures.map((f) => f.receipt_id).filter(Boolean),
     false_BLOCK_receipts: score.false_BLOCK_failures.map((f) => f.receipt_id).filter(Boolean),
+    known_false_block_receipts: score.known_false_block_failures.map((f) => f.receipt_id).filter(Boolean),
     error_ids: score.error_failures.map((f) => f.id),
     agent_id: NIGHTLY_AGENT_ID,
     gate: {
@@ -335,15 +371,17 @@ export async function runSuite(opts = {}) {
       fail_reasons: gate.failReasons,
       exit_code: gate.exitCode,
       first_ship_note:
-        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). After #51 lower to 0.`,
+        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. After #51 lower false_BLOCK baseline to 0.`,
     },
+    known_false_block_overdue: overdue.map((o) => o.warn),
     rows,
     score,
+    overdue,
   };
 
   console.log('');
   console.log(
-    `false_ALLOW=${score.false_ALLOW}  false_BLOCK=${score.false_BLOCK}  errors=${score.errors}  ok=${score.ok}/${score.ran}`,
+    `false_ALLOW=${score.false_ALLOW}  false_BLOCK=${score.false_BLOCK}  known_false_block=${score.known_false_block}  errors=${score.errors}  ok=${score.ok}/${score.ran}`,
   );
   if (score.false_ALLOW_failures.length) {
     console.log(`false_ALLOW: ${formatFailureList(score.false_ALLOW_failures).join('; ')}`);
@@ -351,29 +389,39 @@ export async function runSuite(opts = {}) {
   if (score.false_BLOCK_failures.length) {
     console.log(`false_BLOCK: ${formatFailureList(score.false_BLOCK_failures).join('; ')}`);
   }
+  if (score.known_false_block_failures.length) {
+    console.log(`known_false_block: ${formatFailureList(score.known_false_block_failures).join('; ')}`);
+  }
+  for (const o of overdue) {
+    console.warn(o.warn);
+  }
   if (score.error_failures.length) {
     console.log(`errors: ${formatFailureList(score.error_failures).join('; ')}`);
   }
   console.log(
-    `gate false_ALLOW=0 false_BLOCK≤${gate.falseBlockBaseline} → ${gate.exitCode === 0 ? 'PASS' : 'FAIL'} ${gate.failReasons.join(' ')}`,
+    `gate false_ALLOW=0 false_BLOCK≤${gate.falseBlockBaseline} known_false_block informational → ${gate.exitCode === 0 ? 'PASS' : 'FAIL'} ${gate.failReasons.join(' ')}`,
   );
   console.log(JSON.stringify({
     false_ALLOW: report.false_ALLOW,
     false_BLOCK: report.false_BLOCK,
+    known_false_block: report.known_false_block,
     errors: report.errors,
     false_ALLOW_ids: report.false_ALLOW_ids,
     false_BLOCK_ids: report.false_BLOCK_ids,
+    known_false_block_ids: report.known_false_block_ids,
     false_ALLOW_receipts: report.false_ALLOW_receipts,
     false_BLOCK_receipts: report.false_BLOCK_receipts,
+    known_false_block_receipts: report.known_false_block_receipts,
+    known_false_block_overdue: report.known_false_block_overdue,
     gate: report.gate,
   }));
 
-  writeStepSummary({ score, gate });
+  writeStepSummary({ score, gate, overdue });
   return report;
 }
 
 function emptyish(n) {
-  return { ran: n, ok: 0, false_ALLOW: 0, false_BLOCK: 0, errors: 0 };
+  return { ran: n, ok: 0, false_ALLOW: 0, false_BLOCK: 0, known_false_block: 0, errors: 0 };
 }
 
 function isMain() {

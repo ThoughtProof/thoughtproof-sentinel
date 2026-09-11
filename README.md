@@ -36,7 +36,7 @@ vercel dev
 
 Labeled drain / in-scope measurement against live production
 `POST https://sentinel.thoughtproof.ai/sentinel/verify` (~15–20¢/night at
-`standard`, 21 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
+`standard`, 23 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
 also on PRs that touch the suite or engine). Preview is an optional
 override for PR/dispatch only.
 
@@ -48,7 +48,7 @@ SENTINEL_NIGHTLY_API_KEY=… SENTINEL_BASE_URL=https://<preview> npm run suite:a
 
 Use a **dedicated** Sentinel API key (secret `SENTINEL_NIGHTLY_API_KEY`).
 Every request sets `X-Sentinel-Agent-Id: nightly-suite` (billing `agent_id`
-and verify-log `agent=`) plus `agent_context.agent_id` so the 21 nightly
+and verify-log `agent=`) plus `agent_context.agent_id` so the 23 nightly
 receipts can be filtered from organic traffic.
 
 **First-ship baseline:** `false_ALLOW` must be **0**. `false_BLOCK` is a
@@ -57,6 +57,16 @@ receipts can be filtered from organic traffic.
 that constant requires a CHANGELOG line. After structured mandate
 ([#51](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/51))
 lower the baseline to 0. Counts are reported honestly (no quarantine).
+`known_false_block` is a third, **informational** nightly metric (issue
+[#64](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/64)):
+incidental Deploy/ship verbs on an FYI mandate that BLOCKs today. Flagged
+scenarios are counted and printed; they do **not** enter the false_BLOCK
+gate. Do not raise `FALSE_BLOCK_BASELINE` to hide them. Each flagged
+scenario MUST carry `since` (`YYYY-MM-DD`). After **seven nights** from
+`since`, Ship/founder decide: fix the classifier **or** document as a
+product limitation with rationale — no open-ended observation. Nightly
+prints a WARN when age > 7 (`known_false_block overdue: …`); that WARN
+does not fail the gate.
 
 **GitHub secrets / variables** (see comments in
 `.github/workflows/action-authorization-suite.yml`):
