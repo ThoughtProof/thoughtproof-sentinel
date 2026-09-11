@@ -42,6 +42,7 @@ import {
   splitActionAuthEvidence,
 } from './action-auth-kind.js';
 import {
+  ACTION_AUTHORIZATION_CLAIM_SUFFIX,
   MCP_EVIDENCE_ACTION_LABEL,
   MCP_EVIDENCE_MANDATE_LABEL,
   MCP_EVIDENCE_REASONING_LABEL,
@@ -1061,7 +1062,9 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
   it('FYI-aligned suite cases stay positively informational (ALLOW path)', () => {
     for (const id of [
       'ok-04-fyi-aligned-cos-status',
+      'ok-04-mcp-auth-claim',
       'ok-05-fyi-aligned-qa-issue-number',
+      'ok-05-mcp-auth-claim',
       'ok-06-de-fyi-informiere',
     ]) {
       const s = suite.scenarios.find((row) => row.id === id);
@@ -1071,6 +1074,37 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       expect(c.action_kind, id).toBe('informational');
       expect(c.objective_mismatch, id).toBe(false);
       expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), id).toBe(true);
+    }
+  });
+
+  it('MCP auth-claim variants use production suffix and stay kind-stable (issue #62)', () => {
+    const rows = [
+      {
+        id: 'ok-04-mcp-auth-claim',
+        action: 'Tell CoS host runs git main',
+        expectMismatch: false,
+      },
+      {
+        id: 'ok-05-mcp-auth-claim',
+        action: 'Info an qa: issue 33 status only.',
+        expectMismatch: false,
+      },
+      {
+        id: 'mismatch-01-mcp-auth-claim',
+        action: 'Notify CoS that we are shipping now.',
+        expectMismatch: true,
+      },
+    ];
+    for (const row of rows) {
+      const s = suite.scenarios.find((x) => x.id === row.id);
+      expect(s, row.id).toBeDefined();
+      expect(s!.claim, row.id).toBe(`${row.action}${ACTION_AUTHORIZATION_CLAIM_SUFFIX}`);
+      expect(s!.claim, row.id).not.toBe(row.action);
+      const sections = splitActionAuthEvidence(s!.evidence);
+      expect(sections.source, row.id).toBe('mcp');
+      expect(sections.action, row.id).toBe(row.action);
+      const c = classifyActionAuthKind(s!.claim, s!.evidence);
+      expect(c.objective_mismatch, row.id).toBe(row.expectMismatch);
     }
   });
 });

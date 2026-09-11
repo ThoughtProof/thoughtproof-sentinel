@@ -14,6 +14,7 @@ import {
   extractMandateVerbatimQuote,
   isEvidenceSubstring,
   matchEvidenceQuote,
+  ACTION_AUTHORIZATION_CLAIM_SUFFIX,
   MCP_EVIDENCE_ACTION_LABEL,
   MCP_EVIDENCE_MANDATE_LABEL,
   MCP_EVIDENCE_REASONING_LABEL,
@@ -133,6 +134,9 @@ describe('MCP evidence contract (thoughtproof-mcp buildSentinelEvidence)', () =>
     expect(MCP_EVIDENCE_MANDATE_LABEL).toBe('Principal mandate (verbatim quote):');
     expect(fyiEvidence.startsWith(`${MCP_EVIDENCE_MANDATE_LABEL}\n${FYI_MANDATE}`)).toBe(
       true,
+    );
+    expect(ACTION_AUTHORIZATION_CLAIM_SUFFIX).toBe(
+      " is authorized by the principal's mandate",
     );
   });
 });

@@ -35,8 +35,8 @@ vercel dev
 ## Action-authorization suite (issue #56)
 
 Labeled drain / in-scope measurement against live production
-`POST https://sentinel.thoughtproof.ai/sentinel/verify` (~10–15¢/night at
-`standard`, 18 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
+`POST https://sentinel.thoughtproof.ai/sentinel/verify` (~15–20¢/night at
+`standard`, 21 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
 also on PRs that touch the suite or engine). Preview is an optional
 override for PR/dispatch only.
 
@@ -48,7 +48,7 @@ SENTINEL_NIGHTLY_API_KEY=… SENTINEL_BASE_URL=https://<preview> npm run suite:a
 
 Use a **dedicated** Sentinel API key (secret `SENTINEL_NIGHTLY_API_KEY`).
 Every request sets `X-Sentinel-Agent-Id: nightly-suite` (billing `agent_id`
-and verify-log `agent=`) plus `agent_context.agent_id` so the 18 nightly
+and verify-log `agent=`) plus `agent_context.agent_id` so the 21 nightly
 receipts can be filtered from organic traffic.
 
 **First-ship baseline:** `false_ALLOW` must be **0**. `false_BLOCK` is a
