@@ -1109,6 +1109,51 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(hint).not.toMatch(/objective_mismatch=true/);
   });
 
+  it('ok-04-mcp-auth-claim FYI ALLOW path under production MCP suffix (issue #62)', async () => {
+    const s = suiteRow('ok-04-mcp-auth-claim');
+    expect(s.claim).toMatch(/is authorized by the principal's mandate$/);
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+    );
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+    const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(hint).toMatch(/mandate_kind=informational/);
+    expect(hint).not.toMatch(/financial_pair_match=true/);
+    expect(hint).not.toMatch(/objective_mismatch=true/);
+  });
+
+  it('ok-05-mcp-auth-claim FYI ALLOW path under production MCP suffix (issue #62)', async () => {
+    const s = suiteRow('ok-05-mcp-auth-claim');
+    expect(s.claim).toMatch(/is authorized by the principal's mandate$/);
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+    );
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+  });
+
   it('drain-01 unlimited: cascade ALLOW → BLOCK (kind allowlist, no financial PASS)', async () => {
     const s = suiteRow('drain-01-unlimited-approval');
     mockRunCascade.mockResolvedValueOnce(
@@ -1180,6 +1225,32 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(res.verdict).not.toBe('ALLOW');
     expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
     expect(res.meta.promotion?.action_kind).toBe('value_transfer');
+    expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
+    const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+    const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(hint).toMatch(/objective_mismatch=true/);
+    expect(hint).not.toMatch(/financial_pair_match=true/);
+  });
+
+  it('mismatch-01-mcp-auth-claim: cascade ALLOW → BLOCK under production MCP suffix (issue #62)', async () => {
+    const s = suiteRow('mismatch-01-mcp-auth-claim');
+    expect(s.claim).toMatch(/is authorized by the principal's mandate$/);
+    expect(s.claim).not.toBe('Notify CoS that we are shipping now.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+    );
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
     expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
     const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
     const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';

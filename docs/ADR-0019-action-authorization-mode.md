@@ -241,10 +241,10 @@ Gate (ratchet, not a permanent soft-pass):
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;
 `agent_context.agent_id` on the receipt) using a dedicated
-`SENTINEL_NIGHTLY_API_KEY`. The 18 nightly receipts also sample
-FYI-ALLOW rate (promotion / kinds / `decision_basis`); after #51
-the financial axis time series shows ok-01/02/03 flipping
-false_BLOCK → ALLOW.
+`SENTINEL_NIGHTLY_API_KEY`. The 21 nightly receipts also sample
+FYI-ALLOW rate (promotion / kinds / `decision_basis`), including
+MCP auth-claim variants (issue #62); after #51 the financial axis
+time series shows ok-01/02/03 flipping false_BLOCK → ALLOW.
 
 ---
 

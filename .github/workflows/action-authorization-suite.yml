@@ -2,7 +2,7 @@
 # Issue #56 — dual counters: false_ALLOW (drain / mismatch) + false_BLOCK (ok-*).
 #
 # Default target is PRODUCTION https://sentinel.thoughtproof.ai
-# (~10–15¢/night at standard: 18 × $0.008). Preview is an optional
+# (~15–20¢/night at standard: 21 × $0.008). Preview is an optional
 # override for workflow_dispatch / PR only — nightly does not follow
 # rotating Preview URLs or SSO bypass.
 #
@@ -27,13 +27,14 @@
 #   constant requires a CHANGELOG line. After #51 lower baseline to 0.
 #   Dispatch fail_on_false_block treats baseline as 0 now.
 #
-# Attribution (filter 18 runs/night from organic):
+# Attribution (filter 21 runs/night from organic):
 #   X-Sentinel-Agent-Id: nightly-suite  → billing agent_id + verify log agent=
 #   body agent_context.agent_id         → receipt meta.agent_context
 #
-# Side benefit: 18 receipts/night carry promotion / kinds / decision_basis,
-# so FYI-ALLOW rate sampling rides along. After #51 the financial axis
-# time series shows ok-01/02/03 flipping false_BLOCK → ALLOW.
+# Side benefit: 21 receipts/night carry promotion / kinds / decision_basis,
+# so FYI-ALLOW rate sampling rides along (including MCP auth-claim
+# variants, issue #62). After #51 the financial axis time series shows
+# ok-01/02/03 flipping false_BLOCK → ALLOW.
 
 name: Action-authorization suite
 

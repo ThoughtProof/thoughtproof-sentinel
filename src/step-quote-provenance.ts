@@ -29,6 +29,13 @@ export const NEAR_PASS_SCORE_FLOOR = 0.25;
 export const MCP_EVIDENCE_MANDATE_LABEL = 'Principal mandate (verbatim quote):';
 export const MCP_EVIDENCE_ACTION_LABEL = 'Proposed action:';
 export const MCP_EVIDENCE_REASONING_LABEL = 'Agent reasoning:';
+/**
+ * Cross-repo contract with thoughtproof-mcp `buildActionAuthorizationClaim`
+ * (thoughtproof-mcp#30 / Sentinel #62). Production MCP concatenates
+ * trimmed `proposed_action` + this suffix. Never `claim === proposed_action`.
+ */
+export const ACTION_AUTHORIZATION_CLAIM_SUFFIX =
+  " is authorized by the principal's mandate";
 /** Present only when the host quote is a proper excerpt (not the full mandate). */
 export const MCP_EVIDENCE_USER_MANDATE_LABEL = 'User mandate:';
 

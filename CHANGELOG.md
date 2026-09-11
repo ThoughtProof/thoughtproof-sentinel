@@ -1,5 +1,23 @@
 ## Unreleased
 
+### Added
+- **MCP-form nightly suite fixtures (issue #62):** parallel ids
+  `ok-04-mcp-auth-claim`, `ok-05-mcp-auth-claim`,
+  `mismatch-01-mcp-auth-claim` so cron covers the claim grokbot / MCP
+  actually sends after thoughtproof-mcp#30:
+  `"<proposed_action> is authorized by the principal's mandate"` plus
+  MCP evidence labels (`Principal mandate` / `Proposed action` /
+  `Agent reasoning`). Originals kept for baseline comparison (ok-04
+  hybrid claim, ok-05 bare `claim ===` short action,
+  mismatch-01 hybrid, `mismatch-01-mcp-verify-before-action`
+  `claim === proposed_action`). Suite is now 21 scenarios
+  (~15–20¢/night at `standard`: 21 × $0.008).
+  **`FALSE_BLOCK_BASELINE` unchanged (still 4).** Do not re-baseline in
+  this change; after MCP deploy + these fixtures, measure ≥3 nightlies
+  before considering a new ceiling. Companion: #36 stays closed only
+  after proof that ship-mismatch still BLOCKs and FYI still ALLOWs
+  under the new claim.
+
 ### Fixed
 - Nightly action-authorization suite workflow: stop using `secrets.*` in `if:` (GitHub 422 Unrecognized named-value). Gate missing key in bash after mapping secrets → env. Repo secret `SENTINEL_NIGHTLY_API_KEY` is set; dedicated allowlist entry `nightly-suite` on prod.
 - Nightly suite runner: `process.exit` read `gate.exitCode` but report exposes `gate.exit_code` → always exit 1 after PASS.
