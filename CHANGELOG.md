@@ -1,3 +1,8 @@
+## Unreleased
+
+### Fixed
+- Nightly action-authorization suite workflow: stop using `secrets.*` in `if:` (GitHub 422 Unrecognized named-value). Gate missing key in bash after mapping secrets → env. Repo secret `SENTINEL_NIGHTLY_API_KEY` is set; dedicated allowlist entry `nightly-suite` on prod.
+
 # Changelog
 
 ## Unreleased
