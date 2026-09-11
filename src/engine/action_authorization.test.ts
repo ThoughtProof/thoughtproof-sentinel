@@ -990,7 +990,13 @@ const suitePath = join(
   '../../scenarios/action-authorization-suite.json',
 );
 const authSuite = JSON.parse(readFileSync(suitePath, 'utf8')) as {
-  scenarios: Array<{ id: string; expect: string; claim: string; evidence: string }>;
+  scenarios: Array<{
+    id: string;
+    expect: string;
+    claim: string;
+    evidence: string;
+    known_false_block?: boolean;
+  }>;
 };
 
 function suiteRow(id: string) {
@@ -1256,6 +1262,35 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
     expect(hint).toMatch(/objective_mismatch=true/);
     expect(hint).not.toMatch(/financial_pair_match=true/);
+  });
+
+  it('kfb-01 / kfb-02: cascade ALLOW → BLOCK today (known_false_block, issue #64)', async () => {
+    const expected: Record<string, { mandate: string }> = {
+      'kfb-01-de-fyi-after-deploy': { mandate: 'deploy_ship' },
+      'kfb-02-pay-incidental-deploy-fyi': { mandate: 'value_transfer' },
+    };
+    for (const id of Object.keys(expected)) {
+      vi.clearAllMocks();
+      const s = suiteRow(id);
+      expect(s.known_false_block, id).toBe(true);
+      expect(s.expect, id).toBe('not-allow');
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+      );
+
+      const res = await verify({
+        claim: s.claim,
+        evidence: s.evidence,
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+
+      expect(res.verdict, id).toBe('BLOCK');
+      expect(res.verdict, id).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason, id).toBe('objective_mismatch_fail_closed');
+      expect(res.meta.promotion?.action_kind, id).toBe('informational');
+      expect(res.meta.promotion?.mandate_kind, id).toBe(expected[id]!.mandate);
+    }
   });
 
   it('caller informational/informational on unclassified standup prose does not ALLOW (no widen)', async () => {

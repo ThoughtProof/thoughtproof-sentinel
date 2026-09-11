@@ -235,13 +235,19 @@ Gate (ratchet, not a permanent soft-pass):
   ok-03 / ok-06 after prompt-only #57). Counts are reported honestly;
   ok-* are not quarantined. Changing the constant requires a
   CHANGELOG line.
+- **`known_false_block` (issue #64):** optional scenario flag for
+  classifier false BLOCKs that are **not** the cascade ok-* ratchet
+  (informational-path fragility: incidental Deploy/ship verbs on an
+  FYI / notify-after-pay mandate). Nightly prints the count. The flag
+  does **not** enter the false_BLOCK gate. Do not raise
+  `FALSE_BLOCK_BASELINE` to hide these.
 - **After #51:** lower `FALSE_BLOCK_BASELINE` to **0** (CHANGELOG).
   Dispatch `fail_on_false_block` treats the baseline as 0 now.
 
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;
 `agent_context.agent_id` on the receipt) using a dedicated
-`SENTINEL_NIGHTLY_API_KEY`. The 21 nightly receipts also sample
+`SENTINEL_NIGHTLY_API_KEY`. The 23 nightly receipts also sample
 FYI-ALLOW rate (promotion / kinds / `decision_basis`), including
 MCP auth-claim variants (issue #62); after #51 the financial axis
 time series shows ok-01/02/03 flipping false_BLOCK → ALLOW.

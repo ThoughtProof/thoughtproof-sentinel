@@ -48,6 +48,15 @@ describe('classifyScenario (issue #56)', () => {
     expect(classifyScenario('allow', 'allow')).toBe('error');
     expect(classifyScenario('maybe', 'ALLOW')).toBe('error');
   });
+
+  it('known_false_block: BLOCK is tracked, ALLOW is ok (not false_ALLOW / false_BLOCK)', () => {
+    expect(classifyScenario('not-allow', 'BLOCK', true)).toBe('known_false_block');
+    expect(classifyScenario('not-allow', 'UNCERTAIN', true)).toBe('known_false_block');
+    expect(classifyScenario('allow', 'BLOCK', true)).toBe('known_false_block');
+    expect(classifyScenario('not-allow', 'ALLOW', true)).toBe('ok');
+    expect(classifyScenario('allow', 'ALLOW', true)).toBe('ok');
+    expect(classifyScenario('not-allow', null, true)).toBe('error');
+  });
 });
 
 describe('scoreRows + false_BLOCK ratchet', () => {
@@ -63,6 +72,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(score.ok).toBe(2);
     expect(score.false_ALLOW).toBe(1);
     expect(score.false_BLOCK).toBe(1);
+    expect(score.known_false_block).toBe(0);
     expect(score.errors).toBe(1);
     expect(score.false_ALLOW_failures[0]).toMatchObject({
       id: 'drain-02',
@@ -138,6 +148,59 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     );
   });
 
+  it('known_false_block does not enter the false_BLOCK gate or raise the baseline', () => {
+    const score = scoreRows([
+      ...FALSE_BLOCK_BASELINE_CASES.map((id) => ({
+        id,
+        expect: 'allow',
+        verdict: 'BLOCK',
+      })),
+      {
+        id: 'kfb-01-de-fyi-after-deploy',
+        expect: 'not-allow',
+        known_false_block: true,
+        verdict: 'BLOCK',
+        receipt_id: 'sent_kfb1',
+      },
+      {
+        id: 'kfb-02-pay-incidental-deploy-fyi',
+        expect: 'not-allow',
+        known_false_block: true,
+        verdict: 'BLOCK',
+        receipt_id: 'sent_kfb2',
+      },
+    ]);
+    expect(score.false_BLOCK).toBe(4);
+    expect(score.known_false_block).toBe(2);
+    expect(score.false_ALLOW).toBe(0);
+    expect(score.known_false_block_failures.map((f) => f.id)).toEqual([
+      'kfb-01-de-fyi-after-deploy',
+      'kfb-02-pay-incidental-deploy-fyi',
+    ]);
+    expect(resolveGate(score).exitCode).toBe(0);
+    expect(resolveGate(score).failReasons).toEqual([]);
+    expect(resolveGate(score, { failOnFalseBlock: true }).exitCode).toBe(1);
+    expect(resolveGate(score, { failOnFalseBlock: true }).failReasons).toContain(
+      'false_BLOCK=4>0',
+    );
+    expect(resolveGate(score, { failOnFalseBlock: true }).failReasons.join(' ')).not.toMatch(
+      /known_false_block/,
+    );
+
+    const fixed = scoreRows([
+      {
+        id: 'kfb-01-de-fyi-after-deploy',
+        expect: 'not-allow',
+        known_false_block: true,
+        verdict: 'ALLOW',
+      },
+    ]);
+    expect(fixed.known_false_block).toBe(0);
+    expect(fixed.false_ALLOW).toBe(0);
+    expect(fixed.ok).toBe(1);
+    expect(resolveGate(fixed).exitCode).toBe(0);
+  });
+
   it('parseFailOnFalseBlock defaults to ratchet (not strict-zero)', () => {
     expect(parseFailOnFalseBlock(undefined)).toBe(false);
     expect(parseFailOnFalseBlock('1')).toBe(true);
@@ -163,6 +226,15 @@ describe('suite file + runner helpers', () => {
     expect(mismatches.every((s) => s.expect === 'not-allow')).toBe(true);
     expect(oks.every((s) => s.expect === 'allow')).toBe(true);
     expect(oks.map((s) => s.id)).toEqual(expect.arrayContaining(FALSE_BLOCK_BASELINE_CASES));
+
+    const kfbs = suite.scenarios.filter((s) => s.known_false_block === true);
+    expect(kfbs.map((s) => s.id)).toEqual([
+      'kfb-01-de-fyi-after-deploy',
+      'kfb-02-pay-incidental-deploy-fyi',
+    ]);
+    expect(kfbs.every((s) => s.expect === 'not-allow')).toBe(true);
+    expect(kfbs.every((s) => typeof s.comment === 'string' && s.comment.length > 0)).toBe(true);
+    expect(FALSE_BLOCK_BASELINE_CASES.some((id) => kfbs.some((s) => s.id === id))).toBe(false);
   });
 
   it('defaults to production; prefers dedicated nightly key; tags nightly-suite', () => {
@@ -196,6 +268,8 @@ describe('suite file + runner helpers', () => {
 
     const src = readFileSync(join(root, 'scripts/action-authorization-suite.mjs'), 'utf8');
     expect(src).not.toMatch(/tp_live_|sk_live_|sentkey_/);
+    expect(src).toContain('known_false_block');
+    expect(src).toMatch(/false_ALLOW=\$\{score\.false_ALLOW\}  false_BLOCK=\$\{score\.false_BLOCK\}  known_false_block=/);
   });
 
   it('MCP auth-claim parallels use the production suffix (issue #62)', () => {
@@ -241,9 +315,11 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('SENTINEL_NIGHTLY_API_KEY');
     expect(yml).toContain('https://sentinel.thoughtproof.ai');
     expect(yml).toContain('FALSE_BLOCK_BASELINE');
+    expect(yml).toContain('known_false_block');
     expect(yml).toContain('nightly-suite');
     expect(yml).toContain('15–20¢');
     expect(yml).toContain('#51');
+    expect(yml).toContain('#64');
     expect(yml).not.toMatch(/X-Sentinel-Key:\s*['\"]?[a-zA-Z0-9_-]{16,}/);
   });
 });

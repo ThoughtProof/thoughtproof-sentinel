@@ -973,7 +973,13 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     '../../scenarios/action-authorization-suite.json',
   );
   const suite = JSON.parse(readFileSync(suitePath, 'utf8')) as {
-    scenarios: Array<{ id: string; expect: string; claim: string; evidence: string }>;
+    scenarios: Array<{
+      id: string;
+      expect: string;
+      claim: string;
+      evidence: string;
+      known_false_block?: boolean;
+    }>;
   };
 
   it('every mismatch-* suite case is classifier not-allow (not positively matching)', () => {
@@ -1075,6 +1081,30 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       expect(c.objective_mismatch, id).toBe(false);
       expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind), id).toBe(true);
     }
+  });
+
+  it('known_false_block fixtures BLOCK today via classifier mismatch (issue #64)', () => {
+    const s1 = suite.scenarios.find((row) => row.id === 'kfb-01-de-fyi-after-deploy');
+    expect(s1).toBeDefined();
+    expect(s1!.expect).toBe('not-allow');
+    expect(s1!.known_false_block).toBe(true);
+    const c1 = classifyActionAuthKind(s1!.claim, s1!.evidence);
+    expect(c1.action_kind).toBe('informational');
+    expect(c1.mandate_kind).toBe('deploy_ship');
+    expect(c1.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c1.action_kind, c1.mandate_kind)).toBe(false);
+    expect(hasPositiveShipInstruction(s1!.evidence)).toBe(true);
+
+    const s2 = suite.scenarios.find((row) => row.id === 'kfb-02-pay-incidental-deploy-fyi');
+    expect(s2).toBeDefined();
+    expect(s2!.expect).toBe('not-allow');
+    expect(s2!.known_false_block).toBe(true);
+    const c2 = classifyActionAuthKind(s2!.claim, s2!.evidence);
+    expect(c2.action_kind).toBe('informational');
+    expect(c2.mandate_kind).toBe('value_transfer');
+    expect(c2.objective_mismatch).toBe(true);
+    expect(informationalActionMayPublicAllow(c2.action_kind, c2.mandate_kind)).toBe(false);
+    expect(hasPositiveShipInstruction(s2!.evidence)).toBe(true);
   });
 
   it('MCP auth-claim variants use production suffix and stay kind-stable (issue #62)', () => {
