@@ -391,5 +391,6 @@ if (isMain()) {
   const report = await runSuite({ dryRun });
   if (report?.missingKey) process.exit(2);
   if (dryRun) process.exit(0);
-  process.exit(report?.gate?.exitCode ?? 1);
+  // report.gate uses snake_case exit_code (see JSON payload above).
+  process.exit(report?.gate?.exit_code ?? report?.gate?.exitCode ?? 1);
 }
