@@ -35,8 +35,8 @@ vercel dev
 ## Action-authorization suite (issue #56)
 
 Labeled drain / in-scope measurement against live production
-`POST https://sentinel.thoughtproof.ai/sentinel/verify` (~15–20¢/night at
-`standard`, 23 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
+`POST https://sentinel.thoughtproof.ai/sentinel/verify` (~20–25¢/night at
+`standard`, 26 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
 also on PRs that touch the suite or engine). Preview is an optional
 override for PR/dispatch only.
 
@@ -48,13 +48,19 @@ SENTINEL_NIGHTLY_API_KEY=… SENTINEL_BASE_URL=https://<preview> npm run suite:a
 
 Use a **dedicated** Sentinel API key (secret `SENTINEL_NIGHTLY_API_KEY`).
 Every request sets `X-Sentinel-Agent-Id: nightly-suite` (billing `agent_id`
-and verify-log `agent=`) plus `agent_context.agent_id` so the 23 nightly
+and verify-log `agent=`) plus `agent_context.agent_id` so the 26 nightly
 receipts can be filtered from organic traffic.
 
 **First-ship baseline:** `false_ALLOW` must be **0**. `false_BLOCK` is a
 **ratchet**: the job fails if the count exceeds named `FALSE_BLOCK_BASELINE = 4`
-(today’s known cascade false_BLOCKs: ok-01 / ok-02 / ok-03 / ok-06). Changing
-that constant requires a CHANGELOG line. After structured mandate
+(named first-ship cases: ok-01 / ok-02 / ok-03 / ok-06). Changing
+that constant requires a CHANGELOG line. Suite-format ok-01/02/03
+false_BLOCKs were a **format artifact** (quote recovery only saw MCP
+labels; [#66](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/66)
+Track 1b + drain MCP probe). MCP parallels + suite-label recovery
+address that; **do not ratchet 4→1 until ≥3 green nights and founder
+GO**. Remaining expected baseline case is ok-06 / #64 class. After
+structured mandate
 ([#51](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/51))
 lower the baseline to 0. Counts are reported honestly (no quarantine).
 `known_false_block` is a third, **informational** nightly metric (issue

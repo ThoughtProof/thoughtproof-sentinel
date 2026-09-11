@@ -39,6 +39,43 @@ export const ACTION_AUTHORIZATION_CLAIM_SUFFIX =
 /** Present only when the host quote is a proper excerpt (not the full mandate). */
 export const MCP_EVIDENCE_USER_MANDATE_LABEL = 'User mandate:';
 
+/**
+ * Suite-format evidence labels (scenarios/action-authorization-suite.json).
+ * Track 1b (#66): recovery that only saw MCP labels left suite ok-01/02/03
+ * quote-null → weakly_faithful@0.25. Same cases in MCP form ALLOW.
+ */
+export const SUITE_EVIDENCE_MANDATE_LABEL = 'USER INSTRUCTION:';
+export const SUITE_EVIDENCE_ACTION_LABEL = 'AGENT PROPOSED ACTION:';
+export const SUITE_EVIDENCE_REASONING_LABEL = 'AGENT REASONING:';
+export const SUITE_EVIDENCE_WALLET_LABEL = 'WALLET BALANCE:';
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Slice the text after `label` up to the next sibling label.
+ * Accepts newline-separated MCP blocks and same-line suite one-liners.
+ * Empty `nextLabels` means "rest of evidence".
+ */
+export function extractLabeledSection(
+  evidence: string,
+  label: string,
+  nextLabels: readonly string[],
+): string | null {
+  if (!evidence || !label) return null;
+  const labelRe = new RegExp(escapeRe(label), 'i');
+  const m = evidence.match(labelRe);
+  if (!m || m.index === undefined) return null;
+  const after = evidence.slice(m.index + m[0].length);
+  const next = nextLabels.map(escapeRe).filter(Boolean).join('|');
+  const cut = next
+    ? after.search(new RegExp(`(?:\\n|\\s+)(?:${next})`, 'i'))
+    : -1;
+  const raw = (cut === -1 ? after : after.slice(0, cut)).trim();
+  return raw || '';
+}
+
 export const PROVENANCE_DOWNGRADE_STAMP =
   '[PROVENANCE DOWNGRADE: quote invalid or missing]';
 export const RECOVERED_MANDATE_NOTE =
@@ -208,10 +245,9 @@ export function isEvidenceSubstring(quote: string, evidence: string): boolean {
 }
 
 /**
- * Extract the MCP-embedded mandate span from evidence.
+ * Extract a citeable mandate span from evidence.
  *
- * Format (thoughtproof-mcp `buildSentinelEvidence`, undeclared until this
- * module — labels are the contract):
+ * Prefers the MCP-embedded span (thoughtproof-mcp `buildSentinelEvidence`):
  *
  *   Principal mandate (verbatim quote):
  *   <mandate or qualifying host quote>
@@ -219,26 +255,27 @@ export function isEvidenceSubstring(quote: string, evidence: string): boolean {
  *   Proposed action:
  *   …
  *
+ * Falls back to suite labels (`USER INSTRUCTION:` / `AGENT PROPOSED ACTION:`
+ * / `WALLET BALANCE:`) so non-MCP hosts recover the same cite (#66 Track 1b).
+ * Same-line suite one-liners are cut before wallet / proposed-action so the
+ * recovered quote is the mandate, not the whole blob.
+ *
  * No character-count floor. MCP's 20-char rule is host-excerpt fallback
  * only (review suggestion that landed as HOST_QUOTE_MIN_CHARS on the
  * optional host `quote`, not on the embedded span).
  */
 export function extractMandateVerbatimQuote(evidence: string): string | null {
   if (!evidence) return null;
-  const labelRe = new RegExp(
-    MCP_EVIDENCE_MANDATE_LABEL.replace(/[()]/g, '\\$&'),
-    'i',
-  );
-  const labelMatch = evidence.match(labelRe);
-  if (!labelMatch || labelMatch.index === undefined) return null;
-  const after = evidence.slice(labelMatch.index + labelMatch[0].length);
-  const cut = after.search(
-    new RegExp(
-      `\\n(?:${MCP_EVIDENCE_ACTION_LABEL}|${MCP_EVIDENCE_REASONING_LABEL})`,
-      'i',
-    ),
-  );
-  const raw = (cut === -1 ? after : after.slice(0, cut)).trim();
+  const mcp = extractLabeledSection(evidence, MCP_EVIDENCE_MANDATE_LABEL, [
+    MCP_EVIDENCE_ACTION_LABEL,
+    MCP_EVIDENCE_REASONING_LABEL,
+  ]);
+  const suite = extractLabeledSection(evidence, SUITE_EVIDENCE_MANDATE_LABEL, [
+    SUITE_EVIDENCE_WALLET_LABEL,
+    SUITE_EVIDENCE_ACTION_LABEL,
+    SUITE_EVIDENCE_REASONING_LABEL,
+  ]);
+  const raw = mcp || suite;
   if (!raw) return null;
   const m = matchEvidenceQuote(raw, evidence);
   return m.matched && m.span ? m.span : null;

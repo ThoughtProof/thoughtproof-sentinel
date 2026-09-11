@@ -82,10 +82,15 @@
 import type { AuthorizationMandate } from './authorization-gate.js';
 import { allowanceLooksUnlimited } from './authorization-gate.js';
 import {
+  extractLabeledSection,
   MCP_EVIDENCE_ACTION_LABEL,
   MCP_EVIDENCE_MANDATE_LABEL,
   MCP_EVIDENCE_REASONING_LABEL,
   MCP_EVIDENCE_USER_MANDATE_LABEL,
+  SUITE_EVIDENCE_ACTION_LABEL,
+  SUITE_EVIDENCE_MANDATE_LABEL,
+  SUITE_EVIDENCE_REASONING_LABEL,
+  SUITE_EVIDENCE_WALLET_LABEL,
 } from '../step-quote-provenance.js';
 
 export const ACTION_KINDS = [
@@ -237,37 +242,18 @@ const MONEY_CONTEXT_RE =
 const NOTIFY_OBJECT_RE =
   /\b(?:notify(?:ing)?|tell(?:ing)?|inform(?:iere|ieren|iert)?|fyi(?:\s+to)?|info|status|r[uü]ckmeldung|bescheid)\s+(?:an?\s+|an\s+)?([^\n,.;:]+?)(?=\s+(?:that|about|host|issue|status|we|the\s+|to\s+|for\b|über|zum|zur|dass)\b|\s*[.,;:]|$)/gi;
 
-function escapeRe(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /** Neutralize every caller `structural_fact:` (prefix + rest of line). */
 export function sanitizeCallerStructuralFacts(text: string): string {
   if (!text) return text ?? '';
   return text.replace(CALLER_STRUCTURAL_FACT_RE, CALLER_STRUCTURAL_FACT_REDACTION);
 }
 
-function sectionAfter(
-  evidence: string,
-  label: string,
-  nextLabels: string[],
-): string | null {
-  const labelRe = new RegExp(escapeRe(label), 'i');
-  const m = evidence.match(labelRe);
-  if (!m || m.index === undefined) return null;
-  const after = evidence.slice(m.index + m[0].length);
-  const next = nextLabels.map(escapeRe).join('|');
-  const cut = after.search(new RegExp(`\\n(?:${next})`, 'i'));
-  const raw = (cut === -1 ? after : after.slice(0, cut)).trim();
-  return raw || '';
-}
-
 export function splitActionAuthEvidence(evidence: string): ActionAuthSections {
-  const mcpMandate = sectionAfter(evidence, MCP_EVIDENCE_MANDATE_LABEL, [
+  const mcpMandate = extractLabeledSection(evidence, MCP_EVIDENCE_MANDATE_LABEL, [
     MCP_EVIDENCE_ACTION_LABEL,
     MCP_EVIDENCE_REASONING_LABEL,
   ]);
-  const mcpAction = sectionAfter(evidence, MCP_EVIDENCE_ACTION_LABEL, [
+  const mcpAction = extractLabeledSection(evidence, MCP_EVIDENCE_ACTION_LABEL, [
     MCP_EVIDENCE_REASONING_LABEL,
     'Context:',
   ]);
@@ -275,7 +261,7 @@ export function splitActionAuthEvidence(evidence: string): ActionAuthSections {
     // thoughtproof-mcp puts the full instruction under `User mandate:` when
     // the host quote is a proper excerpt. Classification must use the full
     // instruction, not only the provenance span.
-    const userMandate = sectionAfter(evidence, MCP_EVIDENCE_USER_MANDATE_LABEL, [
+    const userMandate = extractLabeledSection(evidence, MCP_EVIDENCE_USER_MANDATE_LABEL, [
       MCP_EVIDENCE_MANDATE_LABEL,
       MCP_EVIDENCE_ACTION_LABEL,
     ]);
@@ -283,24 +269,24 @@ export function splitActionAuthEvidence(evidence: string): ActionAuthSections {
       mandate: userMandate ? userMandate : mcpMandate,
       action: mcpAction,
       reasoning:
-        sectionAfter(evidence, MCP_EVIDENCE_REASONING_LABEL, ['Context:']) ?? '',
+        extractLabeledSection(evidence, MCP_EVIDENCE_REASONING_LABEL, ['Context:']) ?? '',
       source: 'mcp',
     };
   }
 
-  const suiteMandate = sectionAfter(evidence, 'USER INSTRUCTION:', [
-    'AGENT PROPOSED ACTION:',
-    'AGENT REASONING:',
-    'WALLET BALANCE:',
+  const suiteMandate = extractLabeledSection(evidence, SUITE_EVIDENCE_MANDATE_LABEL, [
+    SUITE_EVIDENCE_ACTION_LABEL,
+    SUITE_EVIDENCE_REASONING_LABEL,
+    SUITE_EVIDENCE_WALLET_LABEL,
   ]);
-  const suiteAction = sectionAfter(evidence, 'AGENT PROPOSED ACTION:', [
-    'AGENT REASONING:',
+  const suiteAction = extractLabeledSection(evidence, SUITE_EVIDENCE_ACTION_LABEL, [
+    SUITE_EVIDENCE_REASONING_LABEL,
   ]);
   if (suiteMandate !== null && suiteAction !== null) {
     return {
       mandate: suiteMandate,
       action: suiteAction,
-      reasoning: sectionAfter(evidence, 'AGENT REASONING:', []) ?? '',
+      reasoning: extractLabeledSection(evidence, SUITE_EVIDENCE_REASONING_LABEL, []) ?? '',
       source: 'suite',
     };
   }
@@ -432,11 +418,19 @@ function parseNotionalToken(raw: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Drop wallet-balance and trailing proposed-action so suite one-liners do not inflate the mandate notional. */
+/**
+ * Drop wallet-balance and trailing proposed-action / reasoning so one-liners
+ * and pasted MCP blobs do not inflate the mandate notional or authorize a
+ * recipient that only appears in the action (#66 spend-span).
+ */
 function mandateSpendSpan(text: string): string {
-  return text
-    .replace(/WALLET BALANCE:[^\n]*/gi, ' ')
-    .split(/\n?\s*AGENT PROPOSED ACTION:/i)[0] ?? text;
+  return (
+    text
+      .replace(/WALLET BALANCE:[^\n]*/gi, ' ')
+      .split(
+        /\n?\s*(?:AGENT PROPOSED ACTION:|Proposed action:|AGENT REASONING:|Agent reasoning:)/i,
+      )[0] ?? text
+  ).trim();
 }
 
 function firstSpendNotional(text: string): number | null {
