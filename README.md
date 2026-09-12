@@ -8,7 +8,9 @@ Agentic verification API — lightweight verification for autonomous agent workf
 |-------|--------|-------------|
 | `/sentinel/health` | GET | Liveness (`ok`) + readiness (`ready`, `serv_key`, `rate_limit`). `rate_limit: "redis"` means Upstash env is configured, not connectivity-checked. |
 | `/sentinel/tiers` | GET | Tier discovery |
-| `/sentinel/verify` | POST | Verification (501 until engine wired) |
+| `/sentinel/verify` | POST | Verification; optional `signed_export` when export key env is set (M1) |
+| `/.well-known/thoughtproof-keys.json` | GET | Ed25519 pubs for M1 signed canonical export (pin URL + kid OOB) |
+| `/.well-known/validation-keys.json` | GET | Public keys for ERC-8004-style validation artifacts |
 | `/openapi.json` | GET | Live OpenAPI 3.1 document |
 | `/docs` | GET | Swagger UI over `/openapi.json` |
 | `/redoc` | GET | ReDoc over `/openapi.json` |

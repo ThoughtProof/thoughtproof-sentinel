@@ -1,0 +1,41 @@
+{
+  "schema": "thoughtproof.keys.v1",
+  "issuer": "ThoughtProof",
+  "issuerUrl": "https://thoughtproof.ai",
+  "purpose": "Ed25519 public keys for ThoughtProof Sentinel M1 signed canonical export (thoughtproof.sentinel.export.v1). Receivers must pin this URL and kid out-of-band; the document alone is not a trust root.",
+  "keys": [
+    {
+      "kid": "tp-sentinel-export-ed25519-2026-09",
+      "alg": "Ed25519",
+      "publicKey": "22e3124d0328c3068fdf268e9a57fdba79190158ef73d33038eaa5b970a3143b",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAIuMSTQMowwaP3yaOmlf9unkZAVjvc9MwOOqluXCjFDs=\n-----END PUBLIC KEY-----\n",
+      "notBefore": "2026-09-12T00:00:00Z",
+      "notAfter": null,
+      "status": "active",
+      "usage": "Sign sentinel.verdict.canonical.v1 export envelopes (M1). Not EAS attester. Not X-Sentinel-Key."
+    }
+  ],
+  "export": {
+    "domain": "thoughtproof.sentinel.export.v1",
+    "signedInput": "UTF-8(domain) || 0x00 || JCS({artifactSchema,verificationId,canonical,digest,keyId,alg,signedAt,validUntil?})",
+    "canonicalDigest": "0x || sha256(UTF-8(transported canonical JCS string)) — do not re-JCS an object",
+    "signature": "Ed25519 detached over signedInput; wire encoding 0x + lowercase hex (64 bytes)",
+    "commitmentNamespace": "thoughtproof.sentinel-decision.v1",
+    "algorithm": "sha256"
+  },
+  "verify": {
+    "wellKnown": "https://sentinel.thoughtproof.ai/.well-known/thoughtproof-keys.json",
+    "script": "https://raw.githubusercontent.com/ThoughtProof/thoughtproof-sentinel/main/scripts/verify-canonical-export.mjs",
+    "local": "node scripts/verify-canonical-export.mjs <export.json> [--keys path|url]"
+  },
+  "rotation": [
+    "Publish new kid before first use.",
+    "Never delete old keys from this document — set notAfter (and status=retired) instead.",
+    "Receivers pin URL + kid set out-of-band."
+  ],
+  "notes": [
+    "M1 vector / pilot key — rotate for production with a new kid; keep this kid listed with notAfter after cutover.",
+    "Private key is never published. Production signing uses env SENTINEL_EXPORT_PRIVATE_KEY + SENTINEL_EXPORT_KEY_ID.",
+    "EAS attester and API keys are different trust roots and must not be substituted for this export key."
+  ]
+}

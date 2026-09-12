@@ -15,6 +15,14 @@
       "destination": "/api/well-known/validation-keys"
     },
     {
+      "source": "/.well-known/thoughtproof-keys.json",
+      "destination": "/api/well-known/thoughtproof-keys"
+    },
+    {
+      "source": "/.well-known/thoughtproof-keys",
+      "destination": "/api/well-known/thoughtproof-keys"
+    },
+    {
       "source": "/.well-known/intuition/erc8004/agents/:chainId/:tokenId/trust-assessment.json",
       "destination": "/api/well-known/intuition/erc8004/agents/[chainId]/[tokenId]/trust-assessment?chainId=:chainId&tokenId=:tokenId"
     },
