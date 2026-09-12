@@ -8,7 +8,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "dev": "echo 'Use: npx vercel dev --listen 3001'",
-    "suite:action-auth": "node scripts/action-authorization-suite.mjs"
+    "suite:action-auth": "node scripts/action-authorization-suite.mjs",
+    "docs:sri": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/verify-docs-cdn-sri.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

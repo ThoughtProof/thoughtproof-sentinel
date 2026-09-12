@@ -32,6 +32,9 @@
 #   remaining named baseline case is primarily ok-06 (#64 class).
 #   Not a permanent soft-pass. Changing the constant requires a
 #   CHANGELOG line. After #51 lower baseline to 0.
+#   Nightly also GETs DOCS_CDN unpkg pins and checks sha384(bytes)
+#   against src/openapi-docs.ts (job docs-cdn-sri). Schedule / dispatch
+#   only — not PR CI (network flake). Does not touch the suite gate.
 #   known_false_block is printed every night and does not enter this
 #   gate — do not raise FALSE_BLOCK_BASELINE to hide those fixtures (#64).
 #   Each kfb fixture requires since (YYYY-MM-DD). After 7 nights,
@@ -82,6 +85,22 @@ permissions:
   contents: read
 
 jobs:
+  docs-cdn-sri:
+    name: Docs CDN SRI bytes (DOCS_CDN vs unpkg)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify unpkg SRI matches DOCS_CDN
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --disable-warning=ExperimentalWarning \
+            scripts/verify-docs-cdn-sri.ts
+
   suite:
     name: Live suite (false_ALLOW / false_BLOCK / known_false_block)
     runs-on: ubuntu-latest

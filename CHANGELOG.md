@@ -1,6 +1,7 @@
 ## Unreleased
 
 ### Added
+- **Nightly docs CDN SRI:** cron / dispatch verifies unpkg bytes against `DOCS_CDN` sha384 pins.
 - **Published API docs (`/docs`, `/redoc`):** lightweight Swagger UI
   and ReDoc pages that load the live `/openapi.json`. Prod previously
   404'd both paths (Vercel `NOT_FOUND`) while the spec itself worked.

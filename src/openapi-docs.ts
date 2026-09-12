@@ -4,7 +4,9 @@
  *
  * CDN scripts are exact-version pins with sha384 SRI (computed 2026-09-12
  * from the bytes unpkg served for these versions). Do not float majors.
- * Users may paste X-Sentinel-Key into Swagger Try-it-out.
+ * Nightly `scripts/verify-docs-cdn-sri.ts` GETs these URLs and checks
+ * sha384(bytes) === integrity. Users may paste X-Sentinel-Key into
+ * Swagger Try-it-out.
  */
 
 export const OPENAPI_SPEC_URL = '/openapi.json';
