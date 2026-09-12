@@ -78,3 +78,20 @@ Regenerate: `node scripts/gen-m1-export-vectors.mjs`
 - Envelope \`validUntil\` is checked against the **verifier clock** (\`--now\`).
 - Prod \`notBefore\` = first publish day (\`2026-09-12\`); vector entry may use an earlier nbf for fixture \`signedAt\`.
 
+## Production live export
+
+| File | Expect |
+|---|---|
+| `export-prod-live.json` | **ok without any flag** against live keys URL — kid `tp-sentinel-export-ed25519-2026-09` (active) |
+
+```bash
+node scripts/verify-canonical-export.mjs scripts/fixtures/m1-export/export-prod-live.json \
+  --keys https://sentinel.thoughtproof.ai/.well-known/thoughtproof-keys.json
+# no --allow-vector-only
+```
+
+Fetched via real `POST /sentinel/verify` (prod signer). Meta: `export-prod-live-meta.json`.  
+`validUntil` may expire (TTL); re-fetch with `node scripts/fetch-m1-prod-export.mjs` if needed.
+
+Fixtures (vector kid) need `--allow-vector-only`. Production export does **not**.
+
