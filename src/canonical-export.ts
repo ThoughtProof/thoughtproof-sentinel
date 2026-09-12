@@ -24,14 +24,18 @@
  * (`hashCanonicalSentinelVerdict`) — PriorSeal commits to decision bytes,
  * not the whole export envelope.
  *
- * Verification order:
- *   1. verify envelope signature over signed_input with pinned keyId
- *   2. recompute sha256 over transported `canonical` string (do NOT re-JCS)
- *   3. require `digest` field equals recompute
- *   4. unique PriorSeal namespace match on that digest (receiver)
- *   5. if validUntil present in signed envelope, apply expiry
+ * Verification order (PriorSeal receiver §4 / portable script):
+ *   1. resolve keyId against pinned key doc (status/notBefore/notAfter)
+ *   2. verify envelope signature over signed_input with that public key
+ *   3. recompute sha256 over transported `canonical` string (do NOT re-JCS)
+ *   4. require `digest` field equals recompute
+ *   5. unique PriorSeal namespace match on that digest (receiver)
+ *   6. if validUntil present in signed envelope, apply expiry
  *
- * Pure crypto helpers here. I/O (env key load, well-known doc) is separate.
+ * Library helper `verifySignedCanonicalExport` assumes the caller already
+ * resolved/pinned the public key; it still checks signature before digest.
+ *
+ * Crypto helpers + key-doc boot check live here. Health surfaces readiness.
  */
 import {
   createHash,
@@ -42,6 +46,8 @@ import {
   verify as cryptoVerify,
   type KeyObject,
 } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - canonicalize types are loose; runtime export is the function
 import canonicalize from 'canonicalize';
@@ -70,7 +76,10 @@ export const EXPORT_KEY_ID_ENV = 'SENTINEL_EXPORT_KEY_ID';
  */
 export const EXPORT_TTL_SECONDS_ENV = 'SENTINEL_EXPORT_TTL_SECONDS';
 
-const DEFAULT_KEY_ID = 'tp-sentinel-export-ed25519-2026-09';
+export const DEFAULT_KEY_ID = 'tp-sentinel-export-ed25519-2026-09';
+
+/** Optional override path to thoughtproof-keys.json (tests). */
+export const EXPORT_KEYS_PATH_ENV = 'SENTINEL_EXPORT_KEYS_PATH';
 
 /** Vector-only kid (fixtures). Never the default production signer. */
 export const VECTOR_KEY_ID = 'tp-sentinel-export-ed25519-2026-09-vector';
@@ -222,11 +231,17 @@ export function publicKeyPem(publicKey: KeyObject): string {
   return publicKey.export({ type: 'spki', format: 'pem' }) as string;
 }
 
+/** OKP JWK `x` (base64url, unpadded) for an Ed25519 public key. */
+export function publicKeyOkpX(publicKey: KeyObject): string {
+  return Buffer.from(publicKeyRawHex(publicKey), 'hex').toString('base64url');
+}
+
 export function generateExportKeyPair(): {
   publicKey: KeyObject;
   privateKey: KeyObject;
   publicKeyHex: string;
   publicKeyPem: string;
+  publicKeyOkpX: string;
 } {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
   return {
@@ -234,17 +249,254 @@ export function generateExportKeyPair(): {
     privateKey,
     publicKeyHex: publicKeyRawHex(publicKey),
     publicKeyPem: publicKeyPem(publicKey),
+    publicKeyOkpX: publicKeyOkpX(publicKey),
+  };
+}
+
+export interface ThoughtproofKeyEntry {
+  kid?: string;
+  keyId?: string;
+  kty?: string;
+  crv?: string;
+  x?: string;
+  alg?: string;
+  status?: string;
+  notBefore?: string | null;
+  notAfter?: string | null;
+  publicKey?: string;
+  publicKeyPem?: string;
+}
+
+export interface ThoughtproofKeysDoc {
+  schema?: string;
+  keys?: ThoughtproofKeyEntry[];
+}
+
+export type ExportSignerMatch =
+  | 'ok'
+  | 'missing_env'
+  | 'unusable_key'
+  | 'vector_kid_forbidden'
+  | 'key_doc_missing'
+  | 'key_doc_entry_missing'
+  | 'not_active_in_doc'
+  | 'pubkey_mismatch'
+  | 'key_not_yet_valid'
+  | 'key_expired';
+
+export interface ExportSignerReadiness {
+  /** Env private key material present. */
+  configured: boolean;
+  /** Safe to sign production exports. */
+  ready: boolean;
+  keyId: string | null;
+  match: ExportSignerMatch;
+  /** Derived OKP x from env private key (never the private material). */
+  derivedX?: string;
+  /** Published OKP x for keyId when found. */
+  publishedX?: string;
+  detail?: string;
+}
+
+function defaultKeysPath(): string {
+  return join(process.cwd(), 'data', 'thoughtproof-keys.json');
+}
+
+export function resolveKeysDocPath(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env[EXPORT_KEYS_PATH_ENV];
+  if (override && override.trim()) return override.trim();
+  return defaultKeysPath();
+}
+
+export function loadThoughtproofKeysDoc(
+  path: string = defaultKeysPath(),
+): ThoughtproofKeysDoc | null {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as ThoughtproofKeysDoc;
+  } catch {
+    return null;
+  }
+}
+
+export function findKeyEntry(
+  doc: ThoughtproofKeysDoc | null,
+  keyId: string,
+): ThoughtproofKeyEntry | null {
+  if (!doc?.keys) return null;
+  return (
+    doc.keys.find((k) => k.kid === keyId || k.keyId === keyId) ?? null
+  );
+}
+
+function unixFromIso(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const n = Math.floor(new Date(iso).getTime() / 1000);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Boot / health check: env private key must derive the published active OKP x
+ * for the configured kid. Mismatch → not ready (do not sign).
+ */
+export function getExportSignerReadiness(
+  env: NodeJS.ProcessEnv = process.env,
+  opts: { keysPath?: string; nowSeconds?: number } = {},
+): ExportSignerReadiness {
+  const raw = env[EXPORT_PRIVATE_KEY_ENV];
+  if (!raw || !raw.trim()) {
+    return { configured: false, ready: false, keyId: null, match: 'missing_env' };
+  }
+
+  let privateKey: KeyObject;
+  try {
+    privateKey = resolvePrivateKey(raw);
+  } catch (err) {
+    return {
+      configured: true,
+      ready: false,
+      keyId: null,
+      match: 'unusable_key',
+      detail: err instanceof Error ? err.message : 'private key parse failed',
+    };
+  }
+
+  const keyId = (env[EXPORT_KEY_ID_ENV] || DEFAULT_KEY_ID).trim() || DEFAULT_KEY_ID;
+  if (keyId === VECTOR_KEY_ID) {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'vector_kid_forbidden',
+      detail: 'vector-only kid must never sign production exports',
+      derivedX: publicKeyOkpX(createPublicKey(privateKey)),
+    };
+  }
+
+  let derivedX: string;
+  try {
+    derivedX = publicKeyOkpX(createPublicKey(privateKey));
+  } catch (err) {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'unusable_key',
+      detail: err instanceof Error ? err.message : 'public derive failed',
+    };
+  }
+
+  const keysPath = opts.keysPath ?? resolveKeysDocPath(env);
+  const doc = loadThoughtproofKeysDoc(keysPath);
+  if (!doc) {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'key_doc_missing',
+      derivedX,
+      detail: `cannot read keys doc at ${keysPath}`,
+    };
+  }
+
+  const entry = findKeyEntry(doc, keyId);
+  if (!entry) {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'key_doc_entry_missing',
+      derivedX,
+      detail: `kid not in keys doc: ${keyId}`,
+    };
+  }
+
+  if ((entry.status || 'active') !== 'active') {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'not_active_in_doc',
+      derivedX,
+      publishedX: entry.x,
+      detail: `published status=${entry.status}`,
+    };
+  }
+
+  if (!entry.x || typeof entry.x !== 'string') {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'key_doc_entry_missing',
+      derivedX,
+      detail: 'active entry missing OKP x',
+    };
+  }
+
+  if (entry.x !== derivedX) {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'pubkey_mismatch',
+      derivedX,
+      publishedX: entry.x,
+      detail: 'env private key does not match published active OKP x — refusing to sign',
+    };
+  }
+
+  const now = opts.nowSeconds ?? Math.floor(Date.now() / 1000);
+  const nbf = unixFromIso(entry.notBefore ?? null);
+  if (nbf !== null && now < nbf) {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'key_not_yet_valid',
+      derivedX,
+      publishedX: entry.x,
+      detail: `now=${now} notBefore=${nbf}`,
+    };
+  }
+  const exp = unixFromIso(entry.notAfter ?? null);
+  if (exp !== null && now > exp) {
+    return {
+      configured: true,
+      ready: false,
+      keyId,
+      match: 'key_expired',
+      derivedX,
+      publishedX: entry.x,
+      detail: `now=${now} notAfter=${exp}`,
+    };
+  }
+
+  return {
+    configured: true,
+    ready: true,
+    keyId,
+    match: 'ok',
+    derivedX,
+    publishedX: entry.x,
   };
 }
 
 /**
  * Issue a signed export from a canonical body (or response).
  * Does not mutate the canonical body; validUntil is envelope-only.
+ * Refuses VECTOR_KEY_ID — vector-only is fixture material only.
  */
 export function issueSignedCanonicalExport(
   source: CanonicalSentinelVerdictBody | SentinelVerifyResponse,
   options: IssueExportOptions,
 ): SignedCanonicalExport {
+  const keyId = options.keyId ?? DEFAULT_KEY_ID;
+  if (keyId === VECTOR_KEY_ID) {
+    throw new Error(
+      `refusing to sign with vector-only kid ${VECTOR_KEY_ID} — use fixture generator, not production issue path`,
+    );
+  }
+
   const body: CanonicalSentinelVerdictBody =
     'artifactSchema' in source && source.artifactSchema === 'sentinel.verdict.canonical.v1'
       ? source
@@ -252,14 +504,12 @@ export function issueSignedCanonicalExport(
 
   const canonical = serializeCanonicalSentinelVerdict(body);
   const digest = hashCanonicalSentinelVerdict(body);
-  // Defense: digest must equal hash of transported string
   const transported = digestTransportedCanonical(canonical);
   if (digest !== transported) {
     throw new Error('internal digest mismatch between body hash and transported canonical');
   }
 
   const signedAt = options.nowSeconds ?? Math.floor(Date.now() / 1000);
-  const keyId = options.keyId ?? DEFAULT_KEY_ID;
   const fields: CanonicalExportSignedFields = {
     artifactSchema: body.artifactSchema,
     verificationId: body.verificationId,
@@ -286,8 +536,9 @@ export function issueSignedCanonicalExport(
 }
 
 /**
- * Verify a signed export against a pinned public key.
- * Does NOT fetch keys — caller supplies the pin.
+ * Verify a signed export against a caller-pinned public key.
+ * Order: structural checks → signature → digest → validUntil.
+ * (Key resolution is the caller's job; portable script does resolve → sig → digest.)
  */
 export function verifySignedCanonicalExport(
   exportArtifact: SignedCanonicalExport | Record<string, unknown>,
@@ -302,8 +553,7 @@ export function verifySignedCanonicalExport(
     typeof e.keyId !== 'string' ||
     typeof e.verificationId !== 'string' ||
     typeof e.artifactSchema !== 'string' ||
-    typeof e.signedAt !== 'number' ||
-    e.alg !== EXPORT_ALG
+    typeof e.signedAt !== 'number'
   ) {
     return { ok: false, code: 'missing_fields', detail: 'required export fields missing or wrong type' };
   }
@@ -312,17 +562,6 @@ export function verifySignedCanonicalExport(
   }
   if (!/^0x[0-9a-f]{64}$/.test(e.digest)) {
     return { ok: false, code: 'bad_digest_format', detail: e.digest, keyId: e.keyId };
-  }
-
-  const recomputed = digestTransportedCanonical(e.canonical);
-  if (recomputed !== e.digest) {
-    return {
-      ok: false,
-      code: 'digest_mismatch',
-      detail: 'transported canonical bytes ≠ digest field (DECISION_COMMITMENT_DIGEST_MISMATCH)',
-      recomputedDigest: recomputed,
-      keyId: e.keyId,
-    };
   }
 
   const fields: CanonicalExportSignedFields = {
@@ -367,6 +606,7 @@ export function verifySignedCanonicalExport(
     };
   }
 
+  // Signature before digest (aligned with PriorSeal §4 / portable verifier).
   const signedInput = buildExportSignedInput(fields);
   const sigOk = cryptoVerify(
     null,
@@ -378,7 +618,17 @@ export function verifySignedCanonicalExport(
     return {
       ok: false,
       code: 'signature_invalid',
-      detail: 'Ed25519 verify failed over domain||0x00||JCS(fields)',
+      detail: 'Ed25519 verify failed over domain||0x00||JCS(fields) (DECISION_SIGNATURE_INVALID)',
+      keyId: e.keyId,
+    };
+  }
+
+  const recomputed = digestTransportedCanonical(e.canonical);
+  if (recomputed !== e.digest) {
+    return {
+      ok: false,
+      code: 'digest_mismatch',
+      detail: 'transported canonical bytes ≠ digest field (DECISION_COMMITMENT_DIGEST_MISMATCH)',
       recomputedDigest: recomputed,
       keyId: e.keyId,
     };
@@ -408,18 +658,58 @@ export interface LoadedExportSigner {
   ttlSeconds?: number;
 }
 
+export interface LoadExportSignerOptions {
+  /**
+   * When true (default), require env key → published active OKP x match.
+   * Unit tests may set false to exercise crypto without a keys doc fixture.
+   */
+  requirePublishedMatch?: boolean;
+  keysPath?: string;
+  nowSeconds?: number;
+}
+
 /**
- * Load signer from process env. Returns null when not configured
+ * Load signer from process env. Returns null when not configured or boot check fails
  * (verify path stays byte-compatible — no signed_export field).
  */
 export function loadExportSignerFromEnv(
   env: NodeJS.ProcessEnv = process.env,
+  opts: LoadExportSignerOptions = {},
 ): LoadedExportSigner | null {
+  const requireMatch = opts.requirePublishedMatch !== false;
+  if (requireMatch) {
+    const readiness = getExportSignerReadiness(env, {
+      keysPath: opts.keysPath,
+      nowSeconds: opts.nowSeconds,
+    });
+    if (!readiness.ready) {
+      if (readiness.configured) {
+        console.error(
+          `[canonical-export] export signer not ready: match=${readiness.match}` +
+            (readiness.detail ? ` detail=${readiness.detail}` : ''),
+        );
+      }
+      return null;
+    }
+  } else {
+    const raw = env[EXPORT_PRIVATE_KEY_ENV];
+    if (!raw || !raw.trim()) return null;
+    const keyId = (env[EXPORT_KEY_ID_ENV] || DEFAULT_KEY_ID).trim() || DEFAULT_KEY_ID;
+    if (keyId === VECTOR_KEY_ID) {
+      console.error('[canonical-export] refusing VECTOR_KEY_ID even with requirePublishedMatch=false');
+      return null;
+    }
+  }
+
   const raw = env[EXPORT_PRIVATE_KEY_ENV];
   if (!raw || !raw.trim()) return null;
   try {
     const privateKey = resolvePrivateKey(raw);
     const keyId = (env[EXPORT_KEY_ID_ENV] || DEFAULT_KEY_ID).trim() || DEFAULT_KEY_ID;
+    if (keyId === VECTOR_KEY_ID) {
+      console.error('[canonical-export] refusing VECTOR_KEY_ID');
+      return null;
+    }
     const ttlRaw = env[EXPORT_TTL_SECONDS_ENV];
     let ttlSeconds: number | undefined;
     if (ttlRaw !== undefined && String(ttlRaw).trim() !== '') {
@@ -437,7 +727,7 @@ export function loadExportSignerFromEnv(
 }
 
 /**
- * Issue export when signer configured; otherwise null (omit from response).
+ * Issue export when signer configured + boot-check ready; otherwise null.
  * Never throws into the verify path — signing failure is logged and omitted.
  */
 export function maybeIssueSignedExport(
@@ -445,7 +735,7 @@ export function maybeIssueSignedExport(
   env: NodeJS.ProcessEnv = process.env,
   nowSeconds?: number,
 ): SignedCanonicalExport | null {
-  const signer = loadExportSignerFromEnv(env);
+  const signer = loadExportSignerFromEnv(env, { nowSeconds });
   if (!signer) return null;
   try {
     return issueSignedCanonicalExport(response, {

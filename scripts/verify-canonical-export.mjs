@@ -14,11 +14,14 @@
  * Key document: thoughtproof.keys.v1 (OKP + TP status extensions) — not pure JWKS.
  * JWK alg = EdDSA (JOSE). Envelope alg = Ed25519. Do not cross-compare them.
  *
- * Verification order (M1 contract):
- *   1. resolve keyId → OKP key; reject retired / vector-only (unless flag)
- *   2. Ed25519 verify domain||0x00||JCS(fields)
- *   3. sha256(UTF-8(transported canonical string)) === digest
+ * Verification order (PriorSeal §4):
+ *   1. resolve keyId against key doc (status / notBefore / notAfter)
+ *   2. Ed25519 verify domain||0x00||JCS(fields)  → DECISION_SIGNATURE_INVALID on fail
+ *   3. sha256(UTF-8(transported canonical)) === digest → DECISION_COMMITMENT_DIGEST_MISMATCH
  *   4. optional validUntil vs --now
+ *
+ * DECISION_SIGNER_UNTRUSTED is reserved for key_not_found / status / notBefore /
+ * notAfter / vector-only rejection — not for a broken signature on a known key.
  */
 import {
   createPublicKey,
@@ -33,7 +36,6 @@ const DEFAULT_KEYS =
   process.env.THOUGHTPROOF_KEYS_URL ||
   'https://sentinel.thoughtproof.ai/.well-known/thoughtproof-keys.json';
 
-/** Minimal JCS for flat objects with string/int values (export signed fields). */
 function jcsFlat(obj) {
   const keys = Object.keys(obj).sort();
   const parts = [];
@@ -72,18 +74,10 @@ function digestCanonical(canonical) {
   return '0x' + createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
-/**
- * Resolve public key from a thoughtproof.keys.v1 entry.
- * Preferred: OKP JWK { kty, crv, x }. Legacy PEM/hex accepted during transition.
- */
 function resolvePub(entry) {
   if (entry.kty === 'OKP' && entry.crv === 'Ed25519' && typeof entry.x === 'string') {
     return createPublicKey({
-      key: {
-        kty: 'OKP',
-        crv: 'Ed25519',
-        x: entry.x,
-      },
+      key: { kty: 'OKP', crv: 'Ed25519', x: entry.x },
       format: 'jwk',
     });
   }
@@ -99,18 +93,34 @@ function resolvePub(entry) {
   throw new Error('key entry missing OKP x (or legacy publicKeyPem/publicKey)');
 }
 
-/** status extensions: only `active` is production-trustworthy. */
-function keyUsable(entry, allowVectorOnly) {
+function keyUsable(entry, allowVectorOnly, now) {
   const status = entry.status || 'active';
   if (status === 'retired') {
-    return { ok: false, reason: 'key_retired' };
+    return { ok: false, reason: 'key_retired', code: 'DECISION_SIGNER_UNTRUSTED' };
   }
   if (status === 'vector-only') {
-    if (allowVectorOnly) return { ok: true };
-    return { ok: false, reason: 'vector_only_key_not_allowed' };
+    if (allowVectorOnly) {
+      // fall through to notBefore/notAfter
+    } else {
+      return { ok: false, reason: 'vector_only_key_not_allowed', code: 'DECISION_SIGNER_UNTRUSTED' };
+    }
+  } else if (status !== 'active') {
+    return { ok: false, reason: 'key_status_unusable', code: 'DECISION_SIGNER_UNTRUSTED', status };
   }
-  if (status === 'active') return { ok: true };
-  return { ok: false, reason: 'key_status_unusable', status };
+
+  if (entry.notBefore) {
+    const nbf = Math.floor(new Date(entry.notBefore).getTime() / 1000);
+    if (Number.isFinite(nbf) && now < nbf) {
+      return { ok: false, reason: 'key_not_yet_valid', code: 'DECISION_SIGNER_UNTRUSTED', nbf };
+    }
+  }
+  if (entry.notAfter) {
+    const until = Math.floor(new Date(entry.notAfter).getTime() / 1000);
+    if (Number.isFinite(until) && now > until) {
+      return { ok: false, reason: 'key_expired', code: 'DECISION_SIGNER_UNTRUSTED', until };
+    }
+  }
+  return { ok: true };
 }
 
 async function loadKeys(ref) {
@@ -172,31 +182,18 @@ async function main() {
       process.exit(2);
     }
   }
-  // Envelope alg is Ed25519 (primitive). Do not require equality with JWK alg EdDSA.
   if (artifact.alg !== 'Ed25519') {
     console.log(JSON.stringify({ ok: false, error: 'alg_unsupported', alg: artifact.alg }, null, 2));
     process.exit(2);
   }
-
-  const recomputed = digestCanonical(artifact.canonical);
-  if (recomputed !== artifact.digest) {
+  if (!/^0x[0-9a-f]{64}$/.test(artifact.digest)) {
     console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          error: 'digest_mismatch',
-          code: 'DECISION_COMMITMENT_DIGEST_MISMATCH',
-          digest: artifact.digest,
-          recomputedDigest: recomputed,
-          note: 'Verify against transported canonical string of the issued artifact — never a fresh /sentinel/verify',
-        },
-        null,
-        2,
-      ),
+      JSON.stringify({ ok: false, error: 'bad_digest_format', digest: artifact.digest }, null, 2),
     );
-    process.exit(4);
+    process.exit(2);
   }
 
+  // --- 1. Resolve key ---
   const { doc, source } = await loadKeys(args.keys);
   const entry = (doc.keys || []).find(
     (k) => k.kid === artifact.keyId || k.keyId === artifact.keyId,
@@ -218,14 +215,14 @@ async function main() {
     process.exit(3);
   }
 
-  const usable = keyUsable(entry, args.allowVectorOnly);
+  const usable = keyUsable(entry, args.allowVectorOnly, args.now);
   if (!usable.ok) {
     console.log(
       JSON.stringify(
         {
           ok: false,
           error: usable.reason,
-          code: 'DECISION_SIGNER_UNTRUSTED',
+          code: usable.code,
           keyId: artifact.keyId,
           status: entry.status || null,
           keys: source,
@@ -237,23 +234,24 @@ async function main() {
     process.exit(3);
   }
 
-  if (entry.notAfter) {
-    const until = Math.floor(new Date(entry.notAfter).getTime() / 1000);
-    if (Number.isFinite(until) && args.now > until) {
-      console.log(
-        JSON.stringify(
-          {
-            ok: false,
-            error: 'key_expired',
-            code: 'DECISION_SIGNER_UNTRUSTED',
-            keyId: artifact.keyId,
-          },
-          null,
-          2,
-        ),
-      );
-      process.exit(3);
-    }
+  let pub;
+  try {
+    pub = resolvePub(entry);
+  } catch (err) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: false,
+          error: 'key_unusable',
+          code: 'DECISION_SIGNER_UNTRUSTED',
+          detail: err instanceof Error ? err.message : String(err),
+          keyId: artifact.keyId,
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(3);
   }
 
   const fields = {
@@ -271,25 +269,7 @@ async function main() {
     process.exit(2);
   }
 
-  let pub;
-  try {
-    pub = resolvePub(entry);
-  } catch (err) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          error: 'key_unusable',
-          detail: err instanceof Error ? err.message : String(err),
-          keyId: artifact.keyId,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(3);
-  }
-
+  // --- 2. Signature ---
   const sigHex = String(artifact.signature).replace(/^0x/i, '');
   const signedInput = buildSignedInput(fields);
   const sigOk = cryptoVerify(null, signedInput, pub, Buffer.from(sigHex, 'hex'));
@@ -299,10 +279,10 @@ async function main() {
         {
           ok: false,
           error: 'signature_invalid',
-          code: 'DECISION_SIGNER_UNTRUSTED',
+          code: 'DECISION_SIGNATURE_INVALID',
           keyId: artifact.keyId,
           keys: source,
-          recomputedDigest: recomputed,
+          note: 'Canonical/envelope bytes changed after signing, or wrong key material for this kid — not an unpinned-signer class',
         },
         null,
         2,
@@ -311,6 +291,27 @@ async function main() {
     process.exit(5);
   }
 
+  // --- 3. Digest over transported canonical ---
+  const recomputed = digestCanonical(artifact.canonical);
+  if (recomputed !== artifact.digest) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: false,
+          error: 'digest_mismatch',
+          code: 'DECISION_COMMITMENT_DIGEST_MISMATCH',
+          digest: artifact.digest,
+          recomputedDigest: recomputed,
+          note: 'Verify against transported canonical string of the issued artifact — never a fresh /sentinel/verify',
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(4);
+  }
+
+  // --- 4. validUntil ---
   if (fields.validUntil !== undefined && args.now > fields.validUntil) {
     console.log(
       JSON.stringify(
@@ -343,6 +344,7 @@ async function main() {
         domain: DOMAIN,
         envelopeAlg: artifact.alg,
         jwkAlg: entry.alg || null,
+        verifyOrder: 'key_resolve → signature → digest → validUntil',
         note: 'envelope alg Ed25519 ≠ JWK alg EdDSA — do not cross-compare',
       },
       null,

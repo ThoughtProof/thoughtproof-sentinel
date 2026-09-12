@@ -2,7 +2,7 @@
   "schema": "thoughtproof.keys.v1",
   "issuer": "ThoughtProof",
   "issuerUrl": "https://thoughtproof.ai",
-  "purpose": "Public keys for verifying ThoughtProof Sentinel M1 signed canonical exports (thoughtproof.sentinel.export.v1). This is a ThoughtProof key document (OKP members + TP status extensions) — not a pure JWKS. Receivers pin this URL and kid set out-of-band; the document alone is not a trust root.",
+  "purpose": "Public keys for verifying ThoughtProof Sentinel M1 signed canonical exports (thoughtproof.sentinel.export.v1). This is a ThoughtProof key document (OKP members + TP status extensions) \u2014 not a pure JWKS. Receivers pin this URL and kid set out-of-band; the document alone is not a trust root.",
   "keys": [
     {
       "kty": "OKP",
@@ -11,7 +11,7 @@
       "kid": "tp-sentinel-export-ed25519-2026-09-vector",
       "alg": "EdDSA",
       "status": "vector-only",
-      "notBefore": "2026-09-12T00:00:00Z",
+      "notBefore": "2026-07-01T00:00:00Z",
       "notAfter": null,
       "usage": "Fixture / paired-vector signatures only. Private seed lives in scripts/gen-m1-export-vectors.mjs. NEVER used to sign production exports. Verifiers must reject this kid unless explicitly allowing vector-only keys."
     },
@@ -22,7 +22,7 @@
       "kid": "tp-sentinel-export-ed25519-2026-09",
       "alg": "EdDSA",
       "status": "active",
-      "notBefore": "2026-09-12T00:00:00Z",
+      "notBefore": "2026-07-01T00:00:00Z",
       "notAfter": null,
       "usage": "Production M1 export signatures. Private key ONLY via env SENTINEL_EXPORT_PRIVATE_KEY (never in repo). Not EAS attester. Not X-Sentinel-Key."
     }
@@ -32,7 +32,7 @@
     "domain": "thoughtproof.sentinel.export.v1",
     "signedInput": "UTF-8(domain) || 0x00 || JCS({artifactSchema,verificationId,canonical,digest,keyId,alg,signedAt,validUntil?})",
     "envelopeAlg": "Ed25519",
-    "canonicalDigest": "0x || sha256(UTF-8(transported canonical JCS string)) — do not re-JCS an object",
+    "canonicalDigest": "0x || sha256(UTF-8(transported canonical JCS string)) \u2014 do not re-JCS an object",
     "signature": "Ed25519 detached over signedInput; wire encoding 0x + lowercase hex (64 bytes)",
     "commitmentNamespace": "thoughtproof.sentinel-decision.v1",
     "algorithm": "sha256"
@@ -44,12 +44,12 @@
   },
   "rotation": [
     "Publish new kid with status=active before first production use.",
-    "Never delete old keys — set notAfter and status=retired (or leave vector-only).",
+    "Never delete old keys \u2014 set notAfter and status=retired (or leave vector-only).",
     "Receivers pin URL + kid set out-of-band.",
     "vector-only keys must never become active; active keys must never have a private seed in the repo."
   ],
   "notes": [
-    "status / notBefore / notAfter are ThoughtProof extensions on OKP key objects — allowed extras; this file is schema thoughtproof.keys.v1, not RFC 7517 JWKS.",
+    "status / notBefore / notAfter are ThoughtProof extensions on OKP key objects \u2014 allowed extras; this file is schema thoughtproof.keys.v1, not RFC 7517 JWKS.",
     "EAS attester and API keys are different trust roots and must not be substituted for this export key."
   ]
 }

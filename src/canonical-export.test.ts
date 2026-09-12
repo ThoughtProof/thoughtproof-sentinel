@@ -1,4 +1,4 @@
-import { createPublicKey } from 'crypto';
+import { createPublicKey, sign as cryptoSign } from 'crypto';
 import { describe, expect, it } from 'vitest';
 import {
   buildExportSignedInput,
@@ -7,6 +7,10 @@ import {
   issueSignedCanonicalExport,
   loadExportSignerFromEnv,
   maybeIssueSignedExport,
+  getExportSignerReadiness,
+  VECTOR_KEY_ID,
+  DEFAULT_KEY_ID,
+  publicKeyOkpX,
   publicKeyPem,
   publicKeyRawHex,
   verifySignedCanonicalExport,
@@ -85,23 +89,42 @@ describe('canonical-export M1 envelope', () => {
     });
   });
 
-  it('detects digest mismatch without re-running verify (artifact lock)', () => {
+  it('detects post-sign canonical tamper as signature_invalid (sig before digest)', () => {
     const { privateKey, publicKey } = generateExportKeyPair();
     const exp = issueSignedCanonicalExport(makeResponse(), {
       privateKey,
       keyId: 'test-kid-1',
       nowSeconds: 1_780_000_000,
     });
-    // Attacker swaps canonical string but leaves old digest — signature may still
-    // fail first depending on order; we check digest before accepting.
     const tampered = {
       ...exp,
       canonical: exp.canonical.replace('"ALLOW"', '"BLOCK"'),
     };
     const v = verifySignedCanonicalExport(tampered, publicKey);
     expect(v.ok).toBe(false);
+    expect(v.code).toBe('signature_invalid');
+  });
+
+  it('detects issuer-inconsistent digest after valid signature (digest check still runs)', () => {
+    const { privateKey, publicKey } = generateExportKeyPair();
+    const body = buildCanonicalSentinelVerdict(makeResponse());
+    const canonical = serializeCanonicalSentinelVerdict(body);
+    const wrongDigest = '0x' + 'ab'.repeat(32);
+    const fields = {
+      artifactSchema: body.artifactSchema,
+      verificationId: body.verificationId,
+      canonical,
+      digest: wrongDigest,
+      keyId: 'k',
+      alg: EXPORT_ALG,
+      signedAt: 100,
+    };
+    const signedInput = buildExportSignedInput(fields);
+    const signature = '0x' + cryptoSign(null, signedInput, privateKey).toString('hex');
+    const artifact = { exportSchema: EXPORT_DOMAIN, ...fields, signature };
+    const v = verifySignedCanonicalExport(artifact, publicKey);
+    expect(v.ok).toBe(false);
     expect(v.code).toBe('digest_mismatch');
-    expect(v.recomputedDigest).not.toBe(exp.digest);
   });
 
   it('detects signature break when digest+canonical stay consistent but envelope fields change', () => {
@@ -181,13 +204,16 @@ describe('canonical-export M1 envelope', () => {
     expect(maybeIssueSignedExport(makeResponse(), {})).toBeNull();
   });
 
-  it('loadExportSignerFromEnv accepts raw 32-byte seed hex', () => {
+  it('loadExportSignerFromEnv accepts raw 32-byte seed hex (skip published match)', () => {
     const seed = '11'.repeat(32);
-    const loaded = loadExportSignerFromEnv({
-      SENTINEL_EXPORT_PRIVATE_KEY: seed,
-      SENTINEL_EXPORT_KEY_ID: 'seed-kid',
-      SENTINEL_EXPORT_TTL_SECONDS: '120',
-    });
+    const loaded = loadExportSignerFromEnv(
+      {
+        SENTINEL_EXPORT_PRIVATE_KEY: seed,
+        SENTINEL_EXPORT_KEY_ID: 'seed-kid',
+        SENTINEL_EXPORT_TTL_SECONDS: '120',
+      },
+      { requirePublishedMatch: false },
+    );
     expect(loaded).not.toBeNull();
     expect(loaded!.keyId).toBe('seed-kid');
     expect(loaded!.ttlSeconds).toBe(120);
@@ -250,3 +276,81 @@ describe('thoughtproof.keys.v1 separation', () => {
     expect(vector?.kid).not.toBe(active?.kid);
   });
 });
+
+describe('export signer boot check + vector kid hard reject', () => {
+  it('refuses to issue with VECTOR_KEY_ID', () => {
+    const { privateKey } = generateExportKeyPair();
+    expect(() =>
+      issueSignedCanonicalExport(makeResponse(), {
+        privateKey,
+        keyId: VECTOR_KEY_ID,
+        nowSeconds: 1,
+      }),
+    ).toThrow(/vector-only/);
+  });
+
+  it('loadExportSignerFromEnv refuses VECTOR_KEY_ID even without published match', () => {
+    const seed = '22'.repeat(32);
+    const loaded = loadExportSignerFromEnv(
+      {
+        SENTINEL_EXPORT_PRIVATE_KEY: seed,
+        SENTINEL_EXPORT_KEY_ID: VECTOR_KEY_ID,
+      },
+      { requirePublishedMatch: false },
+    );
+    expect(loaded).toBeNull();
+  });
+
+  it('getExportSignerReadiness matches prod seed to published active x', async () => {
+    const { readFileSync, existsSync } = await import('fs');
+    const { homedir } = await import('os');
+    const { join } = await import('path');
+    const seedPath = join(homedir(), '.hermes/.credentials/sentinel-export-private-key-seed-m1-2026-09');
+    if (!existsSync(seedPath)) return;
+    const seed = readFileSync(seedPath, 'utf8').trim();
+    // Skip if credentials missing in CI
+    if (!seed || seed.length !== 64) return;
+    const r = getExportSignerReadiness({
+      SENTINEL_EXPORT_PRIVATE_KEY: seed,
+      SENTINEL_EXPORT_KEY_ID: DEFAULT_KEY_ID,
+    });
+    expect(r.configured).toBe(true);
+    expect(r.ready).toBe(true);
+    expect(r.match).toBe('ok');
+    expect(r.keyId).toBe(DEFAULT_KEY_ID);
+  });
+
+  it('getExportSignerReadiness detects pubkey mismatch', () => {
+    const wrongSeed = '33'.repeat(32);
+    const r = getExportSignerReadiness({
+      SENTINEL_EXPORT_PRIVATE_KEY: wrongSeed,
+      SENTINEL_EXPORT_KEY_ID: DEFAULT_KEY_ID,
+    });
+    expect(r.configured).toBe(true);
+    expect(r.ready).toBe(false);
+    expect(r.match).toBe('pubkey_mismatch');
+  });
+
+  it('maybeIssueSignedExport omits on pubkey mismatch', () => {
+    const out = maybeIssueSignedExport(makeResponse(), {
+      SENTINEL_EXPORT_PRIVATE_KEY: '44'.repeat(32),
+      SENTINEL_EXPORT_KEY_ID: DEFAULT_KEY_ID,
+    });
+    expect(out).toBeNull();
+  });
+
+  it('verify order: signature checked before digest (tampered envelope fields fail sig first)', () => {
+    const { privateKey, publicKey } = generateExportKeyPair();
+    const exp = issueSignedCanonicalExport(makeResponse(), {
+      privateKey,
+      keyId: 'k',
+      nowSeconds: 1_000,
+      ttlSeconds: 60,
+    });
+    const stretched = { ...exp, validUntil: exp.validUntil! + 1 };
+    const v = verifySignedCanonicalExport(stretched, publicKey, { nowSeconds: 1_000 });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('signature_invalid');
+  });
+});
+

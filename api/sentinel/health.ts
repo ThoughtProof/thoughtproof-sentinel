@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getModelReadiness } from '../../src/model-config.js';
 import { getPotCliVersion } from '../../src/runtime-versions.js';
 import { getRateLimitReadiness } from '../../src/upstash-env.js';
+import { getExportSignerReadiness } from '../../src/canonical-export.js';
 
 const VERSION = '0.1.0';
 const MODES = ['handoff', 'plan_revision', 'memory_write', 'output_synthesis', 'trade_execution', 'trade_reasoning', 'action_authorization'] as const;
@@ -34,11 +35,30 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
     const ready =
       modelReady && rate_limit !== 'unavailable' && !(prod && rate_limit === 'in_memory');
 
+    // M1 export signer boot check (public only — never echo private material).
+    // configured=false is normal pre-env; configured+!ready is a misconfig red flag.
+    const exportSigner = getExportSignerReadiness();
+    const export_signer = {
+      configured: exportSigner.configured,
+      ready: exportSigner.ready,
+      keyId: exportSigner.keyId,
+      match: exportSigner.match,
+      // derivedX / publishedX only when misconfigured (debug without leaking seed)
+      ...(exportSigner.configured && !exportSigner.ready
+        ? {
+            derivedX: exportSigner.derivedX ?? null,
+            publishedX: exportSigner.publishedX ?? null,
+            detail: exportSigner.detail ?? null,
+          }
+        : {}),
+    };
+
     res.status(200).json({
       ok: true,
       ready,
       serv_key,
       rate_limit,
+      export_signer,
       version: VERSION,
       pot_cli: getPotCliVersion(),
       modes: [...MODES],

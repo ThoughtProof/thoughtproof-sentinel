@@ -19,6 +19,11 @@
   `scripts/verify-canonical-export.mjs` (excludes `vector-only`/`retired`
   unless `--allow-vector-only`). Vectors under `scripts/fixtures/m1-export/`.
   Module: `src/canonical-export.ts`.
+  Follow-up: env boot-check (derived OKP x must match published active x;
+  else no sign + `export_signer` on `/sentinel/health`); hard-reject
+  `VECTOR_KEY_ID` on issue/load; portable codes
+  `DECISION_SIGNATURE_INVALID` vs `DECISION_SIGNER_UNTRUSTED`; verify
+  order key→sig→digest (§4); `notBefore` enforced.
 
 - **Published API docs (`/docs`, `/redoc`):** lightweight Swagger UI
   and ReDoc pages that load the live `/openapi.json`. Prod previously

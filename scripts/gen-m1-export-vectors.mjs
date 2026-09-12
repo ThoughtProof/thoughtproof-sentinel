@@ -13,14 +13,6 @@
  *   private key ONLY in env SENTINEL_EXPORT_PRIVATE_KEY (not in this repo).
  *
  *   node scripts/gen-m1-export-vectors.mjs
- *
- * Writes scripts/fixtures/m1-export/:
- *   export-valid.json
- *   export-tampered-canonical.json
- *   export-tampered-validUntil.json
- *   export-wrong-key.json          (sig from other keypair, claims vector kid)
- *   export-unknown-keyId.json      (keyId not in keys doc)
- *   README.md
  */
 import {
   createHash,
@@ -42,10 +34,6 @@ const VECTOR_KID = 'tp-sentinel-export-ed25519-2026-09-vector';
 const PROD_KID = 'tp-sentinel-export-ed25519-2026-09';
 const DOMAIN = 'thoughtproof.sentinel.export.v1';
 
-/**
- * VECTOR-ONLY seed. Public OKP x must match keys doc entry with status=vector-only.
- * Compromising this seed does NOT forge production exports (different kid + active key).
- */
 const VECTOR_SEED_HEX =
   'b66ae2bdbbba3a8c6ef77e3d627153f6c8d9d1308d9a3d4d99482e564d7903f6';
 const EXPECT_VECTOR_X = 'IuMSTQMowwaP3yaOmlf9unkZAVjvc9MwOOqluXCjFDs';
@@ -96,11 +84,8 @@ if (!vectorEntry || vectorEntry.status !== 'vector-only' || vectorEntry.x !== EX
 if (!prodEntry || prodEntry.status !== 'active' || prodEntry.x !== EXPECT_PROD_X) {
   throw new Error('keys doc prod entry missing/wrong status/x');
 }
-if (vectorEntry.x === prodEntry.x) {
-  throw new Error('FATAL: vector and prod public keys must differ');
-}
-if (VECTOR_KID === PROD_KID) {
-  throw new Error('FATAL: vector and prod kids must differ');
+if (vectorEntry.x === prodEntry.x || VECTOR_KID === PROD_KID) {
+  throw new Error('FATAL: vector and prod keys must differ');
 }
 
 function jcs(obj) {
@@ -124,10 +109,7 @@ function issue(fields, privateKey) {
     exportSchema: DOMAIN,
     ...fields,
     signature: '0x' + Buffer.from(sig).toString('hex'),
-    _meta: {
-      signedInputHex: signedInput.toString('hex'),
-      signedInputLen: signedInput.length,
-    },
+    _signedInputHex: signedInput.toString('hex'),
   };
 }
 
@@ -144,35 +126,29 @@ const baseFields = {
   validUntil: signedAt + ttl,
 };
 
-const d =
-  '0x' + createHash('sha256').update(FIXTURE_JCS, 'utf8').digest('hex');
+const d = '0x' + createHash('sha256').update(FIXTURE_JCS, 'utf8').digest('hex');
 if (d !== FIXTURE_HASH) throw new Error('fixture digest drift');
 
 const validFull = issue(baseFields, vectorPrivate);
-const signedInputHex = validFull._meta.signedInputHex;
-const { _meta, ...valid } = validFull;
+const signedInputHex = validFull._signedInputHex;
+const { _signedInputHex, ...valid } = validFull;
 
 const tamperedCanonical = {
   ...valid,
   canonical: FIXTURE_JCS.replace('"ALLOW"', '"BLOCK"'),
 };
-
 const tamperedValidUntil = {
   ...valid,
   validUntil: baseFields.validUntil + 365 * 86400,
 };
 
-// Wrong-key: different keypair signs, but keyId still claims VECTOR_KID
-// → verify with published vector pub → signature_invalid (DECISION_SIGNER_UNTRUSTED class)
 const { privateKey: wrongPriv } = generateKeyPairSync('ed25519');
-const wrongKeyFull = issue(baseFields, wrongPriv);
-const { _meta: _w, ...wrongKey } = wrongKeyFull;
+const wrongFull = issue(baseFields, wrongPriv);
+const { _signedInputHex: _w, ...wrongKey } = wrongFull;
 
-// Unknown keyId: valid vector signature bytes recomputed under a fake kid
-// (re-sign so envelope is self-consistent; lookup fails on keyId)
 const unknownFields = { ...baseFields, keyId: 'tp-sentinel-export-DOES-NOT-EXIST' };
 const unknownFull = issue(unknownFields, vectorPrivate);
-const { _meta: _u, ...unknownKey } = unknownFull;
+const { _signedInputHex: _u, ...unknownKey } = unknownFull;
 
 function writeJson(name, obj) {
   writeFileSync(join(outDir, name), JSON.stringify(obj, null, 2) + '\n');
@@ -193,15 +169,13 @@ const readme = `# M1 signed canonical export vectors
 | \`${VECTOR_KID}\` | \`vector-only\` | seed in \`gen-m1-export-vectors.mjs\` only | fixtures / paired checks |
 | \`${PROD_KID}\` | \`active\` | **env only** \`SENTINEL_EXPORT_PRIVATE_KEY\` | production \`signed_export\` |
 
-Vector seed **must never** match the active production key. Active public OKP \`x\` is published; its private key is **not** in this repository.
-
 ## alg names (do not cross-compare)
 
-- **Export envelope** field \`alg\`: \`Ed25519\` (primitive on signed fields)
-- **Key document** field \`alg\`: \`EdDSA\` (JOSE / RFC 8037 on OKP)
-- Same curve. A verifier that string-equals the two fields will false-fail.
+- **Export envelope** field \`alg\`: \`Ed25519\`
+- **Key document** field \`alg\`: \`EdDSA\` (JOSE / RFC 8037)
+- Same curve. Do not string-equals the two fields.
 
-Key document schema: \`thoughtproof.keys.v1\` (OKP + TP \`status\`/\`notBefore\`/\`notAfter\` extensions). **Not** a pure JWKS.
+Key document schema: \`thoughtproof.keys.v1\` (OKP + TP status extensions). **Not** a pure JWKS.
 
 ## Canonical fixture
 
@@ -217,26 +191,31 @@ signedInputHex (${signedInputHex.length / 2} bytes):
 ${signedInputHex}
 \`\`\`
 
-Recompute: \`sha256(UTF-8(canonical))\` must equal \`digest\`; Ed25519-verify \`signedInput\` with OKP \`x\` for \`${VECTOR_KID}\`.
+## Verify order (PriorSeal §4)
+
+1. Resolve keyId (status / notBefore / notAfter) → \`DECISION_SIGNER_UNTRUSTED\` on fail
+2. Verify signature over \`domain || 0x00 || JCS(fields)\` → \`DECISION_SIGNATURE_INVALID\` on fail
+3. Recompute sha256(transported canonical) === digest → \`DECISION_COMMITMENT_DIGEST_MISMATCH\`
+4. optional validUntil
+
+\`DECISION_SIGNER_UNTRUSTED\` is **not** used for a broken signature on a known kid.
 
 ## Files
 
 | File | Expect |
 |---|---|
 | \`export-valid.json\` | ok with \`--allow-vector-only\` |
-| \`export-tampered-canonical.json\` | \`digest_mismatch\` / \`DECISION_COMMITMENT_DIGEST_MISMATCH\` |
-| \`export-tampered-validUntil.json\` | \`signature_invalid\` |
-| \`export-wrong-key.json\` | \`signature_invalid\` (claims vector kid, signed by other key — signer untrusted) |
-| \`export-unknown-keyId.json\` | \`key_not_found\` |
+| \`export-tampered-canonical.json\` | \`DECISION_SIGNATURE_INVALID\` |
+| \`export-tampered-validUntil.json\` | \`DECISION_SIGNATURE_INVALID\` |
+| \`export-wrong-key.json\` | \`DECISION_SIGNATURE_INVALID\` (kid resolves; sig fails under published x) |
+| \`export-unknown-keyId.json\` | \`key_not_found\` / \`DECISION_SIGNER_UNTRUSTED\` |
 
 ## Verify locally
 
 \`\`\`bash
-# valid (vector-only kid requires the flag)
 node scripts/verify-canonical-export.mjs scripts/fixtures/m1-export/export-valid.json \\
   --keys data/thoughtproof-keys.json --now ${signedAt} --allow-vector-only
 
-# without flag → key_not_usable / vector-only rejected
 node scripts/verify-canonical-export.mjs scripts/fixtures/m1-export/export-valid.json \\
   --keys data/thoughtproof-keys.json --now ${signedAt}; echo exit:\$?
 
@@ -252,16 +231,6 @@ node scripts/verify-canonical-export.mjs scripts/fixtures/m1-export/export-wrong
 node scripts/verify-canonical-export.mjs scripts/fixtures/m1-export/export-unknown-keyId.json \\
   --keys data/thoughtproof-keys.json --now ${signedAt} --allow-vector-only
 \`\`\`
-
-## Receiver rules (PriorSeal M1)
-
-1. Pin keys URL **and** kid set out-of-band.
-2. Accept only \`status: active\` for production artifacts; never treat \`vector-only\` as production trust.
-3. Verify envelope signature over \`domain || 0x00 || JCS(fields)\`.
-4. Recompute sha256 over the **transported** \`canonical\` string; require equality with \`digest\`.
-5. Digest identifies **one issued artifact**, never a fresh verification.
-6. Namespace: \`thoughtproof.sentinel-decision.v1\` / sha256 / lowercase \`0x\`+64 hex.
-7. \`validUntil\` is envelope-only (not inside canonical.v1).
 
 Regenerate: \`node scripts/gen-m1-export-vectors.mjs\`
 `;
@@ -279,7 +248,6 @@ console.log(
       verificationId: valid.verificationId,
       digest: valid.digest,
       signedInputBytes: signedInputHex.length / 2,
-      signedInputHexPrefix: signedInputHex.slice(0, 32) + '…',
     },
     null,
     2,
