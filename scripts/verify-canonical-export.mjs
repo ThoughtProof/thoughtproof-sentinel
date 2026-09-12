@@ -15,13 +15,16 @@
  * JWK alg = EdDSA (JOSE). Envelope alg = Ed25519. Do not cross-compare them.
  *
  * Verification order (PriorSeal §4):
- *   1. resolve keyId against key doc (status / notBefore / notAfter)
+ *   1. resolve keyId against key doc
+ *        - notBefore/notAfter vs export **signedAt** (not verifier clock)
+ *        - status=retired still verifies in-window historical sigs
+ *        - vector-only needs --allow-vector-only
  *   2. Ed25519 verify domain||0x00||JCS(fields)  → DECISION_SIGNATURE_INVALID on fail
  *   3. sha256(UTF-8(transported canonical)) === digest → DECISION_COMMITMENT_DIGEST_MISMATCH
- *   4. optional validUntil vs --now
+ *   4. optional validUntil vs verifier --now (freshness)
  *
- * DECISION_SIGNER_UNTRUSTED is reserved for key_not_found / status / notBefore /
- * notAfter / vector-only rejection — not for a broken signature on a known key.
+ * DECISION_SIGNER_UNTRUSTED is reserved for key_not_found / window / vector-only —
+ * not for a broken signature on a known key.
  */
 import {
   createPublicKey,
@@ -93,31 +96,38 @@ function resolvePub(entry) {
   throw new Error('key entry missing OKP x (or legacy publicKeyPem/publicKey)');
 }
 
-function keyUsable(entry, allowVectorOnly, now) {
+/**
+ * Key usable for verifying an *existing* export.
+ * - notBefore/notAfter vs **signedAt** (historical verify after rotation)
+ * - status=retired: still OK if signedAt in window (denies new trust only at sign time)
+ * - status=vector-only: needs --allow-vector-only
+ * - validUntil is checked later vs verifier --now
+ */
+function keyUsable(entry, allowVectorOnly, signedAt) {
   const status = entry.status || 'active';
-  if (status === 'retired') {
-    return { ok: false, reason: 'key_retired', code: 'DECISION_SIGNER_UNTRUSTED' };
-  }
   if (status === 'vector-only') {
-    if (allowVectorOnly) {
-      // fall through to notBefore/notAfter
-    } else {
+    if (!allowVectorOnly) {
       return { ok: false, reason: 'vector_only_key_not_allowed', code: 'DECISION_SIGNER_UNTRUSTED' };
     }
-  } else if (status !== 'active') {
+  } else if (status !== 'active' && status !== 'retired') {
     return { ok: false, reason: 'key_status_unusable', code: 'DECISION_SIGNER_UNTRUSTED', status };
+  }
+  // retired + active (+ vector-only with flag): check validity window vs signedAt
+
+  if (typeof signedAt !== 'number' || !Number.isFinite(signedAt)) {
+    return { ok: false, reason: 'missing_fields', code: 'DECISION_SIGNER_UNTRUSTED', detail: 'signedAt required for key window' };
   }
 
   if (entry.notBefore) {
     const nbf = Math.floor(new Date(entry.notBefore).getTime() / 1000);
-    if (Number.isFinite(nbf) && now < nbf) {
-      return { ok: false, reason: 'key_not_yet_valid', code: 'DECISION_SIGNER_UNTRUSTED', nbf };
+    if (Number.isFinite(nbf) && signedAt < nbf) {
+      return { ok: false, reason: 'key_not_yet_valid', code: 'DECISION_SIGNER_UNTRUSTED', nbf, signedAt };
     }
   }
   if (entry.notAfter) {
     const until = Math.floor(new Date(entry.notAfter).getTime() / 1000);
-    if (Number.isFinite(until) && now > until) {
-      return { ok: false, reason: 'key_expired', code: 'DECISION_SIGNER_UNTRUSTED', until };
+    if (Number.isFinite(until) && signedAt > until) {
+      return { ok: false, reason: 'key_expired', code: 'DECISION_SIGNER_UNTRUSTED', until, signedAt };
     }
   }
   return { ok: true };
@@ -215,7 +225,7 @@ async function main() {
     process.exit(3);
   }
 
-  const usable = keyUsable(entry, args.allowVectorOnly, args.now);
+  const usable = keyUsable(entry, args.allowVectorOnly, artifact.signedAt);
   if (!usable.ok) {
     console.log(
       JSON.stringify(

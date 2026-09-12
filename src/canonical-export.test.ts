@@ -1,5 +1,5 @@
 import { createPublicKey, sign as cryptoSign } from 'crypto';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   buildExportSignedInput,
   digestTransportedCanonical,
@@ -8,6 +8,7 @@ import {
   loadExportSignerFromEnv,
   maybeIssueSignedExport,
   getExportSignerReadiness,
+  clearExportSignerReadinessCache,
   VECTOR_KEY_ID,
   DEFAULT_KEY_ID,
   publicKeyOkpX,
@@ -278,6 +279,9 @@ describe('thoughtproof.keys.v1 separation', () => {
 });
 
 describe('export signer boot check + vector kid hard reject', () => {
+  beforeEach(() => {
+    clearExportSignerReadinessCache();
+  });
   it('refuses to issue with VECTOR_KEY_ID', () => {
     const { privateKey } = generateExportKeyPair();
     expect(() =>
@@ -354,3 +358,14 @@ describe('export signer boot check + vector kid hard reject', () => {
   });
 });
 
+describe('key validity window vs signedAt (portable semantics doc)', () => {
+  it('published prod notBefore is 2026-09-12; vector may differ', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const doc = JSON.parse(readFileSync(join(process.cwd(), 'data', 'thoughtproof-keys.json'), 'utf8'));
+    const vector = doc.keys.find((k: { status: string }) => k.status === 'vector-only');
+    const active = doc.keys.find((k: { status: string }) => k.status === 'active');
+    expect(active?.notBefore).toBe('2026-09-12T00:00:00Z');
+    expect(vector?.notBefore).toBe('2026-07-01T00:00:00Z');
+  });
+});

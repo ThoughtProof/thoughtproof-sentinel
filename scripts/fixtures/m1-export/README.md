@@ -71,3 +71,10 @@ node scripts/verify-canonical-export.mjs scripts/fixtures/m1-export/export-unkno
 ```
 
 Regenerate: `node scripts/gen-m1-export-vectors.mjs`
+
+## Key window vs freshness
+
+- \`notBefore\` / \`notAfter\` are checked against the export **\`signedAt\`** (so rotated/retired keys still verify historical artifacts).
+- Envelope \`validUntil\` is checked against the **verifier clock** (\`--now\`).
+- Prod \`notBefore\` = first publish day (\`2026-09-12\`); vector entry may use an earlier nbf for fixture \`signedAt\`.
+

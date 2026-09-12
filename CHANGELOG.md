@@ -23,7 +23,7 @@
   else no sign + `export_signer` on `/sentinel/health`); hard-reject
   `VECTOR_KEY_ID` on issue/load; portable codes
   `DECISION_SIGNATURE_INVALID` vs `DECISION_SIGNER_UNTRUSTED`; verify
-  order key→sig→digest (§4); `notBefore` enforced.
+  order key→sig→digest (§4); key window vs **signedAt** (not verifier clock); prod nbf=2026-09-12 ≠ vector nbf; readiness memoized; keys JSON static-import (bundle-safe); retired still verifies historical in-window.
 
 - **Published API docs (`/docs`, `/redoc`):** lightweight Swagger UI
   and ReDoc pages that load the live `/openapi.json`. Prod previously

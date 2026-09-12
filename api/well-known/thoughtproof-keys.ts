@@ -2,11 +2,10 @@
  * GET /.well-known/thoughtproof-keys.json
  *
  * Public keys for verifying ThoughtProof Sentinel M1 signed canonical exports.
- * Static file under data/ — no secrets.
+ * Static import so Vercel always bundles data/ into this function.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import keysDoc from '../../data/thoughtproof-keys.json' with { type: 'json' };
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -15,8 +14,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const path = join(process.cwd(), 'data', 'thoughtproof-keys.json');
-    const body = readFileSync(path, 'utf8');
+    const body = JSON.stringify(keysDoc);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600');
     res.setHeader('Access-Control-Allow-Origin', '*');

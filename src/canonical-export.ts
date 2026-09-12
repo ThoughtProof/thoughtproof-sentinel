@@ -25,7 +25,10 @@
  * not the whole export envelope.
  *
  * Verification order (PriorSeal receiver §4 / portable script):
- *   1. resolve keyId against pinned key doc (status/notBefore/notAfter)
+ *   1. resolve keyId against pinned key doc:
+ *        - notBefore/notAfter vs export signedAt (historical verify after rotation)
+ *        - status=retired still verifies past sigs in-window; vector-only needs flag
+ *        - validUntil (envelope) vs verifier clock
  *   2. verify envelope signature over signed_input with that public key
  *   3. recompute sha256 over transported `canonical` string (do NOT re-JCS)
  *   4. require `digest` field equals recompute
@@ -48,6 +51,8 @@ import {
 } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+// Bundled into verify + health so Vercel cannot drop data/ from the function trace.
+import bundledKeysDoc from '../data/thoughtproof-keys.json' with { type: 'json' };
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - canonicalize types are loose; runtime export is the function
 import canonicalize from 'canonicalize';
@@ -308,11 +313,25 @@ export function resolveKeysDocPath(env: NodeJS.ProcessEnv = process.env): string
   return defaultKeysPath();
 }
 
+/**
+ * Load keys doc. Default = statically imported bundle (always present in
+ * the verify/health function). readFileSync only when SENTINEL_EXPORT_KEYS_PATH
+ * (or explicit path) overrides — test/fixture path.
+ */
 export function loadThoughtproofKeysDoc(
-  path: string = defaultKeysPath(),
+  path?: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): ThoughtproofKeysDoc | null {
+  const override =
+    path ??
+    (env[EXPORT_KEYS_PATH_ENV] && env[EXPORT_KEYS_PATH_ENV]!.trim()
+      ? env[EXPORT_KEYS_PATH_ENV]!.trim()
+      : null);
+  if (!override) {
+    return bundledKeysDoc as ThoughtproofKeysDoc;
+  }
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as ThoughtproofKeysDoc;
+    return JSON.parse(readFileSync(override, 'utf8')) as ThoughtproofKeysDoc;
   } catch {
     return null;
   }
@@ -323,9 +342,7 @@ export function findKeyEntry(
   keyId: string,
 ): ThoughtproofKeyEntry | null {
   if (!doc?.keys) return null;
-  return (
-    doc.keys.find((k) => k.kid === keyId || k.keyId === keyId) ?? null
-  );
+  return doc.keys.find((k) => k.kid === keyId || k.keyId === keyId) ?? null;
 }
 
 function unixFromIso(iso: string | null | undefined): number | null {
@@ -334,13 +351,51 @@ function unixFromIso(iso: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Env fingerprint for memo — env + bundled path cannot change mid-instance. */
+function readinessCacheKey(
+  env: NodeJS.ProcessEnv,
+  keysPath: string | undefined,
+  nowSeconds: number | undefined,
+): string {
+  return [
+    env[EXPORT_PRIVATE_KEY_ENV] ?? '',
+    env[EXPORT_KEY_ID_ENV] ?? '',
+    env[EXPORT_TTL_SECONDS_ENV] ?? '',
+    env[EXPORT_KEYS_PATH_ENV] ?? '',
+    keysPath ?? '',
+    nowSeconds === undefined ? 'live' : String(nowSeconds),
+  ].join('\0');
+}
+
+let readinessMemo: { key: string; value: ExportSignerReadiness } | null = null;
+
+/** Test helper: drop module memo between cases. */
+export function clearExportSignerReadinessCache(): void {
+  readinessMemo = null;
+}
+
 /**
  * Boot / health check: env private key must derive the published active OKP x
  * for the configured kid. Mismatch → not ready (do not sign).
+ * Memoized per cold start (env + keys path fingerprint).
  */
 export function getExportSignerReadiness(
   env: NodeJS.ProcessEnv = process.env,
   opts: { keysPath?: string; nowSeconds?: number } = {},
+): ExportSignerReadiness {
+  const cacheKey = readinessCacheKey(env, opts.keysPath, opts.nowSeconds);
+  if (readinessMemo && readinessMemo.key === cacheKey) {
+    return readinessMemo.value;
+  }
+
+  const value = computeExportSignerReadiness(env, opts);
+  readinessMemo = { key: cacheKey, value };
+  return value;
+}
+
+function computeExportSignerReadiness(
+  env: NodeJS.ProcessEnv,
+  opts: { keysPath?: string; nowSeconds?: number },
 ): ExportSignerReadiness {
   const raw = env[EXPORT_PRIVATE_KEY_ENV];
   if (!raw || !raw.trim()) {
@@ -385,8 +440,7 @@ export function getExportSignerReadiness(
     };
   }
 
-  const keysPath = opts.keysPath ?? resolveKeysDocPath(env);
-  const doc = loadThoughtproofKeysDoc(keysPath);
+  const doc = loadThoughtproofKeysDoc(opts.keysPath, env);
   if (!doc) {
     return {
       configured: true,
@@ -394,7 +448,8 @@ export function getExportSignerReadiness(
       keyId,
       match: 'key_doc_missing',
       derivedX,
-      detail: `cannot read keys doc at ${keysPath}`,
+      detail:
+        'keys doc unavailable (bundled import failed or SENTINEL_EXPORT_KEYS_PATH unreadable) — check function bundle, not the private key',
     };
   }
 
@@ -410,6 +465,7 @@ export function getExportSignerReadiness(
     };
   }
 
+  // Signing requires status=active only (retired/vector cannot mint new prod trust).
   if ((entry.status || 'active') !== 'active') {
     return {
       configured: true,
@@ -445,6 +501,7 @@ export function getExportSignerReadiness(
     };
   }
 
+  // For *signing* readiness, key must be valid *now* (we are creating signedAt≈now).
   const now = opts.nowSeconds ?? Math.floor(Date.now() / 1000);
   const nbf = unixFromIso(entry.notBefore ?? null);
   if (nbf !== null && now < nbf) {
@@ -689,14 +746,6 @@ export function loadExportSignerFromEnv(
             (readiness.detail ? ` detail=${readiness.detail}` : ''),
         );
       }
-      return null;
-    }
-  } else {
-    const raw = env[EXPORT_PRIVATE_KEY_ENV];
-    if (!raw || !raw.trim()) return null;
-    const keyId = (env[EXPORT_KEY_ID_ENV] || DEFAULT_KEY_ID).trim() || DEFAULT_KEY_ID;
-    if (keyId === VECTOR_KEY_ID) {
-      console.error('[canonical-export] refusing VECTOR_KEY_ID even with requirePublishedMatch=false');
       return null;
     }
   }
