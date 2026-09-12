@@ -4,10 +4,9 @@
  *
  * Imports DOCS_CDN from src/openapi-docs.ts (source of truth), GETs each
  * unpkg URL (follows redirects), computes sha384-<base64>, and compares
- * to the pinned integrity. A mismatch or non-200 fails loudly so a stale
- * hash cannot leave /docs or /redoc empty while CI stays green.
- *
- * Nightly / workflow_dispatch only — not PR CI (unpkg flake).
+ * to the pinned integrity. Hash mismatch is security-relevant (exit 1).
+ * Fetch failure or non-200 is unpkg noise: WARN + exit 0 so CDN flake
+ * cannot fail the nightly. Nightly / workflow_dispatch only — not PR CI.
  *
  *   node --experimental-strip-types --disable-warning=ExperimentalWarning \
  *     scripts/verify-docs-cdn-sri.ts
@@ -77,6 +76,16 @@ export function assertRequiredDocsCdnAssets(assets: DocsCdnAsset[]): void {
       `DOCS_CDN has ${assets.length} assets; expected at least ${REQUIRED_DOCS_CDN_ASSETS.length}`,
     );
   }
+}
+
+/** Bytes were fetched (status 200) and sha384 ≠ pinned integrity. */
+export function isSriHashMismatch(result: AssetCheckFail): boolean {
+  return result.actual !== null;
+}
+
+/** Job fails only on hash mismatch. Fetch / non-200 is soft (exit 0). */
+export function docsCdnSriJobExitCode(results: AssetCheckResult[]): 0 | 1 {
+  return results.some((row) => !row.ok && isSriHashMismatch(row)) ? 1 : 0;
 }
 
 export function formatAssetFailure(result: AssetCheckFail): string {
@@ -166,30 +175,45 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   assertRequiredDocsCdnAssets(assets);
 
   console.log(`Checking ${assets.length} DOCS_CDN unpkg pins (sha384 SRI)…`);
-  const { ok, results } = await verifyDocsCdnSri(assets);
-  let failed = 0;
+  const { results } = await verifyDocsCdnSri(assets);
+  let mismatches = 0;
+  let networkWarns = 0;
 
   for (const result of results) {
     if (result.ok) {
       console.log(`OK  ${result.name}  ${result.integrity}  ${result.bytes} bytes  ${result.href}`);
       continue;
     }
-    failed += 1;
     const message = formatAssetFailure(result);
-    console.error(`::error title=Docs CDN SRI failed (${result.name})::${result.error}`);
-    console.error(message);
-    if (printOnly && result.actual) {
-      console.log(`PRINT ${result.name}  ${result.actual}  ${result.href}`);
+    if (isSriHashMismatch(result)) {
+      mismatches += 1;
+      console.error(`::error title=Docs CDN SRI mismatch (${result.name})::${result.error}`);
+      console.error(message);
+      if (printOnly && result.actual) {
+        console.log(`PRINT ${result.name}  ${result.actual}  ${result.href}`);
+      }
+      continue;
     }
+    networkWarns += 1;
+    console.error(`::warning title=unpkg unavailable (${result.name})::${result.error}`);
+    console.error(`WARN unpkg unavailable: DOCS_CDN.${result.name} ${result.error}`);
+    console.error(message);
   }
 
-  if (!ok) {
+  if (mismatches > 0) {
     console.error(
-      `\n${failed}/${results.length} docs CDN SRI check(s) failed. ` +
+      `\n${mismatches}/${results.length} docs CDN SRI mismatch(es). ` +
         'Browser will block /docs or /redoc if integrity does not match unpkg bytes. ' +
         'Re-bump: GET the URL, sha384 the body as sha384-<base64>, update DOCS_CDN.',
     );
-    return printOnly ? 0 : 1;
+    return printOnly ? 0 : docsCdnSriJobExitCode(results);
+  }
+  if (networkWarns > 0) {
+    console.error(
+      `\nWARN unpkg unavailable: ${networkWarns}/${results.length} pin(s) ` +
+        'could not be fetched (network/non-200). Not failing nightly.',
+    );
+    return 0;
   }
 
   console.log(`All ${results.length} DOCS_CDN integrity pins match unpkg bytes.`);

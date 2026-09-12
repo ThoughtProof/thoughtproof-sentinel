@@ -35,6 +35,10 @@
 #   Nightly also GETs DOCS_CDN unpkg pins and checks sha384(bytes)
 #   against src/openapi-docs.ts (job docs-cdn-sri). Schedule / dispatch
 #   only — not PR CI (network flake). Does not touch the suite gate.
+#   Hash mismatch fails docs-cdn-sri; unpkg fetch/non-200 is WARN +
+#   exit 0. When counting green nights for FALSE_BLOCK_BASELINE 4→0,
+#   count the suite job result, not the whole workflow run (CDN noise
+#   must not void a valid measurement night).
 #   known_false_block is printed every night and does not enter this
 #   gate — do not raise FALSE_BLOCK_BASELINE to hide those fixtures (#64).
 #   Each kfb fixture requires since (YYYY-MM-DD). After 7 nights,

@@ -1,7 +1,7 @@
 ## Unreleased
 
 ### Added
-- **Nightly docs CDN SRI:** cron / dispatch verifies unpkg bytes against `DOCS_CDN` sha384 pins.
+- **Nightly docs CDN SRI:** cron / dispatch verifies unpkg bytes against `DOCS_CDN` sha384 pins. Hash mismatch fails the job; unpkg fetch/non-200 is WARN (exit 0). Count the **suite** job — not the whole workflow — when tallying green nights for `FALSE_BLOCK_BASELINE` 4→0.
 - **Published API docs (`/docs`, `/redoc`):** lightweight Swagger UI
   and ReDoc pages that load the live `/openapi.json`. Prod previously
   404'd both paths (Vercel `NOT_FOUND`) while the spec itself worked.
