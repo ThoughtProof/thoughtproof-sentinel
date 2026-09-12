@@ -16,6 +16,17 @@ import {
   sendDocsHtml,
   swaggerUiHtml,
 } from './openapi-docs.js';
+import {
+  REQUIRED_DOCS_CDN_ASSETS,
+  assertRequiredDocsCdnAssets,
+  checkDocsCdnAsset,
+  docsCdnAssets,
+  docsCdnSriJobExitCode,
+  formatAssetFailure,
+  isSriHashMismatch,
+  sriSha384,
+  verifyDocsCdnSri,
+} from '../scripts/verify-docs-cdn-sri.ts';
 
 function mockRes() {
   const headers: Record<string, string> = {};
@@ -142,6 +153,103 @@ describe('docs / redoc handlers', () => {
     expect(ctx.statusCode).toBe(200);
     expect(String(ctx.body)).toContain('redoc');
     expect(String(ctx.body)).toContain('/openapi.json');
+  });
+});
+
+describe('docs CDN SRI byte check (nightly, no live unpkg)', () => {
+  it('imports the same three DOCS_CDN pins used in HTML', () => {
+    const assets = docsCdnAssets();
+    expect(assets.map((row) => row.name)).toEqual([...REQUIRED_DOCS_CDN_ASSETS]);
+    expect(assets).toEqual([
+      { name: 'swaggerCss', href: DOCS_CDN.swaggerCss.href, integrity: DOCS_CDN.swaggerCss.integrity },
+      { name: 'swaggerBundle', href: DOCS_CDN.swaggerBundle.href, integrity: DOCS_CDN.swaggerBundle.integrity },
+      { name: 'redoc', href: DOCS_CDN.redoc.href, integrity: DOCS_CDN.redoc.integrity },
+    ]);
+    assertRequiredDocsCdnAssets(assets);
+    expect(() => assertRequiredDocsCdnAssets(assets.slice(0, 2))).toThrow(/missing required assets/);
+  });
+
+  it('formats sha384 SRI; mismatch hard-fails, fetch/non-200 soft-fails', async () => {
+    const bytes = new TextEncoder().encode('docs-cdn-sri-fixture');
+    const integrity = sriSha384(bytes);
+    expect(integrity).toMatch(/^sha384-[A-Za-z0-9+/]+=*$/);
+
+    const href = 'https://unpkg.com/swagger-ui-dist@9.9.9/swagger-ui.css';
+    const asset = { name: 'swaggerCss', href, integrity };
+
+    const okFetch = async () =>
+      new Response(bytes, { status: 200 }) as Response;
+    const ok = await checkDocsCdnAsset(asset, okFetch);
+    expect(ok).toMatchObject({ ok: true, name: 'swaggerCss', integrity });
+    expect(docsCdnSriJobExitCode([ok])).toBe(0);
+
+    const mismatch = await checkDocsCdnAsset(asset, async () =>
+      new Response(new TextEncoder().encode('tampered'), { status: 200 }),
+    );
+    expect(mismatch.ok).toBe(false);
+    if (mismatch.ok) throw new Error('expected mismatch');
+    expect(isSriHashMismatch(mismatch)).toBe(true);
+    expect(mismatch.expected).toBe(integrity);
+    expect(mismatch.actual).toMatch(/^sha384-/);
+    expect(mismatch.actual).not.toBe(integrity);
+    const mismatchText = formatAssetFailure(mismatch);
+    expect(mismatchText).toContain('DOCS_CDN.swaggerCss FAILED');
+    expect(mismatchText).toContain(href);
+    expect(mismatchText).toContain(`expected: ${integrity}`);
+    expect(mismatchText).toContain(`actual:   ${mismatch.actual}`);
+    expect(docsCdnSriJobExitCode([mismatch])).toBe(1);
+
+    const missing = await checkDocsCdnAsset(asset, async () =>
+      new Response('gone', { status: 404 }),
+    );
+    expect(missing.ok).toBe(false);
+    if (missing.ok) throw new Error('expected 404');
+    expect(isSriHashMismatch(missing)).toBe(false);
+    expect(missing.status).toBe(404);
+    expect(missing.actual).toBeNull();
+    expect(formatAssetFailure(missing)).toContain('HTTP 404');
+    expect(docsCdnSriJobExitCode([missing])).toBe(0);
+
+    const offline = await checkDocsCdnAsset(asset, async () => {
+      throw new Error('ECONNRESET');
+    });
+    expect(offline.ok).toBe(false);
+    if (offline.ok) throw new Error('expected fetch failure');
+    expect(isSriHashMismatch(offline)).toBe(false);
+    expect(offline.status).toBeNull();
+    expect(offline.error).toContain('ECONNRESET');
+    expect(docsCdnSriJobExitCode([offline])).toBe(0);
+
+    const networkBatch = await verifyDocsCdnSri(
+      [
+        asset,
+        { name: 'swaggerBundle', href: `${href}-bundle`, integrity },
+        { name: 'redoc', href: `${href}-redoc`, integrity },
+      ],
+      async (url) => {
+        if (String(url).endsWith('-redoc')) return new Response('nope', { status: 503 });
+        return new Response(bytes, { status: 200 });
+      },
+    );
+    expect(networkBatch.ok).toBe(false);
+    expect(networkBatch.results.filter((row) => row.ok)).toHaveLength(2);
+    const failed = networkBatch.results.find((row) => !row.ok);
+    expect(failed && !failed.ok && failed.status).toBe(503);
+    expect(docsCdnSriJobExitCode(networkBatch.results)).toBe(0);
+
+    const mixed = [ok, missing, mismatch];
+    expect(docsCdnSriJobExitCode(mixed)).toBe(1);
+  });
+
+  it('nightly workflow runs the SRI check off PR CI only', () => {
+    const yml = readFileSync(join(process.cwd(), '.github/workflows/action-authorization-suite.yml'), 'utf8');
+    expect(yml).toContain('docs-cdn-sri:');
+    expect(yml).toContain('scripts/verify-docs-cdn-sri.ts');
+    expect(yml).toContain("github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'");
+    expect(yml).toContain('Verify unpkg SRI matches DOCS_CDN');
+    expect(yml).toContain('count the suite job result, not the whole workflow');
+    expect(yml).toContain('FALSE_BLOCK_BASELINE');
+    expect(yml).not.toMatch(/FALSE_BLOCK_BASELINE\s*=\s*[12356789]/);
   });
 });
 
