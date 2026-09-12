@@ -5,7 +5,11 @@
   and ReDoc pages that load the live `/openapi.json`. Prod previously
   404'd both paths (Vercel `NOT_FOUND`) while the spec itself worked.
   Partner verification surface for M1 / YuTao. No change to
-  `/sentinel/verify` or promotion.
+  `/sentinel/verify` or promotion. CDN scripts are exact-version
+  pins (`swagger-ui-dist@5.32.15`, `redoc@2.5.4`) with sha384 SRI
+  and `crossorigin="anonymous"` — no floating majors. Docs/ReDoc
+  handlers send a tight CSP (`script-src`/`style-src` self-inline
+  + unpkg). Do not self-host assets.
 - **MCP-form financial ok-01/02/03 fixtures (issue #66 Track 1b):**
   parallel ids `ok-01-mcp-auth-claim`, `ok-02-mcp-auth-claim`,
   `ok-03-mcp-auth-claim` so nightly measures the live MCP claim
@@ -69,7 +73,9 @@
   Gate comment no longer lists ok-01/02/03 as current baseline
   occupants; remaining named case is primarily ok-06 (#64 class).
   **`FALSE_BLOCK_BASELINE` unchanged (still 4).** Job logs print
-  `SUITE_TARGET=<url>`.
+  `SUITE_TARGET=<url>`. After #67, print
+  `WARN false_BLOCK>1 (post-#67 watch; baseline still 4)` when
+  the count exceeds 1 (informational; does not fail the gate).
 
 ### Fixed
 - **Suite-label mandate quote + spend-span recovery (issue #66

@@ -7,7 +7,11 @@ import { describe, expect, it } from 'vitest';
 import docsHandler from '../api/docs.js';
 import redocHandler from '../api/redoc.js';
 import {
+  DOCS_CDN,
+  DOCS_CSP,
   OPENAPI_SPEC_URL,
+  REDOC_VERSION,
+  SWAGGER_UI_DIST_VERSION,
   redocHtml,
   sendDocsHtml,
   swaggerUiHtml,
@@ -60,6 +64,28 @@ describe('openapi docs HTML', () => {
     expect(redoc).toContain('spec-url="/openapi.json"');
   });
 
+  it('pins exact CDN versions with sha384 SRI (no floating majors)', () => {
+    const swagger = swaggerUiHtml();
+    const redoc = redocHtml();
+    expect(SWAGGER_UI_DIST_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(REDOC_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(swagger).toContain(`swagger-ui-dist@${SWAGGER_UI_DIST_VERSION}/`);
+    expect(redoc).toContain(`redoc@${REDOC_VERSION}/`);
+    expect(swagger).not.toContain('swagger-ui-dist@5/');
+    expect(redoc).not.toContain('redoc@2/');
+    expect(swagger).toContain('integrity="sha384-');
+    expect(redoc).toContain('integrity="sha384-');
+    for (const asset of Object.values(DOCS_CDN)) {
+      expect(asset.integrity).toMatch(/^sha384-[A-Za-z0-9+/]+=*$/);
+      expect(asset.href).toContain('unpkg.com');
+    }
+    expect(swagger).toContain(`integrity="${DOCS_CDN.swaggerCss.integrity}"`);
+    expect(swagger).toContain(`integrity="${DOCS_CDN.swaggerBundle.integrity}"`);
+    expect(redoc).toContain(`integrity="${DOCS_CDN.redoc.integrity}"`);
+    expect(swagger.match(/crossorigin="anonymous"/g)?.length).toBe(2);
+    expect(redoc.match(/crossorigin="anonymous"/g)?.length).toBe(1);
+  });
+
   it('escapes a custom spec URL in HTML attributes', () => {
     const html = redocHtml('https://example.test/openapi.json?q="><script>');
     expect(html).not.toContain('"><script>');
@@ -73,6 +99,8 @@ describe('sendDocsHtml', () => {
     sendDocsHtml({ method: 'GET' }, ctx.res, swaggerUiHtml());
     expect(ctx.statusCode).toBe(200);
     expect(ctx.headers['Content-Type']).toBe('text/html; charset=utf-8');
+    expect(ctx.headers['Content-Security-Policy']).toBe(DOCS_CSP);
+    expect(ctx.headers['Content-Security-Policy']).toContain("script-src 'unsafe-inline' https://unpkg.com");
     expect(String(ctx.body)).toContain('SwaggerUIBundle');
     expect(String(ctx.body)).toContain('/openapi.json');
   });

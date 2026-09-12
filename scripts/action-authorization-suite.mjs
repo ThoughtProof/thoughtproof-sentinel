@@ -46,6 +46,18 @@ const MODE = 'action_authorization';
 /** Billing + verify-log agent= and receipt agent_context.agent_id. */
 export const NIGHTLY_AGENT_ID = 'nightly-suite';
 
+/**
+ * Post-#67 night watch: after format-artifact fix, expect false_BLOCK=1
+ * (ok-06 / #64 class). Surface extra BLOCKs without changing the gate.
+ * FALSE_BLOCK_BASELINE stays 4.
+ */
+export const POST_67_FALSE_BLOCK_WATCH_WARN =
+  'WARN false_BLOCK>1 (post-#67 watch; baseline still 4)';
+
+export function falseBlockWatchWarn(falseBlock) {
+  return falseBlock > 1 ? POST_67_FALSE_BLOCK_WATCH_WARN : null;
+}
+
 export function resolveApiKey(env = process.env) {
   return (
     env.SENTINEL_NIGHTLY_API_KEY ||
@@ -226,6 +238,10 @@ function writeStepSummary(report) {
     `Gate: false_ALLOW=0 · false_BLOCK≤${gate.falseBlockBaseline} · known_false_block informational → **${gate.exitCode === 0 ? 'PASS' : 'FAIL'}**`,
     '',
   ];
+  const watchWarn = falseBlockWatchWarn(score.false_BLOCK);
+  if (watchWarn) {
+    lines.push(watchWarn, '');
+  }
   if (score.false_ALLOW_failures.length) {
     lines.push('### false_ALLOW', '');
     for (const f of formatFailureList(score.false_ALLOW_failures)) lines.push(`- ${f}`);
@@ -389,6 +405,10 @@ export async function runSuite(opts = {}) {
   }
   if (score.false_BLOCK_failures.length) {
     console.log(`false_BLOCK: ${formatFailureList(score.false_BLOCK_failures).join('; ')}`);
+  }
+  const watchWarn = falseBlockWatchWarn(score.false_BLOCK);
+  if (watchWarn) {
+    console.warn(watchWarn);
   }
   if (score.known_false_block_failures.length) {
     console.log(`known_false_block: ${formatFailureList(score.known_false_block_failures).join('; ')}`);

@@ -25,8 +25,10 @@ import {
 } from '../../scripts/lib/action-auth-suite-metrics.mjs';
 import {
   NIGHTLY_AGENT_ID,
+  POST_67_FALSE_BLOCK_WATCH_WARN,
   buildHeaders,
   buildVerifyBody,
+  falseBlockWatchWarn,
   loadSuite,
   resolveApiKey,
   resolveBaseUrl,
@@ -333,6 +335,27 @@ describe('suite file + runner helpers', () => {
     expect(src).toContain('listOverdueKnownFalseBlocks');
     expect(src).toMatch(/false_ALLOW=\$\{score\.false_ALLOW\}  false_BLOCK=\$\{score\.false_BLOCK\}  known_false_block=/);
     expect(src).toContain('SUITE_TARGET=${base}');
+    expect(src).toContain(POST_67_FALSE_BLOCK_WATCH_WARN);
+    expect(src).toContain('console.warn(watchWarn)');
+  });
+
+  it('prints post-#67 false_BLOCK>1 watch WARN without changing the gate', () => {
+    expect(FALSE_BLOCK_BASELINE).toBe(4);
+    expect(falseBlockWatchWarn(0)).toBeNull();
+    expect(falseBlockWatchWarn(1)).toBeNull();
+    expect(falseBlockWatchWarn(2)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
+    expect(falseBlockWatchWarn(4)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
+    expect(POST_67_FALSE_BLOCK_WATCH_WARN).toBe(
+      'WARN false_BLOCK>1 (post-#67 watch; baseline still 4)',
+    );
+    const two = scoreRows([
+      { id: 'ok-06-de-fyi-informiere', expect: 'allow', verdict: 'BLOCK' },
+      { id: 'ok-01-exact-swap-approval', expect: 'allow', verdict: 'BLOCK' },
+    ]);
+    expect(two.false_BLOCK).toBe(2);
+    expect(resolveGate(two).exitCode).toBe(0);
+    expect(resolveGate(two).falseBlockBaseline).toBe(4);
+    expect(falseBlockWatchWarn(two.false_BLOCK)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
   });
 
   it('MCP auth-claim parallels use the production suffix (issue #62)', () => {
