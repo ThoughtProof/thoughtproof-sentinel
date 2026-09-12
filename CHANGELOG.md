@@ -2,6 +2,29 @@
 
 ### Added
 - **Nightly docs CDN SRI:** cron / dispatch verifies unpkg bytes against `DOCS_CDN` sha384 pins. Hash mismatch fails the job; unpkg fetch/non-200 is WARN (exit 0). Count the **suite** job — not the whole workflow — when tallying green nights for `FALSE_BLOCK_BASELINE` 4→0.
+- **M1 signed canonical export + pinable key discovery (PriorSeal):**
+  Detached Ed25519 envelope `thoughtproof.sentinel.export.v1` over
+  `domain || 0x00 || JCS({artifactSchema,verificationId,canonical,digest,keyId,alg,signedAt,validUntil?})`.
+  Commitment digest remains **only** `hashCanonicalSentinelVerdict` over
+  transported canonical.v1 JCS bytes (fixture `0x419c360d…` unchanged;
+  `validUntil` is envelope-only). **Two kids:** `…-vector` (`status:
+  vector-only`, seed only in fixture generator — never production) and
+  `tp-sentinel-export-ed25519-2026-09` (`status: active`, public OKP/JWK
+  only; private key **only** via `SENTINEL_EXPORT_PRIVATE_KEY` env).
+  Key doc is `thoughtproof.keys.v1` (OKP + TP status extensions — **not**
+  a pure JWKS). JWK `alg` = `EdDSA` (JOSE); envelope `alg` = `Ed25519`
+  (do not cross-compare). When env key set, `POST /sentinel/verify` may
+  include `signed_export`; omitted when unset. Public keys:
+  `GET /.well-known/thoughtproof-keys.json`. Portable verifier:
+  `scripts/verify-canonical-export.mjs` (excludes `vector-only`/`retired`
+  unless `--allow-vector-only`). Vectors under `scripts/fixtures/m1-export/`.
+  Module: `src/canonical-export.ts`.
+  Follow-up: env boot-check (derived OKP x must match published active x;
+  else no sign + `export_signer` on `/sentinel/health`); hard-reject
+  `VECTOR_KEY_ID` on issue/load; portable codes
+  `DECISION_SIGNATURE_INVALID` vs `DECISION_SIGNER_UNTRUSTED`; verify
+  order key→sig→digest (§4); key window vs **signedAt** (not verifier clock); prod nbf=2026-09-12 ≠ vector nbf; readiness memoized; keys JSON static-import (bundle-safe); retired still verifies historical in-window.
+
 - **Published API docs (`/docs`, `/redoc`):** lightweight Swagger UI
   and ReDoc pages that load the live `/openapi.json`. Prod previously
   404'd both paths (Vercel `NOT_FOUND`) while the spec itself worked.

@@ -9,7 +9,9 @@
     "typecheck": "tsc --noEmit",
     "dev": "echo 'Use: npx vercel dev --listen 3001'",
     "suite:action-auth": "node scripts/action-authorization-suite.mjs",
-    "docs:sri": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/verify-docs-cdn-sri.ts"
+    "docs:sri": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/verify-docs-cdn-sri.ts",
+    "gen:m1-export-vectors": "node scripts/gen-m1-export-vectors.mjs",
+    "verify:m1-export": "node scripts/verify-canonical-export.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

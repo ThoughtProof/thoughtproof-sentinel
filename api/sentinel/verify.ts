@@ -20,6 +20,7 @@ import {
   isModelConfigReady,
   modelConfigUnavailablePayload,
 } from '../../src/model-config.js';
+import { maybeIssueSignedExport } from '../../src/canonical-export.js';
 
 const VERSION = '0.1.0';
 const VALID_PLATFORMS: PaymentPlatform[] = ['openserv', 'acp', 'direct'];
@@ -179,6 +180,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `${unclassifiedAbstention !== undefined ? ` unclassified_abstention=${unclassifiedAbstention ? 1 : 0}` : ''}`,
     );
 
+    // --- M1 signed canonical export (only when SENTINEL_EXPORT_PRIVATE_KEY set) ---
+    // Detached envelope over canonical.v1 — not EAS. Omitted when unset so
+    // pre-M1 response shape stays compatible. Never blocks verify on sign fail.
+    const signedExport = maybeIssueSignedExport(processedResponse);
+
     // --- Final response snapshot (sole return value) ---
     const finalResponse = {
       ...processedResponse,
@@ -199,6 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         platform: billingEvent.platform,
         ...(paymentResult.paymentMethod && { payment_method: paymentResult.paymentMethod }),
       },
+      ...(signedExport ? { signed_export: signedExport } : {}),
     };
 
     // --- ADR-0020 shadow observability (flag default OFF; never mutates response) ---
