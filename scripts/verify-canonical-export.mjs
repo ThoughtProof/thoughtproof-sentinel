@@ -2,20 +2,20 @@
 /**
  * Portable verifier for ThoughtProof Sentinel M1 signed canonical exports.
  *
- * Zero repo dependency beyond Node 18+ (uses built-in crypto only).
- * JCS for the *envelope* signed fields uses a minimal RFC 8785-compatible
- * sort+serialize that matches `canonicalize` for the flat export field set
- * (string/number only, no floats that need es6 number formatting edge cases
- * beyond integers we emit).
+ * Zero repo dependency beyond Node 18+ (built-in crypto only).
  *
  *   node scripts/verify-canonical-export.mjs <export.json> \
- *     [--keys path-or-url] [--now unix] [--require-valid-until]
+ *     [--keys path-or-url] [--now unix] [--require-valid-until] \
+ *     [--allow-vector-only]
  *
  * Default keys URL:
  *   https://sentinel.thoughtproof.ai/.well-known/thoughtproof-keys.json
  *
+ * Key document: thoughtproof.keys.v1 (OKP + TP status extensions) — not pure JWKS.
+ * JWK alg = EdDSA (JOSE). Envelope alg = Ed25519. Do not cross-compare them.
+ *
  * Verification order (M1 contract):
- *   1. pin keyId → public key
+ *   1. resolve keyId → OKP key; reject retired / vector-only (unless flag)
  *   2. Ed25519 verify domain||0x00||JCS(fields)
  *   3. sha256(UTF-8(transported canonical string)) === digest
  *   4. optional validUntil vs --now
@@ -25,7 +25,7 @@ import {
   createHash,
   verify as cryptoVerify,
 } from 'crypto';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 const DOMAIN = 'thoughtproof.sentinel.export.v1';
@@ -72,7 +72,21 @@ function digestCanonical(canonical) {
   return '0x' + createHash('sha256').update(canonical, 'utf8').digest('hex');
 }
 
+/**
+ * Resolve public key from a thoughtproof.keys.v1 entry.
+ * Preferred: OKP JWK { kty, crv, x }. Legacy PEM/hex accepted during transition.
+ */
 function resolvePub(entry) {
+  if (entry.kty === 'OKP' && entry.crv === 'Ed25519' && typeof entry.x === 'string') {
+    return createPublicKey({
+      key: {
+        kty: 'OKP',
+        crv: 'Ed25519',
+        x: entry.x,
+      },
+      format: 'jwk',
+    });
+  }
   if (entry.publicKeyPem) return createPublicKey(entry.publicKeyPem);
   if (entry.publicKey && /^[0-9a-fA-F]{64}$/.test(entry.publicKey)) {
     const raw = Buffer.from(entry.publicKey, 'hex');
@@ -82,7 +96,21 @@ function resolvePub(entry) {
     ]);
     return createPublicKey({ key: spki, format: 'der', type: 'spki' });
   }
-  throw new Error('key entry missing publicKeyPem/publicKey');
+  throw new Error('key entry missing OKP x (or legacy publicKeyPem/publicKey)');
+}
+
+/** status extensions: only `active` is production-trustworthy. */
+function keyUsable(entry, allowVectorOnly) {
+  const status = entry.status || 'active';
+  if (status === 'retired') {
+    return { ok: false, reason: 'key_retired' };
+  }
+  if (status === 'vector-only') {
+    if (allowVectorOnly) return { ok: true };
+    return { ok: false, reason: 'vector_only_key_not_allowed' };
+  }
+  if (status === 'active') return { ok: true };
+  return { ok: false, reason: 'key_status_unusable', status };
 }
 
 async function loadKeys(ref) {
@@ -101,6 +129,7 @@ function parseArgs(argv) {
     keys: DEFAULT_KEYS,
     now: Math.floor(Date.now() / 1000),
     requireValidUntil: false,
+    allowVectorOnly: false,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -108,6 +137,7 @@ function parseArgs(argv) {
     if (a === '--keys') out.keys = argv[++i];
     else if (a === '--now') out.now = Number(argv[++i]);
     else if (a === '--require-valid-until') out.requireValidUntil = true;
+    else if (a === '--allow-vector-only') out.allowVectorOnly = true;
     else rest.push(a);
   }
   out.path = rest[0] || null;
@@ -118,13 +148,13 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.path) {
     console.error(
-      'Usage: node scripts/verify-canonical-export.mjs <export.json> [--keys path|url] [--now unix] [--require-valid-until]',
+      'Usage: node scripts/verify-canonical-export.mjs <export.json> [--keys path|url] [--now unix] [--require-valid-until] [--allow-vector-only]',
     );
     process.exit(1);
   }
   const exp = JSON.parse(readFileSync(args.path, 'utf8'));
-  // Allow full verify response with signed_export nested
-  const artifact = exp.signed_export && typeof exp.signed_export === 'object' ? exp.signed_export : exp;
+  const artifact =
+    exp.signed_export && typeof exp.signed_export === 'object' ? exp.signed_export : exp;
 
   const required = [
     'artifactSchema',
@@ -142,6 +172,7 @@ async function main() {
       process.exit(2);
     }
   }
+  // Envelope alg is Ed25519 (primitive). Do not require equality with JWK alg EdDSA.
   if (artifact.alg !== 'Ed25519') {
     console.log(JSON.stringify({ ok: false, error: 'alg_unsupported', alg: artifact.alg }, null, 2));
     process.exit(2);
@@ -168,18 +199,59 @@ async function main() {
 
   const { doc, source } = await loadKeys(args.keys);
   const entry = (doc.keys || []).find(
-    (k) => (k.kid === artifact.keyId || k.keyId === artifact.keyId) && k.status !== 'retired',
+    (k) => k.kid === artifact.keyId || k.keyId === artifact.keyId,
   );
   if (!entry) {
     console.log(
-      JSON.stringify({ ok: false, error: 'key_not_found', keyId: artifact.keyId, keys: source }, null, 2),
+      JSON.stringify(
+        {
+          ok: false,
+          error: 'key_not_found',
+          code: 'DECISION_SIGNER_UNTRUSTED',
+          keyId: artifact.keyId,
+          keys: source,
+        },
+        null,
+        2,
+      ),
     );
     process.exit(3);
   }
+
+  const usable = keyUsable(entry, args.allowVectorOnly);
+  if (!usable.ok) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: false,
+          error: usable.reason,
+          code: 'DECISION_SIGNER_UNTRUSTED',
+          keyId: artifact.keyId,
+          status: entry.status || null,
+          keys: source,
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(3);
+  }
+
   if (entry.notAfter) {
     const until = Math.floor(new Date(entry.notAfter).getTime() / 1000);
     if (Number.isFinite(until) && args.now > until) {
-      console.log(JSON.stringify({ ok: false, error: 'key_expired', keyId: artifact.keyId }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            ok: false,
+            error: 'key_expired',
+            code: 'DECISION_SIGNER_UNTRUSTED',
+            keyId: artifact.keyId,
+          },
+          null,
+          2,
+        ),
+      );
       process.exit(3);
     }
   }
@@ -199,20 +271,35 @@ async function main() {
     process.exit(2);
   }
 
-  const pub = resolvePub(entry);
+  let pub;
+  try {
+    pub = resolvePub(entry);
+  } catch (err) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: false,
+          error: 'key_unusable',
+          detail: err instanceof Error ? err.message : String(err),
+          keyId: artifact.keyId,
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(3);
+  }
+
   const sigHex = String(artifact.signature).replace(/^0x/i, '');
-  const sigOk = cryptoVerify(
-    null,
-    buildSignedInput(fields),
-    pub,
-    Buffer.from(sigHex, 'hex'),
-  );
+  const signedInput = buildSignedInput(fields);
+  const sigOk = cryptoVerify(null, signedInput, pub, Buffer.from(sigHex, 'hex'));
   if (!sigOk) {
     console.log(
       JSON.stringify(
         {
           ok: false,
           error: 'signature_invalid',
+          code: 'DECISION_SIGNER_UNTRUSTED',
           keyId: artifact.keyId,
           keys: source,
           recomputedDigest: recomputed,
@@ -246,6 +333,7 @@ async function main() {
       {
         ok: true,
         keyId: artifact.keyId,
+        keyStatus: entry.status || 'active',
         verificationId: artifact.verificationId,
         digest: artifact.digest,
         recomputedDigest: recomputed,
@@ -253,6 +341,9 @@ async function main() {
         validUntil: fields.validUntil ?? null,
         keys: source,
         domain: DOMAIN,
+        envelopeAlg: artifact.alg,
+        jwkAlg: entry.alg || null,
+        note: 'envelope alg Ed25519 ≠ JWK alg EdDSA — do not cross-compare',
       },
       null,
       2,

@@ -229,3 +229,24 @@ describe('canonical-export M1 envelope', () => {
     expect(verifySignedCanonicalExport(swapped, publicKey).ok).toBe(false);
   });
 });
+
+describe('thoughtproof.keys.v1 separation', () => {
+  it('publishes distinct vector-only and active OKP kids; vector seed ≠ prod x', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const doc = JSON.parse(
+      readFileSync(join(process.cwd(), 'data', 'thoughtproof-keys.json'), 'utf8'),
+    );
+    expect(doc.schema).toBe('thoughtproof.keys.v1');
+    const vector = doc.keys.find((k: { status: string }) => k.status === 'vector-only');
+    const active = doc.keys.find((k: { status: string }) => k.status === 'active');
+    expect(vector?.kid).toBe('tp-sentinel-export-ed25519-2026-09-vector');
+    expect(active?.kid).toBe('tp-sentinel-export-ed25519-2026-09');
+    expect(vector?.kty).toBe('OKP');
+    expect(active?.kty).toBe('OKP');
+    expect(vector?.alg).toBe('EdDSA');
+    expect(active?.alg).toBe('EdDSA');
+    expect(vector?.x).not.toBe(active?.x);
+    expect(vector?.kid).not.toBe(active?.kid);
+  });
+});

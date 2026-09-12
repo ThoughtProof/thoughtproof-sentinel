@@ -72,6 +72,9 @@ export const EXPORT_TTL_SECONDS_ENV = 'SENTINEL_EXPORT_TTL_SECONDS';
 
 const DEFAULT_KEY_ID = 'tp-sentinel-export-ed25519-2026-09';
 
+/** Vector-only kid (fixtures). Never the default production signer. */
+export const VECTOR_KEY_ID = 'tp-sentinel-export-ed25519-2026-09-vector';
+
 /** Fields covered by the envelope signature (JCS object inside signed_input). */
 export interface CanonicalExportSignedFields {
   artifactSchema: CanonicalSentinelVerdictBody['artifactSchema'];
