@@ -13,6 +13,9 @@ export default function handler(_req: VercelRequest, res: VercelResponse) {
       health: '/sentinel/health',
       verify: '/sentinel/verify',
       tiers: '/sentinel/tiers',
+      openapi: '/openapi.json',
+      docs: '/docs',
+      redoc: '/redoc',
     },
     auth: 'X-API-Key or x402 micropayment (USDC on Base)',
   });

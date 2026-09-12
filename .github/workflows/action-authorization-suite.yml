@@ -6,6 +6,10 @@
 # (~20–25¢/night at standard: 26 × $0.008). Preview is an optional
 # override for workflow_dispatch / PR only — nightly does not follow
 # rotating Preview URLs or SSO bypass.
+# PR runs always measure production by default; code changes on the PR
+# branch are validated post-deploy (or only if SENTINEL_BASE_URL /
+# base_url is explicitly set to a Preview that has
+# VERCEL_AUTOMATION_BYPASS_SECRET configured).
 #
 # Required repository secrets (do not hardcode keys):
 #   SENTINEL_NIGHTLY_API_KEY     dedicated X-Sentinel-Key for this job
@@ -23,9 +27,11 @@
 #
 # Gate:
 #   fail if false_ALLOW > 0 or transport/parse errors > 0
-#   fail if false_BLOCK > FALSE_BLOCK_BASELINE (named constant = 4:
-#   ok-01/02/03 + ok-06). Not a permanent soft-pass. Changing the
-#   constant requires a CHANGELOG line. After #51 lower baseline to 0.
+#   fail if false_BLOCK > FALSE_BLOCK_BASELINE (named constant = 4).
+#   After #67, suite-format ok-01/02/03 should ALLOW on prod;
+#   remaining named baseline case is primarily ok-06 (#64 class).
+#   Not a permanent soft-pass. Changing the constant requires a
+#   CHANGELOG line. After #51 lower baseline to 0.
 #   known_false_block is printed every night and does not enter this
 #   gate — do not raise FALSE_BLOCK_BASELINE to hide those fixtures (#64).
 #   Each kfb fixture requires since (YYYY-MM-DD). After 7 nights,
@@ -101,6 +107,7 @@ jobs:
           SENTINEL_TIER: standard
         run: |
           set -euo pipefail
+          echo "SUITE_TARGET=${SENTINEL_BASE_URL}"
           KEY="${SENTINEL_NIGHTLY_API_KEY:-}"
           if [ -z "$KEY" ]; then
             KEY="${SENTINEL_API_KEY:-}"

@@ -1,6 +1,11 @@
 ## Unreleased
 
 ### Added
+- **Published API docs (`/docs`, `/redoc`):** lightweight Swagger UI
+  and ReDoc pages that load the live `/openapi.json`. Prod previously
+  404'd both paths (Vercel `NOT_FOUND`) while the spec itself worked.
+  Partner verification surface for M1 / YuTao. No change to
+  `/sentinel/verify` or promotion.
 - **MCP-form financial ok-01/02/03 fixtures (issue #66 Track 1b):**
   parallel ids `ok-01-mcp-auth-claim`, `ok-02-mcp-auth-claim`,
   `ok-03-mcp-auth-claim` so nightly measures the live MCP claim
@@ -54,6 +59,17 @@
   before considering a new ceiling. Companion: #36 stays closed only
   after proof that ship-mismatch still BLOCKs and FYI still ALLOWs
   under the new claim.
+
+### Changed
+- **Suite workflow header honesty (after #67 / #66):** document that
+  PR/live-suite jobs measure **production** by default — branch code
+  is validated post-deploy, or only if `SENTINEL_BASE_URL` /
+  `base_url` points at a Preview with
+  `VERCEL_AUTOMATION_BYPASS_SECRET` (Preview-SSO measurement gap).
+  Gate comment no longer lists ok-01/02/03 as current baseline
+  occupants; remaining named case is primarily ok-06 (#64 class).
+  **`FALSE_BLOCK_BASELINE` unchanged (still 4).** Job logs print
+  `SUITE_TARGET=<url>`.
 
 ### Fixed
 - **Suite-label mandate quote + spend-span recovery (issue #66

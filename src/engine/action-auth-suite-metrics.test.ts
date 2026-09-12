@@ -332,6 +332,7 @@ describe('suite file + runner helpers', () => {
     expect(src).toContain('known_false_block');
     expect(src).toContain('listOverdueKnownFalseBlocks');
     expect(src).toMatch(/false_ALLOW=\$\{score\.false_ALLOW\}  false_BLOCK=\$\{score\.false_BLOCK\}  known_false_block=/);
+    expect(src).toContain('SUITE_TARGET=${base}');
   });
 
   it('MCP auth-claim parallels use the production suffix (issue #62)', () => {
@@ -406,6 +407,10 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('20–25¢');
     expect(yml).toContain('#51');
     expect(yml).toContain('#64');
+    expect(yml).toContain('PR runs always measure production by default');
+    expect(yml).toContain('SUITE_TARGET=');
+    expect(yml).not.toContain('ok-01/02/03 + ok-06');
+    expect(yml).toContain('remaining named baseline case is primarily ok-06');
     expect(yml).not.toMatch(/X-Sentinel-Key:\s*['\"]?[a-zA-Z0-9_-]{16,}/);
   });
 });

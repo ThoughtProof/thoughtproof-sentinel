@@ -259,6 +259,7 @@ export async function runSuite(opts = {}) {
   const suite = loadSuite(opts.suitePath ?? DEFAULT_SUITE);
   const dryRun = opts.dryRun === true;
   const base = resolveBaseUrl(env);
+  console.log(`SUITE_TARGET=${base}`);
   const url = `${base}/sentinel/verify`;
   const tier = env.SENTINEL_TIER || DEFAULT_TIER;
   const key = resolveApiKey(env);
