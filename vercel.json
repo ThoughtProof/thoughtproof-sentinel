@@ -1,6 +1,10 @@
 {
   "rewrites": [
     { "source": "/openapi.json", "destination": "/api/openapi" },
+    { "source": "/docs", "destination": "/api/docs" },
+    { "source": "/docs/", "destination": "/api/docs" },
+    { "source": "/redoc", "destination": "/api/redoc" },
+    { "source": "/redoc/", "destination": "/api/redoc" },
     { "source": "/.well-known/x402", "destination": "/api/well-known/x402" },
     {
       "source": "/.well-known/validation-keys.json",

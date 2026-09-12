@@ -9,6 +9,9 @@ Agentic verification API — lightweight verification for autonomous agent workf
 | `/sentinel/health` | GET | Liveness (`ok`) + readiness (`ready`, `serv_key`, `rate_limit`). `rate_limit: "redis"` means Upstash env is configured, not connectivity-checked. |
 | `/sentinel/tiers` | GET | Tier discovery |
 | `/sentinel/verify` | POST | Verification (501 until engine wired) |
+| `/openapi.json` | GET | Live OpenAPI 3.1 document |
+| `/docs` | GET | Swagger UI over `/openapi.json` |
+| `/redoc` | GET | ReDoc over `/openapi.json` |
 
 ## Tiers
 
