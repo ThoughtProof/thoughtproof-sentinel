@@ -8,6 +8,7 @@
   does not change `ENGINE_BUDGET_MS` or the 15s reserve.
 
 ### Added
+- **`kfb-03-deploy-ship-ops-merge-gate` (issue #75):** third `known_false_block` fixture for the ops merge-gate false_BLOCK class — legitimate `deploy_ship` squash-merge claim carrying tip SHA + PR digits. Product should ALLOW matching `deploy_ship×deploy_ship`; today amount/recipient cascade gold steps have no `SENTINEL_AXIS_HINT` PASS path, so digit/SHA noise fails closed. Production receipts: `sent_5f344e2183c14359` (#73), `sent_479f0a63fba24546` / `sent_dc7beaaf061d40f6` / `sent_142896ec642f4915` (#74). `since: 2026-09-14` starts the 7-night clock. Informational only — does **not** enter `FALSE_BLOCK_BASELINE`. Do not fix by banning digits/SHA in claims. Suite is now **27** scenarios. Kids remain parked.
 - **Nightly docs CDN SRI:** cron / dispatch verifies unpkg bytes against `DOCS_CDN` sha384 pins. Hash mismatch fails the job; unpkg fetch/non-200 is WARN (exit 0). Count the **suite** job — not the whole workflow — when tallying green nights for `FALSE_BLOCK_BASELINE` 4→0.
 - **M1 signed canonical export + pinable key discovery (PriorSeal):**
   Detached Ed25519 envelope `thoughtproof.sentinel.export.v1` over

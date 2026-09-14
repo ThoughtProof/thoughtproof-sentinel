@@ -53,7 +53,7 @@ SENTINEL_NIGHTLY_API_KEY=… SENTINEL_BASE_URL=https://<preview> npm run suite:a
 
 Use a **dedicated** Sentinel API key (secret `SENTINEL_NIGHTLY_API_KEY`).
 Every request sets `X-Sentinel-Agent-Id: nightly-suite` (billing `agent_id`
-and verify-log `agent=`) plus `agent_context.agent_id` so the 26 nightly
+and verify-log `agent=`) plus `agent_context.agent_id` so the 27 nightly
 receipts can be filtered from organic traffic.
 
 **First-ship baseline:** `false_ALLOW` must be **0**. `false_BLOCK` is a

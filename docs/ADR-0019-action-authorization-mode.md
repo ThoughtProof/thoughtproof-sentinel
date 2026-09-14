@@ -284,12 +284,16 @@ collapse. Documented at the same honesty bar as Merlini / external
 collapses so the pair is auditable. Product gap: matching
 `deploy_ship×deploy_ship` currently emits no `SENTINEL_AXIS_HINT`
 PASS path for amount/recipient gold steps (cascade calibration);
-digit noise therefore fails closed.
+digit noise therefore fails closed. Follow-up issue **#75**; suite fixture
+`kfb-03-deploy-ship-ops-merge-gate` (`known_false_block: true`,
+`since: 2026-09-14`) measures the claim form on the prose path without
+raising the baseline. Required fix remains cascade-side PASS hint — not
+"no digits in claim".
 
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;
 `agent_context.agent_id` on the receipt) using a dedicated
-`SENTINEL_NIGHTLY_API_KEY`. The 26 nightly receipts also sample
+`SENTINEL_NIGHTLY_API_KEY`. The 27 nightly receipts also sample
 FYI-ALLOW rate (promotion / kinds / `decision_basis`), including
 MCP auth-claim variants (issues #62 / #66). After #66 Track 1b,
 MCP ok-01/02/03 measure the live financial ALLOW path; suite
