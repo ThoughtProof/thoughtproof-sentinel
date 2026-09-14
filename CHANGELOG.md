@@ -1,5 +1,12 @@
 ## Unreleased
 
+### Changed
+- **Export signer load memo:** `loadExportSignerFromEnv` caches the parsed
+  `LoadedExportSigner` per cold-start env fingerprint (key material / kid /
+  TTL / keys path). Avoids repeating `resolvePrivateKey` on every verify
+  after the existing readiness cache hit. Post-engine tail hygiene only —
+  does not change `ENGINE_BUDGET_MS` or the 15s reserve.
+
 ### Added
 - **Nightly docs CDN SRI:** cron / dispatch verifies unpkg bytes against `DOCS_CDN` sha384 pins. Hash mismatch fails the job; unpkg fetch/non-200 is WARN (exit 0). Count the **suite** job — not the whole workflow — when tallying green nights for `FALSE_BLOCK_BASELINE` 4→0.
 - **M1 signed canonical export + pinable key discovery (PriorSeal):**

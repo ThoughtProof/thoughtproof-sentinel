@@ -9,6 +9,7 @@ import {
   maybeIssueSignedExport,
   getExportSignerReadiness,
   clearExportSignerReadinessCache,
+  getExportPrivateKeyParseCount,
   VECTOR_KEY_ID,
   DEFAULT_KEY_ID,
   publicKeyOkpX,
@@ -355,6 +356,56 @@ describe('export signer boot check + vector kid hard reject', () => {
     const v = verifySignedCanonicalExport(stretched, publicKey, { nowSeconds: 1_000 });
     expect(v.ok).toBe(false);
     expect(v.code).toBe('signature_invalid');
+  });
+});
+
+describe('export signer load memoization (post-engine tail hygiene)', () => {
+  beforeEach(() => {
+    clearExportSignerReadinessCache();
+  });
+
+  it('parses private key once across repeated loadExportSignerFromEnv calls', () => {
+    const env = {
+      SENTINEL_EXPORT_PRIVATE_KEY: '55'.repeat(32),
+      SENTINEL_EXPORT_KEY_ID: 'memo-kid',
+      SENTINEL_EXPORT_TTL_SECONDS: '90',
+    };
+    const opts = { requirePublishedMatch: false as const };
+
+    const first = loadExportSignerFromEnv(env, opts);
+    const second = loadExportSignerFromEnv(env, opts);
+    const third = loadExportSignerFromEnv(env, opts);
+
+    expect(first).not.toBeNull();
+    expect(first!.keyId).toBe('memo-kid');
+    expect(first!.ttlSeconds).toBe(90);
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    expect(getExportPrivateKeyParseCount()).toBe(1);
+  });
+
+  it('re-parses when env private key or key id changes', () => {
+    const opts = { requirePublishedMatch: false as const };
+    const a = loadExportSignerFromEnv(
+      {
+        SENTINEL_EXPORT_PRIVATE_KEY: '66'.repeat(32),
+        SENTINEL_EXPORT_KEY_ID: 'memo-kid-a',
+      },
+      opts,
+    );
+    const b = loadExportSignerFromEnv(
+      {
+        SENTINEL_EXPORT_PRIVATE_KEY: '77'.repeat(32),
+        SENTINEL_EXPORT_KEY_ID: 'memo-kid-b',
+      },
+      opts,
+    );
+    expect(a).not.toBeNull();
+    expect(b).not.toBeNull();
+    expect(b).not.toBe(a);
+    expect(a!.keyId).toBe('memo-kid-a');
+    expect(b!.keyId).toBe('memo-kid-b');
+    expect(getExportPrivateKeyParseCount()).toBe(2);
   });
 });
 
