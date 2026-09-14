@@ -184,8 +184,12 @@ function normalizeSignatureHex(sig: string): string {
   return `0x${h.toLowerCase()}`;
 }
 
+/** Test helper: how many times resolvePrivateKey parsed string material. */
+let privateKeyParseCount = 0;
+
 function resolvePrivateKey(key: KeyObject | string): KeyObject {
   if (typeof key !== 'string') return key;
+  privateKeyParseCount += 1;
   const trimmed = key.trim();
   if (trimmed.includes('BEGIN')) {
     return createPrivateKey(trimmed);
@@ -369,9 +373,19 @@ function readinessCacheKey(
 
 let readinessMemo: { key: string; value: ExportSignerReadiness } | null = null;
 
-/** Test helper: drop module memo between cases. */
+/** Loaded signer (parsed KeyObject) — separate from readiness; once per cold-start fingerprint. */
+let loadedSignerMemo: { key: string; value: LoadedExportSigner | null } | null = null;
+
+/** Test helper: drop module memos between cases. */
 export function clearExportSignerReadinessCache(): void {
   readinessMemo = null;
+  loadedSignerMemo = null;
+  privateKeyParseCount = 0;
+}
+
+/** Test helper: resolvePrivateKey string-parse count since last cache clear. */
+export function getExportPrivateKeyParseCount(): number {
+  return privateKeyParseCount;
 }
 
 /**
@@ -725,13 +739,39 @@ export interface LoadExportSignerOptions {
   nowSeconds?: number;
 }
 
+function loadedSignerCacheKey(
+  env: NodeJS.ProcessEnv,
+  opts: LoadExportSignerOptions,
+): string {
+  return [
+    readinessCacheKey(env, opts.keysPath, opts.nowSeconds),
+    opts.requirePublishedMatch === false ? 'skip' : 'match',
+  ].join('\0');
+}
+
 /**
  * Load signer from process env. Returns null when not configured or boot check fails
  * (verify path stays byte-compatible — no signed_export field).
+ * Parsed private key is memoized per cold-start env fingerprint so verify's
+ * post-engine tail does not re-resolvePrivateKey after a readiness cache hit.
  */
 export function loadExportSignerFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   opts: LoadExportSignerOptions = {},
+): LoadedExportSigner | null {
+  const cacheKey = loadedSignerCacheKey(env, opts);
+  if (loadedSignerMemo && loadedSignerMemo.key === cacheKey) {
+    return loadedSignerMemo.value;
+  }
+
+  const value = computeLoadedExportSigner(env, opts);
+  loadedSignerMemo = { key: cacheKey, value };
+  return value;
+}
+
+function computeLoadedExportSigner(
+  env: NodeJS.ProcessEnv,
+  opts: LoadExportSignerOptions,
 ): LoadedExportSigner | null {
   const requireMatch = opts.requirePublishedMatch !== false;
   if (requireMatch) {
