@@ -89,6 +89,7 @@
   under the new claim.
 
 ### Changed
+- **`FALSE_BLOCK_BASELINE` 4 → 0** after ≥3 green suite nights (Night-1/2/3: `false_ALLOW=0`, `false_BLOCK=0`) and founder GO. `falseBlockWatchWarn` now fires on any `false_BLOCK` (`> 0`). The measurement is the **prose path with MCP-shaped evidence**: suite fixtures only have `id` / `expect` / `claim` / `evidence`; `buildVerifyBody` injects no `mandate.kind` / `action.kind`. Caller-kinds (#51 / #60) remain unit-test only until thoughtproof-mcp 0.4.0 — this is not a claim of live-kinds coverage. ok-06 ALLOW’d for three nights and is no longer a residual baseline occupant. `known_false_block` stays informational.
 - **Suite workflow header honesty (after #67 / #66):** document that
   PR/live-suite jobs measure **production** by default — branch code
   is validated post-deploy, or only if `SENTINEL_BASE_URL` /

@@ -232,12 +232,14 @@ Gate (ratchet, not a permanent soft-pass):
 
 - **Fail** if `false_ALLOW > 0` (or transport/parse errors).
 - **Fail** if `false_BLOCK` **exceeds** named `FALSE_BLOCK_BASELINE`
-  (first ship = **4**: named cases ok-01 / ok-02 / ok-03 / ok-06).
-  Suite-format ok-01/02/03 false_BLOCKs were a format artifact
-  (#66 Track 1b: quote recovery only saw MCP labels). Do not ratchet
-  4→1 until ≥3 green nights + founder GO; remaining case is ok-06 /
-  #64 class. Counts are reported honestly; ok-* are not quarantined.
-  Changing the constant requires a CHANGELOG line.
+  (now **0** after ≥3 green suite nights + founder GO; first-ship
+  occupants were ok-01 / ok-02 / ok-03 / ok-06). Suite-format
+  ok-01/02/03 false_BLOCKs were a format artifact (#66 Track 1b:
+  quote recovery only saw MCP labels). ok-06 ALLOW’d for three
+  nights and is not a residual occupant. Counts are reported
+  honestly; ok-* are not quarantined. Changing the constant
+  requires a CHANGELOG line. Measurement is the prose path with
+  MCP-shaped evidence (`buildVerifyBody` injects no kinds).
 - **`known_false_block` (issue #64):** optional scenario flag for
   classifier false BLOCKs that are **not** the cascade ok-* ratchet
   (informational-path fragility: incidental Deploy/ship verbs on an
@@ -248,8 +250,9 @@ Gate (ratchet, not a permanent soft-pass):
   Ship/founder decide: fix the classifier **or** document as a
   product limitation with rationale (anti-drawer). Nightly WARN when
   age > 7; WARN does not fail the gate.
-- **After #51:** lower `FALSE_BLOCK_BASELINE` to **0** (CHANGELOG).
-  Dispatch `fail_on_false_block` treats the baseline as 0 now.
+- **#51 is closed:** `FALSE_BLOCK_BASELINE` is **0** (CHANGELOG).
+  Dispatch `fail_on_false_block` treats the baseline as 0 (already 0).
+  Caller-kinds remain unit-test only until thoughtproof-mcp 0.4.0.
 
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;

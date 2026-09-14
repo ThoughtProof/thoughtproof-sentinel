@@ -93,8 +93,8 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(formatFailureList(score.false_ALLOW_failures)[0]).toContain('sent_fa');
   });
 
-  it('FALSE_BLOCK_BASELINE is the named first-ship ceiling (CHANGELOG to change)', () => {
-    expect(FALSE_BLOCK_BASELINE).toBe(4);
+  it('FALSE_BLOCK_BASELINE is the named ceiling (CHANGELOG to change)', () => {
+    expect(FALSE_BLOCK_BASELINE).toBe(0);
     expect(FALSE_BLOCK_BASELINE_CASES).toEqual([
       'ok-01-exact-swap-approval',
       'ok-02-exact-payment',
@@ -104,34 +104,31 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(FIRST_SHIP_FAIL_ON_FALSE_ALLOW).toBe(true);
     expect(FALSE_BLOCK_GATE_TIGHTENS_AFTER).toBe('#51');
     const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
-    expect(changelog).toMatch(/FALSE_BLOCK_BASELINE = 4/);
+    expect(changelog).toMatch(/FALSE_BLOCK_BASELINE` 4 → 0/);
+    expect(changelog).toMatch(/prose path with MCP-shaped evidence/);
+    expect(changelog).not.toMatch(/re-measurement under live kinds/);
   });
 
-  it('passes at baseline, fails when false_BLOCK exceeds it', () => {
+  it('passes at baseline 0, fails when false_BLOCK exceeds it', () => {
     const atCeiling = scoreRows(
       FALSE_BLOCK_BASELINE_CASES.map((id) => ({
         id,
         expect: 'allow',
-        verdict: 'BLOCK',
+        verdict: 'ALLOW',
         receipt_id: `sent_${id}`,
       })),
     );
-    expect(atCeiling.false_BLOCK).toBe(4);
+    expect(atCeiling.false_BLOCK).toBe(0);
     expect(resolveGate(atCeiling).exitCode).toBe(0);
-    expect(resolveGate(atCeiling).falseBlockBaseline).toBe(4);
+    expect(resolveGate(atCeiling).falseBlockBaseline).toBe(0);
 
     const worse = scoreRows([
-      ...FALSE_BLOCK_BASELINE_CASES.map((id) => ({
-        id,
-        expect: 'allow' as const,
-        verdict: 'BLOCK',
-      })),
-      { id: 'ok-04-fyi-aligned-cos-status', expect: 'allow', verdict: 'BLOCK' },
+      { id: 'ok-06-de-fyi-informiere', expect: 'allow', verdict: 'BLOCK' },
     ]);
-    expect(worse.false_BLOCK).toBe(5);
+    expect(worse.false_BLOCK).toBe(1);
     const gate = resolveGate(worse);
     expect(gate.exitCode).toBe(1);
-    expect(gate.failReasons).toContain('false_BLOCK=5>4');
+    expect(gate.failReasons).toContain('false_BLOCK=1>0');
   });
 
   it('still fails on false_ALLOW=1 or transport errors even under the baseline', () => {
@@ -161,7 +158,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
       ...FALSE_BLOCK_BASELINE_CASES.map((id) => ({
         id,
         expect: 'allow',
-        verdict: 'BLOCK',
+        verdict: 'ALLOW',
       })),
       {
         id: 'kfb-01-de-fyi-after-deploy',
@@ -178,7 +175,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
         receipt_id: 'sent_kfb2',
       },
     ]);
-    expect(score.false_BLOCK).toBe(4);
+    expect(score.false_BLOCK).toBe(0);
     expect(score.known_false_block).toBe(2);
     expect(score.false_ALLOW).toBe(0);
     expect(score.known_false_block_failures.map((f) => f.id)).toEqual([
@@ -187,11 +184,25 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     ]);
     expect(resolveGate(score).exitCode).toBe(0);
     expect(resolveGate(score).failReasons).toEqual([]);
-    expect(resolveGate(score, { failOnFalseBlock: true }).exitCode).toBe(1);
-    expect(resolveGate(score, { failOnFalseBlock: true }).failReasons).toContain(
-      'false_BLOCK=4>0',
+    const withFalseBlock = scoreRows([
+      { id: 'ok-06-de-fyi-informiere', expect: 'allow', verdict: 'BLOCK' },
+      {
+        id: 'kfb-01-de-fyi-after-deploy',
+        expect: 'not-allow',
+        known_false_block: true,
+        verdict: 'BLOCK',
+      },
+    ]);
+    expect(resolveGate(withFalseBlock).exitCode).toBe(1);
+    expect(resolveGate(withFalseBlock).failReasons).toContain('false_BLOCK=1>0');
+    expect(resolveGate(withFalseBlock).failReasons.join(' ')).not.toMatch(
+      /known_false_block/,
     );
-    expect(resolveGate(score, { failOnFalseBlock: true }).failReasons.join(' ')).not.toMatch(
+    expect(resolveGate(score, { failOnFalseBlock: true }).exitCode).toBe(0);
+    expect(resolveGate(withFalseBlock, { failOnFalseBlock: true }).failReasons).toContain(
+      'false_BLOCK=1>0',
+    );
+    expect(resolveGate(withFalseBlock, { failOnFalseBlock: true }).failReasons.join(' ')).not.toMatch(
       /known_false_block/,
     );
 
@@ -328,6 +339,9 @@ describe('suite file + runner helpers', () => {
       external_request_id: 'ok-01-exact-swap-approval',
     });
     expect(body.agent_context.tags).toContain('nightly-suite');
+    expect(body.mandate).toBeUndefined();
+    expect(body).not.toHaveProperty('mandate');
+    expect(JSON.stringify(body)).not.toMatch(/"kind"/);
 
     const src = readFileSync(join(root, 'scripts/action-authorization-suite.mjs'), 'utf8');
     expect(src).not.toMatch(/tp_live_|sk_live_|sentkey_/);
@@ -339,23 +353,23 @@ describe('suite file + runner helpers', () => {
     expect(src).toContain('console.warn(watchWarn)');
   });
 
-  it('prints post-#67 false_BLOCK>1 watch WARN without changing the gate', () => {
-    expect(FALSE_BLOCK_BASELINE).toBe(4);
+  it('prints false_BLOCK>0 watch WARN on any false_BLOCK', () => {
+    expect(FALSE_BLOCK_BASELINE).toBe(0);
     expect(falseBlockWatchWarn(0)).toBeNull();
-    expect(falseBlockWatchWarn(1)).toBeNull();
+    expect(falseBlockWatchWarn(1)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
     expect(falseBlockWatchWarn(2)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
     expect(falseBlockWatchWarn(4)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
     expect(POST_67_FALSE_BLOCK_WATCH_WARN).toBe(
-      'WARN false_BLOCK>1 (post-#67 watch; baseline still 4)',
+      'WARN false_BLOCK>0 (any false_BLOCK; baseline 0)',
     );
-    const two = scoreRows([
+    const one = scoreRows([
       { id: 'ok-06-de-fyi-informiere', expect: 'allow', verdict: 'BLOCK' },
-      { id: 'ok-01-exact-swap-approval', expect: 'allow', verdict: 'BLOCK' },
     ]);
-    expect(two.false_BLOCK).toBe(2);
-    expect(resolveGate(two).exitCode).toBe(0);
-    expect(resolveGate(two).falseBlockBaseline).toBe(4);
-    expect(falseBlockWatchWarn(two.false_BLOCK)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
+    expect(one.false_BLOCK).toBe(1);
+    expect(resolveGate(one).exitCode).toBe(1);
+    expect(resolveGate(one).falseBlockBaseline).toBe(0);
+    expect(falseBlockWatchWarn(one.false_BLOCK)).toBe(POST_67_FALSE_BLOCK_WATCH_WARN);
+    expect(falseBlockWatchWarn(0)).toBeNull();
   });
 
   it('MCP auth-claim parallels use the production suffix (issue #62)', () => {
@@ -433,7 +447,11 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('PR runs always measure production by default');
     expect(yml).toContain('SUITE_TARGET=');
     expect(yml).not.toContain('ok-01/02/03 + ok-06');
-    expect(yml).toContain('remaining named baseline case is primarily ok-06');
+    expect(yml).not.toContain('remaining named baseline case is primarily ok-06');
+    expect(yml).not.toContain('After #51 lower baseline to 0');
+    expect(yml).not.toContain('FALSE_BLOCK_BASELINE stays 4');
+    expect(yml).toContain('named constant = 0');
+    expect(yml).toContain('#51 is');
     expect(yml).not.toMatch(/X-Sentinel-Key:\s*['\"]?[a-zA-Z0-9_-]{16,}/);
   });
 });

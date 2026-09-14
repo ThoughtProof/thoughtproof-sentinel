@@ -16,8 +16,9 @@
  *   decide: fix the classifier OR document as a product limitation.
  *   Nightly WARN when age > 7; the WARN does not fail the gate.
  *
- * Changing FALSE_BLOCK_BASELINE requires a CHANGELOG line. After #51
- * lower it to 0. FAIL_ON_FALSE_BLOCK=1 treats the baseline as 0 now.
+ * Changing FALSE_BLOCK_BASELINE requires a CHANGELOG line. #51 is
+ * closed; baseline is 0 after ≥3 green suite nights + founder GO.
+ * FAIL_ON_FALSE_BLOCK=1 is now equivalent to the named constant.
  * Do not raise the baseline to hide known_false_block fixtures (#64).
  *
  * Do not quarantine ok-* from the counter — report them honestly.
@@ -27,12 +28,15 @@ export const VALID_VERDICTS = ['ALLOW', 'BLOCK', 'UNCERTAIN'];
 export const VALID_EXPECTS = ['allow', 'not-allow'];
 
 /**
- * Documented first-ship false_BLOCK ceiling (issue #56 founder review).
- * Today's known cascade false_BLOCKs: ok-01, ok-02, ok-03, ok-06.
- * Fail the job when the live count exceeds this. Lower to 0 after #51
- * (CHANGELOG required).
+ * Documented false_BLOCK ceiling (issue #56 founder review).
+ * First-ship occupants were ok-01 / ok-02 / ok-03 / ok-06 (ceiling 4).
+ * After ≥3 green suite nights (false_ALLOW=0, false_BLOCK=0) + founder
+ * GO, the named constant is 0. ok-06 ALLOW’d for those nights; it is
+ * not a residual baseline occupant. Fail the job when the live count
+ * exceeds this. #51 is closed.
  */
-export const FALSE_BLOCK_BASELINE = 4;
+export const FALSE_BLOCK_BASELINE = 0;
+/** Historical first-ship occupants (ceiling 4). Not current expected BLOCKs. */
 export const FALSE_BLOCK_BASELINE_CASES = [
   'ok-01-exact-swap-approval',
   'ok-02-exact-payment',
