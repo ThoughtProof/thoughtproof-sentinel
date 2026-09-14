@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   FALSE_BLOCK_BASELINE,
+  FALSE_BLOCK_GATE_TIGHTENED_AFTER,
   classifyScenario,
   formatFailureList,
   listOverdueKnownFalseBlocks,
@@ -50,6 +51,11 @@ export const NIGHTLY_AGENT_ID = 'nightly-suite';
  * After baseline 0: any false_BLOCK is a watch WARN (informational
  * console line; the gate also fails at > 0). ok-06 ALLOW’d for three
  * green nights — it is not a residual expected BLOCK.
+ *
+ * Under FALSE_BLOCK_BASELINE=0 this warn (>0) is redundant with the
+ * gate fail on any false_BLOCK — it only decorates failing runs.
+ * TODO: early-warn on ok-* UNCERTAIN or known_false_block drift
+ * (out of scope for this hygiene follow-up).
  */
 export const POST_67_FALSE_BLOCK_WATCH_WARN =
   'WARN false_BLOCK>0 (any false_BLOCK; baseline 0)';
@@ -306,7 +312,7 @@ export async function runSuite(opts = {}) {
             fail_on_false_ALLOW: true,
             false_BLOCK_baseline: failOnFalseBlock ? 0 : FALSE_BLOCK_BASELINE,
             fail_on_false_BLOCK: failOnFalseBlock,
-            false_BLOCK_tightens_after: '#51',
+            false_BLOCK_tightened_after: FALSE_BLOCK_GATE_TIGHTENED_AFTER,
             known_false_block_overdue: overdue.map((o) => o.warn),
           },
         },
@@ -388,7 +394,7 @@ export async function runSuite(opts = {}) {
       fail_reasons: gate.failReasons,
       exit_code: gate.exitCode,
       first_ship_note:
-        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. Baseline is 0 after ≥3 green suite nights + founder GO (#51 closed).`,
+        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. Baseline is 0 after ≥3 green suite nights + founder GO (shipped #73; #51 closed).`,
     },
     known_false_block_overdue: overdue.map((o) => o.warn),
     rows,

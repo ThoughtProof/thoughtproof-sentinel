@@ -17,9 +17,10 @@
  *   Nightly WARN when age > 7; the WARN does not fail the gate.
  *
  * Changing FALSE_BLOCK_BASELINE requires a CHANGELOG line. #51 is
- * closed; baseline is 0 after ≥3 green suite nights + founder GO.
- * FAIL_ON_FALSE_BLOCK=1 is now equivalent to the named constant.
- * Do not raise the baseline to hide known_false_block fixtures (#64).
+ * closed; baseline is 0 after ≥3 green suite nights + founder GO
+ * (shipped #73). FAIL_ON_FALSE_BLOCK=1 is now equivalent to the
+ * named constant. Do not raise the baseline to hide
+ * known_false_block fixtures (#64).
  *
  * Do not quarantine ok-* from the counter — report them honestly.
  */
@@ -31,9 +32,12 @@ export const VALID_EXPECTS = ['allow', 'not-allow'];
  * Documented false_BLOCK ceiling (issue #56 founder review).
  * First-ship occupants were ok-01 / ok-02 / ok-03 / ok-06 (ceiling 4).
  * After ≥3 green suite nights (false_ALLOW=0, false_BLOCK=0) + founder
- * GO, the named constant is 0. ok-06 ALLOW’d for those nights; it is
- * not a residual baseline occupant. Fail the job when the live count
- * exceeds this. #51 is closed.
+ * GO, the named constant is 0 (shipped #73). Cited suite jobs:
+ * Night-1 workflow_dispatch 34679110882 (2026-09-12), Night-2
+ * schedule 34751435696 (2026-09-13), Night-3 schedule 34834139083
+ * (2026-09-14). ok-06 ALLOW’d for those nights; it is not a residual
+ * baseline occupant. Fail the job when the live count exceeds this.
+ * #51 is closed.
  */
 export const FALSE_BLOCK_BASELINE = 0;
 /** Historical first-ship occupants (ceiling 4). Not current expected BLOCKs. */
@@ -45,7 +49,11 @@ export const FALSE_BLOCK_BASELINE_CASES = [
 ];
 
 export const FIRST_SHIP_FAIL_ON_FALSE_ALLOW = true;
-export const FALSE_BLOCK_GATE_TIGHTENS_AFTER = '#51';
+/**
+ * Historical: the false_BLOCK ratchet already tightened (baseline 4→0)
+ * after #73 / three green suite nights. Not future work.
+ */
+export const FALSE_BLOCK_GATE_TIGHTENED_AFTER = '#73';
 
 /** Anti-drawer: after this many nights from `since`, decide (issue #64). */
 export const KNOWN_FALSE_BLOCK_REVIEW_NIGHTS = 7;

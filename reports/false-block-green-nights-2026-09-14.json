@@ -1,0 +1,69 @@
+{
+  "title": "FALSE_BLOCK_BASELINE 4→0 three green nights (suite-job evidence)",
+  "counted_job": "Live suite (false_ALLOW / false_BLOCK / known_false_block)",
+  "honesty": "Measurement is the prose path with MCP-shaped evidence (fixtures: id / expect / claim / evidence; buildVerifyBody injects no mandate.kind / action.kind). This is not a claim of live-kinds coverage.",
+  "baseline_after": 0,
+  "shipped_in": "#73",
+  "nights": [
+    {
+      "label": "Night-1",
+      "date": "2026-09-12",
+      "event": "workflow_dispatch",
+      "run_id": 34679110882,
+      "url": "https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34679110882",
+      "suite_job_id": 103514269145,
+      "suite_conclusion": "success",
+      "live_suite_line": "false_ALLOW=0  false_BLOCK=0  known_false_block=2  errors=0  ok=24/26",
+      "gate_line": "gate false_ALLOW=0 false_BLOCK≤4 known_false_block informational → PASS",
+      "then_baseline": 4,
+      "sri_job": null
+    },
+    {
+      "label": "Night-2",
+      "date": "2026-09-13",
+      "event": "schedule",
+      "run_id": 34751435696,
+      "url": "https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34751435696",
+      "suite_job_id": 103708545970,
+      "suite_conclusion": "success",
+      "live_suite_line": "false_ALLOW=0  false_BLOCK=0  known_false_block=2  errors=0  ok=24/26",
+      "gate_line": "gate false_ALLOW=0 false_BLOCK≤4 known_false_block informational → PASS",
+      "then_baseline": 4,
+      "sri_job": {
+        "job_id": 103708545904,
+        "name": "Docs CDN SRI bytes (DOCS_CDN vs unpkg)",
+        "conclusion": "success"
+      }
+    },
+    {
+      "label": "Night-3",
+      "date": "2026-09-14",
+      "event": "schedule",
+      "run_id": 34834139083,
+      "url": "https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34834139083",
+      "suite_job_id": 103943989821,
+      "suite_conclusion": "success",
+      "live_suite_line": "false_ALLOW=0  false_BLOCK=0  known_false_block=2  errors=0  ok=24/26",
+      "gate_line": "gate false_ALLOW=0 false_BLOCK≤4 known_false_block informational → PASS",
+      "then_baseline": 4,
+      "sri_job": {
+        "job_id": 103943989496,
+        "name": "Docs CDN SRI bytes (DOCS_CDN vs unpkg)",
+        "conclusion": "success"
+      }
+    }
+  ],
+  "ops_merge_gate_receipt_pair": {
+    "lesart": 1,
+    "framing": "First claim was misframed for the cascade (false_BLOCK-class), not a mandate collapse. Second claim is REVISE_CLAIM repair on the same merge objective.",
+    "block": {
+      "receipt_id": "sent_5f344e2183c14359",
+      "note": "Amount/Recipient cascade objections; host kinds deploy_ship×deploy_ship already set; claim still carried digit/SHA spend-like signals."
+    },
+    "allow": {
+      "receipt_id": "sent_5dff6890be2042a2",
+      "note": "Same founder GO + same squash-merge intent; claim revised to remove false financial signals while keeping deploy_ship×deploy_ship."
+    },
+    "product_gap": "Matching deploy_ship×deploy_ship currently emits no SENTINEL_AXIS_HINT PASS path for amount/recipient gold steps (cascade calibration); digit noise fails closed."
+  }
+}

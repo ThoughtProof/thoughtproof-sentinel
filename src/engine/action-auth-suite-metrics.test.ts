@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FALSE_BLOCK_BASELINE,
   FALSE_BLOCK_BASELINE_CASES,
-  FALSE_BLOCK_GATE_TIGHTENS_AFTER,
+  FALSE_BLOCK_GATE_TIGHTENED_AFTER,
   FIRST_SHIP_FAIL_ON_FALSE_ALLOW,
   KNOWN_FALSE_BLOCK_REVIEW_NIGHTS,
   classifyScenario,
@@ -102,11 +102,40 @@ describe('scoreRows + false_BLOCK ratchet', () => {
       'ok-06-de-fyi-informiere',
     ]);
     expect(FIRST_SHIP_FAIL_ON_FALSE_ALLOW).toBe(true);
-    expect(FALSE_BLOCK_GATE_TIGHTENS_AFTER).toBe('#51');
+    expect(FALSE_BLOCK_GATE_TIGHTENED_AFTER).toBe('#73');
     const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
     expect(changelog).toMatch(/FALSE_BLOCK_BASELINE` 4 → 0/);
     expect(changelog).toMatch(/prose path with MCP-shaped evidence/);
     expect(changelog).not.toMatch(/re-measurement under live kinds/);
+    expect(changelog).toContain('34679110882');
+    expect(changelog).toContain('34751435696');
+    expect(changelog).toContain('34834139083');
+    expect(changelog).toContain('sent_5f344e2183c14359');
+    expect(changelog).toContain('sent_5dff6890be2042a2');
+    expect(changelog).toMatch(/Lesart 1/);
+    expect(changelog).toMatch(/FALSE_BLOCK_GATE_TIGHTENED_AFTER/);
+    expect(changelog).toMatch(/redundant with the gate fail/);
+    const metricsSrc = readFileSync(
+      join(root, 'scripts/lib/action-auth-suite-metrics.mjs'),
+      'utf8',
+    );
+    expect(metricsSrc).toContain('FALSE_BLOCK_GATE_TIGHTENED_AFTER');
+    expect(metricsSrc).not.toMatch(/FALSE_BLOCK_GATE_TIGHTENS_AFTER/);
+    expect(metricsSrc).toContain('34679110882');
+    expect(metricsSrc).toContain('34751435696');
+    expect(metricsSrc).toContain('34834139083');
+    const evidence = JSON.parse(
+      readFileSync(join(root, 'reports/false-block-green-nights-2026-09-14.json'), 'utf8'),
+    );
+    expect(evidence.nights.map((n) => n.run_id)).toEqual([
+      34679110882, 34751435696, 34834139083,
+    ]);
+    expect(evidence.ops_merge_gate_receipt_pair.block.receipt_id).toBe(
+      'sent_5f344e2183c14359',
+    );
+    expect(evidence.ops_merge_gate_receipt_pair.allow.receipt_id).toBe(
+      'sent_5dff6890be2042a2',
+    );
   });
 
   it('passes at baseline 0, fails when false_BLOCK exceeds it', () => {
@@ -452,6 +481,31 @@ describe('suite file + runner helpers', () => {
     expect(yml).not.toContain('FALSE_BLOCK_BASELINE stays 4');
     expect(yml).toContain('named constant = 0');
     expect(yml).toContain('#51 is');
+    expect(yml).toContain('#73');
+    expect(yml).toContain('34679110882');
+    expect(yml).toContain('34751435696');
+    expect(yml).toContain('34834139083');
+    expect(yml).toContain('https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34679110882');
     expect(yml).not.toMatch(/X-Sentinel-Key:\s*['\"]?[a-zA-Z0-9_-]{16,}/);
+
+    const readme = readFileSync(join(root, 'README.md'), 'utf8');
+    expect(readme).toContain('34679110882');
+    expect(readme).toContain('34751435696');
+    expect(readme).toContain('34834139083');
+    const adr = readFileSync(join(root, 'docs/ADR-0019-action-authorization-mode.md'), 'utf8');
+    expect(adr).toContain('34679110882');
+    expect(adr).toContain('34751435696');
+    expect(adr).toContain('34834139083');
+    expect(adr).toContain('sent_5f344e2183c14359');
+    expect(adr).toContain('sent_5dff6890be2042a2');
+    expect(adr).toMatch(/Lesart 1/);
+
+    const runner = readFileSync(join(root, 'scripts/action-authorization-suite.mjs'), 'utf8');
+    expect(runner).toContain('FALSE_BLOCK_GATE_TIGHTENED_AFTER');
+    expect(runner).toContain('false_BLOCK_tightened_after');
+    expect(runner).not.toMatch(/false_BLOCK_tightens_after:\s*'#51'/);
+    expect(runner).toContain('redundant with the');
+    expect(runner).toContain('only decorates failing runs');
+    expect(runner).toContain('TODO: early-warn on ok-* UNCERTAIN');
   });
 });
