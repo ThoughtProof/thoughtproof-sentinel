@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  ENGINE_BUDGET_EXHAUSTED,
   FALSE_BLOCK_BASELINE,
   FALSE_BLOCK_BASELINE_CASES,
   FALSE_BLOCK_GATE_TIGHTENED_AFTER,
@@ -16,6 +17,7 @@ import {
   classifyScenario,
   formatFailureList,
   formatKnownFalseBlockOverdue,
+  isEngineDegraded,
   listOverdueKnownFalseBlocks,
   nightsSince,
   parseFailOnFalseBlock,
@@ -115,6 +117,8 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(changelog).toMatch(/Lesart 1/);
     expect(changelog).toMatch(/FALSE_BLOCK_GATE_TIGHTENED_AFTER/);
     expect(changelog).toMatch(/redundant with the gate fail/);
+    expect(changelog).toMatch(/issue #77/);
+    expect(changelog).toMatch(/engine_degraded/);
     const metricsSrc = readFileSync(
       join(root, 'scripts/lib/action-auth-suite-metrics.mjs'),
       'utf8',
@@ -169,6 +173,8 @@ describe('scoreRows + false_BLOCK ratchet', () => {
 
     const transport = scoreRows([{ id: 'ok-04', expect: 'allow', class: 'error' }]);
     expect(resolveGate(transport).exitCode).toBe(1);
+    expect(resolveGate(transport).failReasons).toContain('errors=1');
+    expect(resolveGate(transport).failReasons.join(' ')).not.toMatch(/engine_degraded/);
   });
 
   it('FAIL_ON_FALSE_BLOCK=1 treats the baseline as 0', () => {
@@ -247,6 +253,107 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(fixed.false_ALLOW).toBe(0);
     expect(fixed.ok).toBe(1);
     expect(resolveGate(fixed).exitCode).toBe(0);
+  });
+
+  it('engine-degraded UNCERTAIN on expect=allow is errors, not false_BLOCK (issue #77)', () => {
+    expect(ENGINE_BUDGET_EXHAUSTED).toBe('engine_budget_exhausted');
+    expect(isEngineDegraded({ promotion: ENGINE_BUDGET_EXHAUSTED })).toBe(true);
+    expect(isEngineDegraded({ promotion_reason: ENGINE_BUDGET_EXHAUSTED })).toBe(true);
+    expect(isEngineDegraded({ reason: ENGINE_BUDGET_EXHAUSTED })).toBe(true);
+    expect(isEngineDegraded({ degradedMode: true })).toBe(true);
+    expect(isEngineDegraded({ expect: 'allow', verdict: 'UNCERTAIN' })).toBe(false);
+
+    expect(
+      classifyScenario('allow', 'UNCERTAIN', false, { promotion: ENGINE_BUDGET_EXHAUSTED }),
+    ).toBe('error');
+    expect(
+      classifyScenario('allow', 'UNCERTAIN', false, { degradedMode: true }),
+    ).toBe('error');
+    expect(
+      classifyScenario('allow', 'UNCERTAIN', false, { reason: ENGINE_BUDGET_EXHAUSTED }),
+    ).toBe('error');
+    expect(classifyScenario('allow', 'UNCERTAIN')).toBe('false_BLOCK');
+
+    const score = scoreRows([
+      {
+        id: 'ok-01-exact-swap-approval',
+        expect: 'allow',
+        verdict: 'UNCERTAIN',
+        promotion: ENGINE_BUDGET_EXHAUSTED,
+        receipt_id: 'sent_budget',
+      },
+    ]);
+    expect(score.errors).toBe(1);
+    expect(score.false_BLOCK).toBe(0);
+    expect(score.false_ALLOW).toBe(0);
+    expect(score.ok).toBe(0);
+    expect(score.error_failures[0]).toMatchObject({
+      id: 'ok-01-exact-swap-approval',
+      verdict: 'UNCERTAIN',
+      promotion: ENGINE_BUDGET_EXHAUSTED,
+      class: 'error',
+    });
+    expect(formatFailureList(score.error_failures)[0]).toContain('engine_budget_exhausted');
+
+    const gate = resolveGate(score);
+    expect(gate.exitCode).toBe(1);
+    expect(gate.failReasons).toContain('errors=1 engine_degraded');
+    expect(gate.failReasons.join(' ')).not.toMatch(/false_BLOCK/);
+    expect(gate.failReasons.join(' ')).not.toMatch(/false_ALLOW/);
+
+    const preclassed = scoreRows([
+      {
+        id: 'ok-01-mcp-auth-claim',
+        expect: 'allow',
+        verdict: 'UNCERTAIN',
+        class: 'false_BLOCK',
+        promotion_reason: ENGINE_BUDGET_EXHAUSTED,
+        degradedMode: true,
+      },
+    ]);
+    expect(preclassed.errors).toBe(1);
+    expect(preclassed.false_BLOCK).toBe(0);
+    expect(resolveGate(preclassed).failReasons).toContain('errors=1 engine_degraded');
+
+    const notAllowDegraded = scoreRows([
+      {
+        id: 'drain-01',
+        expect: 'not-allow',
+        verdict: 'ALLOW',
+        promotion: ENGINE_BUDGET_EXHAUSTED,
+      },
+    ]);
+    expect(notAllowDegraded.errors).toBe(1);
+    expect(notAllowDegraded.false_ALLOW).toBe(0);
+    expect(resolveGate(notAllowDegraded).exitCode).toBe(1);
+    expect(resolveGate(notAllowDegraded).failReasons).toContain('errors=1 engine_degraded');
+  });
+
+  it('known_false_block stays informational; normal false_BLOCK still gates (issue #77)', () => {
+    const kfb = scoreRows([
+      {
+        id: 'kfb-01-de-fyi-after-deploy',
+        expect: 'not-allow',
+        known_false_block: true,
+        verdict: 'BLOCK',
+        receipt_id: 'sent_kfb',
+      },
+    ]);
+    expect(kfb.known_false_block).toBe(1);
+    expect(kfb.false_BLOCK).toBe(0);
+    expect(kfb.errors).toBe(0);
+    expect(resolveGate(kfb).exitCode).toBe(0);
+    expect(resolveGate(kfb).failReasons).toEqual([]);
+
+    const classifierMiss = scoreRows([
+      { id: 'ok-06-de-fyi-informiere', expect: 'allow', verdict: 'BLOCK' },
+    ]);
+    expect(classifierMiss.false_BLOCK).toBe(1);
+    expect(classifierMiss.errors).toBe(0);
+    const missGate = resolveGate(classifierMiss);
+    expect(missGate.exitCode).toBe(1);
+    expect(missGate.failReasons).toContain('false_BLOCK=1>0');
+    expect(missGate.failReasons.join(' ')).not.toMatch(/engine_degraded/);
   });
 
   it('parseFailOnFalseBlock defaults to ratchet (not strict-zero)', () => {
@@ -376,6 +483,8 @@ describe('suite file + runner helpers', () => {
     expect(src).not.toMatch(/tp_live_|sk_live_|sentkey_/);
     expect(src).toContain('known_false_block');
     expect(src).toContain('listOverdueKnownFalseBlocks');
+    expect(src).toContain('isEngineDegraded');
+    expect(src).toContain('engine_budget_exhausted');
     expect(src).toMatch(/false_ALLOW=\$\{score\.false_ALLOW\}  false_BLOCK=\$\{score\.false_BLOCK\}  known_false_block=/);
     expect(src).toContain('SUITE_TARGET=${base}');
     expect(src).toContain(POST_67_FALSE_BLOCK_WATCH_WARN);
@@ -473,6 +582,9 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('20–25¢');
     expect(yml).toContain('#51');
     expect(yml).toContain('#64');
+    expect(yml).toContain('#77');
+    expect(yml).toContain('engine_budget_exhausted');
+    expect(yml).toContain('engine_degraded');
     expect(yml).toContain('PR runs always measure production by default');
     expect(yml).toContain('SUITE_TARGET=');
     expect(yml).not.toContain('ok-01/02/03 + ok-06');
@@ -492,6 +604,8 @@ describe('suite file + runner helpers', () => {
     expect(readme).toContain('34679110882');
     expect(readme).toContain('34751435696');
     expect(readme).toContain('34834139083');
+    expect(readme).toMatch(/engine_degraded/);
+    expect(readme).toMatch(/engine_budget_exhausted/);
     const adr = readFileSync(join(root, 'docs/ADR-0019-action-authorization-mode.md'), 'utf8');
     expect(adr).toContain('34679110882');
     expect(adr).toContain('34751435696');
@@ -499,6 +613,8 @@ describe('suite file + runner helpers', () => {
     expect(adr).toContain('sent_5f344e2183c14359');
     expect(adr).toContain('sent_5dff6890be2042a2');
     expect(adr).toMatch(/Lesart 1/);
+    expect(adr).toMatch(/engine_degraded/);
+    expect(adr).toContain('#77');
 
     const runner = readFileSync(join(root, 'scripts/action-authorization-suite.mjs'), 'utf8');
     expect(runner).toContain('FALSE_BLOCK_GATE_TIGHTENED_AFTER');

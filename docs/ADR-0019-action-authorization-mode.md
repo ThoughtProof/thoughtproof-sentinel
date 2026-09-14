@@ -230,7 +230,7 @@ override only.
 
 Gate (ratchet, not a permanent soft-pass):
 
-- **Fail** if `false_ALLOW > 0` (or transport/parse errors).
+- **Fail** if `false_ALLOW > 0` (or transport/parse / engine-degraded errors).
 - **Fail** if `false_BLOCK` **exceeds** named `FALSE_BLOCK_BASELINE`
   (now **0** after ≥3 green suite nights + founder GO, shipped #73;
   first-ship occupants were ok-01 / ok-02 / ok-03 / ok-06). Count
@@ -260,7 +260,12 @@ Gate (ratchet, not a permanent soft-pass):
   Ship/founder decide: fix the classifier **or** document as a
   product limitation with rationale (anti-drawer). Nightly WARN when
   age > 7; WARN does not fail the gate.
-- **#51 is closed:** `FALSE_BLOCK_BASELINE` is **0** (CHANGELOG; drop
+- **Engine degradation (issue #77):** `promotion=engine_budget_exhausted`
+  / `degradedMode` counts as **`errors`**, not `false_BLOCK` /
+  `false_ALLOW`. Gate still fails when `errors > 0`
+  (`errors=N engine_degraded`) — night not evaluable, not a
+  classifier regression. Mirror of the CDN rule.
+- **#51 is closed:** `FALSE_BLOCK_BASELINE` is **0** (CHANGELOG; drop)
   completed after #73). Dispatch `fail_on_false_block` treats the
   baseline as 0 (already 0). Caller-kinds remain unit-test only
   until thoughtproof-mcp 0.4.0.

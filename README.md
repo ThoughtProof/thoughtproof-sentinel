@@ -87,6 +87,13 @@ scenario MUST carry `since` (`YYYY-MM-DD`). After **seven nights** from
 product limitation with rationale — no open-ended observation. Nightly
 prints a WARN when age > 7 (`known_false_block overdue: …`); that WARN
 does not fail the gate.
+Engine degradation (`promotion=engine_budget_exhausted` / `degradedMode`)
+counts as **`errors`**, not `false_BLOCK` / `false_ALLOW`
+([#77](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/77)).
+The gate still fails when `errors > 0` (`errors=N engine_degraded`) —
+the night is not evaluable, not a classifier regression. Mirror of the
+CDN rule: CDN noise must not void a valid measurement night; engine
+degradation must not pretend quality got worse.
 
 **GitHub secrets / variables** (see comments in
 `.github/workflows/action-authorization-suite.yml`):

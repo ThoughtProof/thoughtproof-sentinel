@@ -27,10 +27,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
+  ENGINE_BUDGET_EXHAUSTED,
   FALSE_BLOCK_BASELINE,
   FALSE_BLOCK_GATE_TIGHTENED_AFTER,
   classifyScenario,
   formatFailureList,
+  isEngineDegraded,
   listOverdueKnownFalseBlocks,
   parseFailOnFalseBlock,
   parseIsoDate,
@@ -174,6 +176,10 @@ async function postVerify(url, headers, body, { timeoutMs = 90_000 } = {}) {
 }
 
 function rowFromResponse(scenario, res) {
+  const promotion_reason = res.json?.meta?.promotion?.reason ?? null;
+  const cascade_reason = res.json?.meta?.promotion?.cascade_reason ?? null;
+  const engine_budget_reason = res.json?.meta?.engine_budget?.reason ?? null;
+  const degradedMode = res.json?.meta?.engine_budget?.degradedMode === true;
   const base = {
     id: scenario.id,
     expect: scenario.expect,
@@ -182,7 +188,12 @@ function rowFromResponse(scenario, res) {
     verdict: res.json?.verdict ?? null,
     receipt_id: res.json?.id ?? null,
     decision_basis: res.json?.meta?.promotion?.decision_basis ?? null,
-    promotion_reason: res.json?.meta?.promotion?.reason ?? null,
+    promotion: promotion_reason,
+    promotion_reason,
+    cascade_reason,
+    engine_budget_reason,
+    reason: engine_budget_reason ?? promotion_reason,
+    degradedMode,
     mandate_kind: res.json?.meta?.promotion?.mandate_kind ?? null,
     action_kind: res.json?.meta?.promotion?.action_kind ?? null,
     error: null,
@@ -201,9 +212,16 @@ function rowFromResponse(scenario, res) {
       error: res.json?.error || res.json?.code || `http_${res.status}`,
     };
   }
+  if (isEngineDegraded(base)) {
+    return {
+      ...base,
+      class: 'error',
+      error: engine_budget_reason || promotion_reason || ENGINE_BUDGET_EXHAUSTED,
+    };
+  }
   return {
     ...base,
-    class: classifyScenario(scenario.expect, base.verdict, scenario.known_false_block === true),
+    class: classifyScenario(scenario.expect, base.verdict, scenario.known_false_block === true, base),
   };
 }
 
@@ -217,6 +235,7 @@ function printRow(row) {
     row.receipt_id ? `receipt=${row.receipt_id}` : null,
     row.decision_basis ? `decision_basis=${row.decision_basis}` : null,
     row.promotion_reason ? `promotion=${row.promotion_reason}` : null,
+    row.degradedMode ? 'degradedMode=true' : null,
     row.mandate_kind ? `mandate_kind=${row.mandate_kind}` : null,
     row.action_kind ? `action_kind=${row.action_kind}` : null,
     row.http_status != null ? `http=${row.http_status}` : null,
@@ -241,7 +260,7 @@ function writeStepSummary(report) {
     `| known_false_block | ${score.known_false_block} |`,
     `| errors | ${score.errors} |`,
     '',
-    `Gate: false_ALLOW=0 · false_BLOCK≤${gate.falseBlockBaseline} · known_false_block informational → **${gate.exitCode === 0 ? 'PASS' : 'FAIL'}**`,
+    `Gate: false_ALLOW=0 · false_BLOCK≤${gate.falseBlockBaseline} · errors=0 (engine_degraded → invalid night) · known_false_block informational → **${gate.exitCode === 0 ? 'PASS' : 'FAIL'}**`,
     '',
   ];
   const watchWarn = falseBlockWatchWarn(score.false_BLOCK);
@@ -394,7 +413,7 @@ export async function runSuite(opts = {}) {
       fail_reasons: gate.failReasons,
       exit_code: gate.exitCode,
       first_ship_note:
-        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. Baseline is 0 after ≥3 green suite nights + founder GO (shipped #73; #51 closed).`,
+        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). Engine degradation (promotion=engine_budget_exhausted / degradedMode) counts as errors, not false_BLOCK / false_ALLOW (issue #77) — night not evaluable; fail reason includes errors=N engine_degraded. known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. Baseline is 0 after ≥3 green suite nights + founder GO (shipped #73; #51 closed).`,
     },
     known_false_block_overdue: overdue.map((o) => o.warn),
     rows,
@@ -426,7 +445,7 @@ export async function runSuite(opts = {}) {
     console.log(`errors: ${formatFailureList(score.error_failures).join('; ')}`);
   }
   console.log(
-    `gate false_ALLOW=0 false_BLOCK≤${gate.falseBlockBaseline} known_false_block informational → ${gate.exitCode === 0 ? 'PASS' : 'FAIL'} ${gate.failReasons.join(' ')}`,
+    `gate false_ALLOW=0 false_BLOCK≤${gate.falseBlockBaseline} errors=0 known_false_block informational → ${gate.exitCode === 0 ? 'PASS' : 'FAIL'} ${gate.failReasons.join(' ')}`,
   );
   console.log(JSON.stringify({
     false_ALLOW: report.false_ALLOW,

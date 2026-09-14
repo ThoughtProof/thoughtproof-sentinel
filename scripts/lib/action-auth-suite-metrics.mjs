@@ -1,16 +1,21 @@
 /**
- * Scoring for scenarios/action-authorization-suite.json (issue #56 / #64).
+ * Scoring for scenarios/action-authorization-suite.json (issue #56 / #64 / #77).
  *
  *   expect: allow      → false_BLOCK if public verdict is not ALLOW
  *   expect: not-allow  → false_ALLOW if public verdict is ALLOW
  *   known_false_block: true
  *     → known_false_block if public verdict is not ALLOW
  *     → ok if public verdict is ALLOW (product-correct; not false_ALLOW)
+ *   engine-degraded (promotion=engine_budget_exhausted / degradedMode /
+ *   reason=engine_budget_exhausted)
+ *     → errors (existing channel) — not false_BLOCK / false_ALLOW
  *
  * Gate:
- *   false_ALLOW must be 0 (or transport/parse errors → fail)
+ *   false_ALLOW must be 0 (or transport/parse / engine-degraded errors → fail)
  *   false_BLOCK may not exceed FALSE_BLOCK_BASELINE (ratchet, not soft-pass)
  *   known_false_block is informational only — printed, never gated.
+ *   Engine degradation fails as invalid/degraded measurement
+ *   (`errors=N engine_degraded`), not a classifier regression.
  *   Each known_false_block: true fixture MUST carry `since` (YYYY-MM-DD).
  *   After KNOWN_FALSE_BLOCK_REVIEW_NIGHTS (7) from `since`, Ship/founder
  *   decide: fix the classifier OR document as a product limitation.
@@ -23,10 +28,41 @@
  * known_false_block fixtures (#64).
  *
  * Do not quarantine ok-* from the counter — report them honestly.
+ * Mirror of the CDN rule: CDN noise must not void a valid night;
+ * engine degradation must not pretend the classifier got worse (#77).
  */
 
 export const VALID_VERDICTS = ['ALLOW', 'BLOCK', 'UNCERTAIN'];
 export const VALID_EXPECTS = ['allow', 'not-allow'];
+
+/** Explicit degraded-engine reason on promotion / engine_budget (#77). */
+export const ENGINE_BUDGET_EXHAUSTED = 'engine_budget_exhausted';
+
+/**
+ * True when a suite row is infrastructure-degraded, not a classifier miss.
+ * Markers: promotion / promotion_reason / reason = engine_budget_exhausted,
+ * or degradedMode=true (row or nested engine_budget).
+ *
+ * @param {object} [row]
+ */
+export function isEngineDegraded(row) {
+  if (!row || typeof row !== 'object') return false;
+  if (row.degradedMode === true) return true;
+  const tokens = [
+    row.promotion,
+    row.promotion_reason,
+    row.reason,
+    row.engine_budget_reason,
+    row.cascade_reason,
+    row.engine_budget?.reason,
+    row.engine_budget?.degradedMode === true ? ENGINE_BUDGET_EXHAUSTED : null,
+    row.meta?.promotion?.reason,
+    row.meta?.promotion?.cascade_reason,
+    row.meta?.engine_budget?.reason,
+    row.meta?.engine_budget?.degradedMode === true ? ENGINE_BUDGET_EXHAUSTED : null,
+  ];
+  return tokens.some((t) => t === ENGINE_BUDGET_EXHAUSTED);
+}
 
 /**
  * Documented false_BLOCK ceiling (issue #56 founder review).
@@ -111,7 +147,14 @@ export function listOverdueKnownFalseBlocks(scenarios, now = new Date()) {
   return overdue;
 }
 
-export function classifyScenario(expect, verdict, knownFalseBlock = false) {
+/**
+ * @param {string} expect
+ * @param {string | null | undefined} verdict
+ * @param {boolean} [knownFalseBlock]
+ * @param {object} [markers] row-shaped degraded-engine markers (issue #77)
+ */
+export function classifyScenario(expect, verdict, knownFalseBlock = false, markers) {
+  if (isEngineDegraded(markers)) return 'error';
   if (expect !== 'allow' && expect !== 'not-allow') return 'error';
   if (!verdict || !VALID_VERDICTS.includes(verdict)) return 'error';
   if (knownFalseBlock === true) {
@@ -149,24 +192,36 @@ export function emptyScore() {
  *   class?: string,
  *   http_status?: number | null,
  *   error?: string | null,
+ *   promotion?: string | null,
+ *   promotion_reason?: string | null,
+ *   reason?: string | null,
+ *   degradedMode?: boolean,
+ *   engine_budget_reason?: string | null,
  * }>} rows
  */
 export function scoreRows(rows) {
   const score = emptyScore();
   for (const row of rows) {
     score.ran += 1;
-    const klass =
-      row.class ??
-      classifyScenario(row.expect, row.verdict, row.known_false_block === true);
+    const degraded = isEngineDegraded(row);
+    const klass = degraded
+      ? 'error'
+      : (row.class ??
+        classifyScenario(row.expect, row.verdict, row.known_false_block === true, row));
     const fail = {
       id: row.id,
       expect: row.expect,
       verdict: row.verdict ?? null,
       receipt_id: row.receipt_id ?? null,
       http_status: row.http_status ?? null,
-      error: row.error ?? null,
+      error: row.error ?? (degraded ? ENGINE_BUDGET_EXHAUSTED : null),
       class: klass,
       known_false_block: row.known_false_block === true,
+      promotion: row.promotion ?? row.promotion_reason ?? null,
+      promotion_reason: row.promotion_reason ?? row.promotion ?? null,
+      reason: row.reason ?? row.engine_budget_reason ?? null,
+      degradedMode: row.degradedMode === true,
+      engine_budget_reason: row.engine_budget_reason ?? null,
     };
     if (klass === 'ok') score.ok += 1;
     else if (klass === 'false_ALLOW') {
@@ -209,7 +264,11 @@ export function resolveGate(score, opts = {}) {
   const namedBaseline = opts.falseBlockBaseline ?? FALSE_BLOCK_BASELINE;
   const falseBlockBaseline = failOnFalseBlock ? 0 : namedBaseline;
   const failReasons = [];
-  if (score.errors > 0) failReasons.push(`errors=${score.errors}`);
+  if (score.errors > 0) {
+    const degraded =
+      (score.error_failures ?? []).some((f) => isEngineDegraded(f)) === true;
+    failReasons.push(degraded ? `errors=${score.errors} engine_degraded` : `errors=${score.errors}`);
+  }
   if (failOnFalseAllow && score.false_ALLOW > 0) {
     failReasons.push(`false_ALLOW=${score.false_ALLOW}`);
   }
@@ -231,6 +290,8 @@ export function formatFailureList(failures) {
     const receipt = f.receipt_id ? ` receipt=${f.receipt_id}` : '';
     const verdict = f.verdict ? ` verdict=${f.verdict}` : '';
     const err = f.error ? ` error=${f.error}` : '';
-    return `${f.id}${verdict}${receipt}${err}`;
+    const promo = f.promotion_reason || f.promotion || f.reason;
+    const promoBit = promo ? ` promotion=${promo}` : '';
+    return `${f.id}${verdict}${receipt}${err}${promoBit}`;
   });
 }
