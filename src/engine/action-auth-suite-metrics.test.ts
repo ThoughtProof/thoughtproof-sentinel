@@ -504,7 +504,8 @@ describe('suite file + runner helpers', () => {
     expect(runner).toContain('FALSE_BLOCK_GATE_TIGHTENED_AFTER');
     expect(runner).toContain('false_BLOCK_tightened_after');
     expect(runner).not.toMatch(/false_BLOCK_tightens_after:\s*'#51'/);
-    expect(runner).toMatch(/redundant with the\s+gate fail/);
-    expect(runner).toMatch(/TODO: early-warn on ok-\* UNCERTAIN/);
+    expect(runner).toContain('redundant with the');
+    expect(runner).toContain('only decorates failing runs');
+    expect(runner).toContain('TODO: early-warn on ok-* UNCERTAIN');
   });
 });
