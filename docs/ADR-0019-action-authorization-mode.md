@@ -232,14 +232,24 @@ Gate (ratchet, not a permanent soft-pass):
 
 - **Fail** if `false_ALLOW > 0` (or transport/parse errors).
 - **Fail** if `false_BLOCK` **exceeds** named `FALSE_BLOCK_BASELINE`
-  (now **0** after ≥3 green suite nights + founder GO; first-ship
-  occupants were ok-01 / ok-02 / ok-03 / ok-06). Suite-format
-  ok-01/02/03 false_BLOCKs were a format artifact (#66 Track 1b:
-  quote recovery only saw MCP labels). ok-06 ALLOW’d for three
-  nights and is not a residual occupant. Counts are reported
-  honestly; ok-* are not quarantined. Changing the constant
-  requires a CHANGELOG line. Measurement is the prose path with
-  MCP-shaped evidence (`buildVerifyBody` injects no kinds).
+  (now **0** after ≥3 green suite nights + founder GO, shipped #73;
+  first-ship occupants were ok-01 / ok-02 / ok-03 / ok-06). Count
+  the **suite** job, not the whole workflow. Cited nights:
+  [Night-1 34679110882](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34679110882)
+  (2026-09-12 `workflow_dispatch`) Live suite
+  `false_ALLOW=0 false_BLOCK=0 known_false_block=2 ok=24/26 PASS`
+  (then-baseline 4);
+  [Night-2 34751435696](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34751435696)
+  (2026-09-13 `schedule`) same suite line, SRI job success;
+  [Night-3 34834139083](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34834139083)
+  (2026-09-14 `schedule`) same suite line, SRI job success.
+  Suite-format ok-01/02/03 false_BLOCKs were a format artifact
+  (#66 Track 1b: quote recovery only saw MCP labels). ok-06 ALLOW’d
+  for three nights and is not a residual occupant. Counts are
+  reported honestly; ok-* are not quarantined. Changing the
+  constant requires a CHANGELOG line. Measurement is the prose
+  path with MCP-shaped evidence (`buildVerifyBody` injects no
+  kinds).
 - **`known_false_block` (issue #64):** optional scenario flag for
   classifier false BLOCKs that are **not** the cascade ok-* ratchet
   (informational-path fragility: incidental Deploy/ship verbs on an
@@ -250,9 +260,26 @@ Gate (ratchet, not a permanent soft-pass):
   Ship/founder decide: fix the classifier **or** document as a
   product limitation with rationale (anti-drawer). Nightly WARN when
   age > 7; WARN does not fail the gate.
-- **#51 is closed:** `FALSE_BLOCK_BASELINE` is **0** (CHANGELOG).
-  Dispatch `fail_on_false_block` treats the baseline as 0 (already 0).
-  Caller-kinds remain unit-test only until thoughtproof-mcp 0.4.0.
+- **#51 is closed:** `FALSE_BLOCK_BASELINE` is **0** (CHANGELOG; drop
+  completed after #73). Dispatch `fail_on_false_block` treats the
+  baseline as 0 (already 0). Caller-kinds remain unit-test only
+  until thoughtproof-mcp 0.4.0.
+
+**Ops merge-gate receipt pair (natural experiment).** Same founder
+GO and same squash-merge intent, two claims. BLOCK
+`sent_5f344e2183c14359` — Amount/Recipient cascade objections while
+host kinds were already `deploy_ship×deploy_ship`; the claim still
+carried digit/SHA spend-like signals, and cascade gold steps have
+no `deploy_ship` PASS hint on amount/recipient axes. ALLOW
+`sent_5dff6890be2042a2` — REVISE_CLAIM on the same objective: false
+financial signals removed (digits/tip SHA; avoid negation near
+publish), kinds unchanged. **Lesart 1:** the first claim was
+misframed for the cascade (`false_BLOCK`-class), not a mandate
+collapse. Documented at the same honesty bar as Merlini / external
+collapses so the pair is auditable. Product gap: matching
+`deploy_ship×deploy_ship` currently emits no `SENTINEL_AXIS_HINT`
+PASS path for amount/recipient gold steps (cascade calibration);
+digit noise therefore fails closed.
 
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;

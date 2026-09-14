@@ -28,11 +28,23 @@
 # Gate:
 #   fail if false_ALLOW > 0 or transport/parse errors > 0
 #   fail if false_BLOCK > FALSE_BLOCK_BASELINE (named constant = 0).
-#   After ≥3 green suite nights (Night-1/2/3: false_ALLOW=0,
-#   false_BLOCK=0) + founder GO, baseline is 0. ok-06 ALLOW’d for
-#   those nights; it is not a residual baseline occupant. #51 is
-#   closed. Not a permanent soft-pass. Changing the constant
-#   requires a CHANGELOG line.
+#   After ≥3 green suite nights + founder GO, baseline is 0 (shipped
+#   #73). Count the suite job, not the whole workflow. Evidence:
+#   Night-1 workflow_dispatch 34679110882 (2026-09-12)
+#     Live suite: false_ALLOW=0 false_BLOCK=0 known_false_block=2
+#     ok=24/26 PASS (under then-baseline 4)
+#     https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34679110882
+#   Night-2 schedule 34751435696 (2026-09-13)
+#     Live suite: false_ALLOW=0 false_BLOCK=0 known_false_block=2
+#     ok=24/26 PASS; SRI job success
+#     https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34751435696
+#   Night-3 schedule 34834139083 (2026-09-14)
+#     Live suite: false_ALLOW=0 false_BLOCK=0 known_false_block=2
+#     ok=24/26 PASS; SRI job success
+#     https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34834139083
+#   ok-06 ALLOW’d for those nights; it is not a residual baseline
+#   occupant. #51 is closed. Not a permanent soft-pass. Changing
+#   the constant requires a CHANGELOG line.
 #   Nightly also GETs DOCS_CDN unpkg pins and checks sha384(bytes)
 #   against src/openapi-docs.ts (job docs-cdn-sri). Schedule / dispatch
 #   only — not PR CI (network flake). Does not touch the suite gate.
@@ -54,10 +66,11 @@
 # so FYI-ALLOW rate sampling rides along (including MCP auth-claim
 # variants, issues #62 / #66). After #66 Track 1b, MCP ok-01/02/03
 # measure the live financial ALLOW path; suite originals are format
-# controls. FALSE_BLOCK_BASELINE is 0 (shipped after ≥3 green suite
-# nights + founder GO). Measurement is the prose path with MCP-shaped
-# evidence (fixtures: id/expect/claim/evidence; buildVerifyBody
-# injects no mandate.kind/action.kind). Caller-kinds (#51/#60) are
+# controls. FALSE_BLOCK_BASELINE is 0 (shipped #73 after ≥3 green
+# suite nights + founder GO; run IDs in Gate comments above).
+# Measurement is the prose path with MCP-shaped evidence (fixtures:
+# id/expect/claim/evidence; buildVerifyBody injects no
+# mandate.kind/action.kind). Caller-kinds (#51/#60) are
 # unit-test only until thoughtproof-mcp 0.4.0.
 
 name: Action-authorization suite

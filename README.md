@@ -64,7 +64,13 @@ CHANGELOG line. Suite-format ok-01/02/03 false_BLOCKs were a
 **format artifact** (quote recovery only saw MCP
 labels; [#66](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/66)
 Track 1b + drain MCP probe). After ≥3 green nights and founder GO the
-ceiling is **0**.
+ceiling is **0** (shipped [#73](https://github.com/ThoughtProof/thoughtproof-sentinel/pull/73)).
+Count the **suite** job, not the whole workflow:
+
+- Night-1 `workflow_dispatch` [34679110882](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34679110882) (2026-09-12): Live suite `false_ALLOW=0 false_BLOCK=0 known_false_block=2 ok=24/26 PASS` (then-baseline 4)
+- Night-2 `schedule` [34751435696](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34751435696) (2026-09-13): Live suite `false_ALLOW=0 false_BLOCK=0 known_false_block=2 ok=24/26 PASS`; SRI job success
+- Night-3 `schedule` [34834139083](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34834139083) (2026-09-14): Live suite `false_ALLOW=0 false_BLOCK=0 known_false_block=2 ok=24/26 PASS`; SRI job success
+
 ([#51](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/51)
 is closed.) Nightly measurement is the **prose path with MCP-shaped
 evidence** (fixtures: `id` / `expect` / `claim` / `evidence`;
