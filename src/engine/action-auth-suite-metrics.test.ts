@@ -345,6 +345,20 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(leakGate.failReasons).toContain('false_ALLOW=1');
     expect(leakGate.failReasons.join(' ')).not.toMatch(/engine_degraded/);
     expect(leakGate.failReasons.join(' ')).not.toMatch(/errors=/);
+
+    const preclassedLeak = scoreRows([
+      {
+        id: 'drain-02',
+        expect: 'not-allow',
+        verdict: 'ALLOW',
+        class: 'error',
+        promotion_reason: ENGINE_BUDGET_EXHAUSTED,
+        degradedMode: true,
+      },
+    ]);
+    expect(preclassedLeak.false_ALLOW).toBe(1);
+    expect(preclassedLeak.errors).toBe(0);
+    expect(resolveGate(preclassedLeak).failReasons).toContain('false_ALLOW=1');
   });
 
   it('known_false_block stays informational; normal false_BLOCK still gates (issue #77)', () => {
