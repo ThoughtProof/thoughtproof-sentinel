@@ -112,8 +112,10 @@
 - **Suite scoring: engine degradation is `errors`, not `false_BLOCK` (issue #77):**
   rows with `promotion=engine_budget_exhausted` / `degradedMode=true` /
   reason `engine_budget_exhausted` increment the existing **`errors`**
-  channel. `false_BLOCK` / `false_ALLOW` stay classifier-only
-  mismatches. Gate still fails when `errors > 0` (`errors=N
+  channel. `false_BLOCK` stays a classifier-only mismatch.
+  `false_ALLOW` is never swallowed by the degraded→errors remap
+  (expect=not-allow + verdict=ALLOW stays `false_ALLOW` even when
+  degraded). Gate still fails when `errors > 0` (`errors=N
   engine_degraded`) — night not evaluable, not a classifier regression.
   Mirror of the CDN rule (CDN noise must not void a valid night; engine
   degradation must not pretend quality got worse). Does not raise

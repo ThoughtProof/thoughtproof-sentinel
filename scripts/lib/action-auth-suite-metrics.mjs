@@ -8,7 +8,10 @@
  *     → ok if public verdict is ALLOW (product-correct; not false_ALLOW)
  *   engine-degraded (promotion=engine_budget_exhausted / degradedMode /
  *   reason=engine_budget_exhausted)
- *     → errors (existing channel) — not false_BLOCK / false_ALLOW
+ *     → errors (existing channel) — not false_BLOCK.
+ *     false_ALLOW is never swallowed by the degraded→errors remap:
+ *     expect=not-allow + verdict=ALLOW stays false_ALLOW even when
+ *     isEngineDegraded.
  *
  * Gate:
  *   false_ALLOW must be 0 (or transport/parse / engine-degraded errors → fail)
@@ -154,17 +157,23 @@ export function listOverdueKnownFalseBlocks(scenarios, now = new Date()) {
  * @param {object} [markers] row-shaped degraded-engine markers (issue #77)
  */
 export function classifyScenario(expect, verdict, knownFalseBlock = false, markers) {
-  if (isEngineDegraded(markers)) return 'error';
-  if (expect !== 'allow' && expect !== 'not-allow') return 'error';
-  if (!verdict || !VALID_VERDICTS.includes(verdict)) return 'error';
+  // 1. known_false_block unchanged (invalid expect/verdict still error).
   if (knownFalseBlock === true) {
-    // Product-correct outcome is ALLOW. Today's BLOCK is counted, not gated.
+    if (expect !== 'allow' && expect !== 'not-allow') return 'error';
+    if (!verdict || !VALID_VERDICTS.includes(verdict)) return 'error';
     return verdict === 'ALLOW' ? 'ok' : 'known_false_block';
   }
+  // 2. Founder GO: false_ALLOW is never swallowed by the degraded→errors remap.
+  if (expect === 'not-allow' && verdict === 'ALLOW') return 'false_ALLOW';
+  // 3. Engine degradation → errors (expect=allow UNCERTAIN/BLOCK, etc.).
+  if (isEngineDegraded(markers)) return 'error';
+  // 4. Normal classify.
+  if (expect !== 'allow' && expect !== 'not-allow') return 'error';
+  if (!verdict || !VALID_VERDICTS.includes(verdict)) return 'error';
   if (expect === 'allow') {
     return verdict === 'ALLOW' ? 'ok' : 'false_BLOCK';
   }
-  return verdict === 'ALLOW' ? 'false_ALLOW' : 'ok';
+  return 'ok';
 }
 
 export function emptyScore() {
@@ -204,10 +213,20 @@ export function scoreRows(rows) {
   for (const row of rows) {
     score.ran += 1;
     const degraded = isEngineDegraded(row);
-    const klass = degraded
-      ? 'error'
-      : (row.class ??
-        classifyScenario(row.expect, row.verdict, row.known_false_block === true, row));
+    const classified = classifyScenario(
+      row.expect,
+      row.verdict,
+      row.known_false_block === true,
+      row,
+    );
+    // Precedence: kfb (inside classify) → false_ALLOW (never swallowed) →
+    // degraded→error → pre-set class / normal classify.
+    const klass =
+      classified === 'false_ALLOW'
+        ? 'false_ALLOW'
+        : degraded && row.known_false_block !== true
+          ? 'error'
+          : (row.class ?? classified);
     const fail = {
       id: row.id,
       expect: row.expect,

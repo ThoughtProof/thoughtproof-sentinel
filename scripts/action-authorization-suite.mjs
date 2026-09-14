@@ -212,7 +212,13 @@ function rowFromResponse(scenario, res) {
       error: res.json?.error || res.json?.code || `http_${res.status}`,
     };
   }
-  if (isEngineDegraded(base)) {
+  const klass = classifyScenario(
+    scenario.expect,
+    base.verdict,
+    scenario.known_false_block === true,
+    base,
+  );
+  if (klass === 'error' && isEngineDegraded(base)) {
     return {
       ...base,
       class: 'error',
@@ -221,7 +227,7 @@ function rowFromResponse(scenario, res) {
   }
   return {
     ...base,
-    class: classifyScenario(scenario.expect, base.verdict, scenario.known_false_block === true, base),
+    class: klass,
   };
 }
 
@@ -413,7 +419,7 @@ export async function runSuite(opts = {}) {
       fail_reasons: gate.failReasons,
       exit_code: gate.exitCode,
       first_ship_note:
-        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). Engine degradation (promotion=engine_budget_exhausted / degradedMode) counts as errors, not false_BLOCK / false_ALLOW (issue #77) — night not evaluable; fail reason includes errors=N engine_degraded. known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. Baseline is 0 after ≥3 green suite nights + founder GO (shipped #73; #51 closed).`,
+        `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). Engine degradation (promotion=engine_budget_exhausted / degradedMode) counts as errors, not false_BLOCK (issue #77) — night not evaluable; fail reason includes errors=N engine_degraded. false_ALLOW is never swallowed by the degraded→errors remap. known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. Baseline is 0 after ≥3 green suite nights + founder GO (shipped #73; #51 closed).`,
     },
     known_false_block_overdue: overdue.map((o) => o.warn),
     rows,

@@ -261,10 +261,10 @@ Gate (ratchet, not a permanent soft-pass):
   product limitation with rationale (anti-drawer). Nightly WARN when
   age > 7; WARN does not fail the gate.
 - **Engine degradation (issue #77):** `promotion=engine_budget_exhausted`
-  / `degradedMode` counts as **`errors`**, not `false_BLOCK` /
-  `false_ALLOW`. Gate still fails when `errors > 0`
-  (`errors=N engine_degraded`) — night not evaluable, not a
-  classifier regression. Mirror of the CDN rule.
+  / `degradedMode` counts as **`errors`**, not `false_BLOCK`.
+  `false_ALLOW` is never swallowed by the degraded→errors remap.
+  Gate still fails when `errors > 0` (`errors=N engine_degraded`) —
+  night not evaluable, not a classifier regression. Mirror of the CDN rule.
 - **#51 is closed:** `FALSE_BLOCK_BASELINE` is **0** (CHANGELOG; drop)
   completed after #73). Dispatch `fail_on_false_block` treats the
   baseline as 0 (already 0). Caller-kinds remain unit-test only

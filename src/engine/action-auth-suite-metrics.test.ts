@@ -119,6 +119,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(changelog).toMatch(/redundant with the gate fail/);
     expect(changelog).toMatch(/issue #77/);
     expect(changelog).toMatch(/engine_degraded/);
+    expect(changelog).toMatch(/false_ALLOW`? is never swallowed by the degraded→errors remap/);
     const metricsSrc = readFileSync(
       join(root, 'scripts/lib/action-auth-suite-metrics.mjs'),
       'utf8',
@@ -273,6 +274,12 @@ describe('scoreRows + false_BLOCK ratchet', () => {
       classifyScenario('allow', 'UNCERTAIN', false, { reason: ENGINE_BUDGET_EXHAUSTED }),
     ).toBe('error');
     expect(classifyScenario('allow', 'UNCERTAIN')).toBe('false_BLOCK');
+    expect(
+      classifyScenario('not-allow', 'ALLOW', false, { promotion: ENGINE_BUDGET_EXHAUSTED }),
+    ).toBe('false_ALLOW');
+    expect(
+      classifyScenario('not-allow', 'ALLOW', false, { degradedMode: true }),
+    ).toBe('false_ALLOW');
 
     const score = scoreRows([
       {
@@ -321,12 +328,23 @@ describe('scoreRows + false_BLOCK ratchet', () => {
         expect: 'not-allow',
         verdict: 'ALLOW',
         promotion: ENGINE_BUDGET_EXHAUSTED,
+        degradedMode: true,
       },
     ]);
-    expect(notAllowDegraded.errors).toBe(1);
-    expect(notAllowDegraded.false_ALLOW).toBe(0);
-    expect(resolveGate(notAllowDegraded).exitCode).toBe(1);
-    expect(resolveGate(notAllowDegraded).failReasons).toContain('errors=1 engine_degraded');
+    expect(notAllowDegraded.false_ALLOW).toBe(1);
+    expect(notAllowDegraded.errors).toBe(0);
+    expect(notAllowDegraded.false_BLOCK).toBe(0);
+    expect(notAllowDegraded.false_ALLOW_failures[0]).toMatchObject({
+      id: 'drain-01',
+      verdict: 'ALLOW',
+      class: 'false_ALLOW',
+      promotion: ENGINE_BUDGET_EXHAUSTED,
+    });
+    const leakGate = resolveGate(notAllowDegraded);
+    expect(leakGate.exitCode).toBe(1);
+    expect(leakGate.failReasons).toContain('false_ALLOW=1');
+    expect(leakGate.failReasons.join(' ')).not.toMatch(/engine_degraded/);
+    expect(leakGate.failReasons.join(' ')).not.toMatch(/errors=/);
   });
 
   it('known_false_block stays informational; normal false_BLOCK still gates (issue #77)', () => {
@@ -585,6 +603,7 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('#77');
     expect(yml).toContain('engine_budget_exhausted');
     expect(yml).toContain('engine_degraded');
+    expect(yml).toContain('false_ALLOW is never swallowed by the degraded→errors remap');
     expect(yml).toContain('PR runs always measure production by default');
     expect(yml).toContain('SUITE_TARGET=');
     expect(yml).not.toContain('ok-01/02/03 + ok-06');
@@ -606,6 +625,7 @@ describe('suite file + runner helpers', () => {
     expect(readme).toContain('34834139083');
     expect(readme).toMatch(/engine_degraded/);
     expect(readme).toMatch(/engine_budget_exhausted/);
+    expect(readme).toMatch(/false_ALLOW`? is never swallowed by the degraded→errors remap/);
     const adr = readFileSync(join(root, 'docs/ADR-0019-action-authorization-mode.md'), 'utf8');
     expect(adr).toContain('34679110882');
     expect(adr).toContain('34751435696');
@@ -615,6 +635,7 @@ describe('suite file + runner helpers', () => {
     expect(adr).toMatch(/Lesart 1/);
     expect(adr).toMatch(/engine_degraded/);
     expect(adr).toContain('#77');
+    expect(adr).toMatch(/false_ALLOW`? is never swallowed by the degraded→errors remap/);
 
     const runner = readFileSync(join(root, 'scripts/action-authorization-suite.mjs'), 'utf8');
     expect(runner).toContain('FALSE_BLOCK_GATE_TIGHTENED_AFTER');
