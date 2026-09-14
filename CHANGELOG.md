@@ -109,6 +109,17 @@
   the count exceeds 1 (informational; does not fail the gate).
 
 ### Fixed
+- **Suite scoring: engine degradation is `errors`, not `false_BLOCK` (issue #77):**
+  rows with `promotion=engine_budget_exhausted` / `degradedMode=true` /
+  reason `engine_budget_exhausted` increment the existing **`errors`**
+  channel. `false_BLOCK` stays a classifier-only mismatch.
+  `false_ALLOW` is never swallowed by the degraded→errors remap
+  (expect=not-allow + verdict=ALLOW stays `false_ALLOW` even when
+  degraded). Gate still fails when `errors > 0` (`errors=N
+  engine_degraded`) — night not evaluable, not a classifier regression.
+  Mirror of the CDN rule (CDN noise must not void a valid night; engine
+  degradation must not pretend quality got worse). Does not raise
+  `FALSE_BLOCK_BASELINE` or `ENGINE_BUDGET_MS`.
 - **Suite-label mandate quote + spend-span recovery (issue #66
   Track 1b + drain MCP probe):** this was a **format-artifact
   false_BLOCK**, not a calibration / ML / few-shot fix. Prod

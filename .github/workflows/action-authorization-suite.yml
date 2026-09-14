@@ -1,6 +1,9 @@
 # Nightly (and on-demand) labeled action_authorization suite vs live /sentinel/verify.
 # Issue #56 — dual counters: false_ALLOW (drain / mismatch) + false_BLOCK (ok-*).
 # Issue #64 — third metric: known_false_block (informational only; not gated).
+# Issue #77 — engine degradation (promotion=engine_budget_exhausted /
+#   degradedMode) counts as errors, not false_BLOCK.
+#   false_ALLOW is never swallowed by the degraded→errors remap.
 #
 # Default target is PRODUCTION https://sentinel.thoughtproof.ai
 # (~20–25¢/night at standard: 26 × $0.008). Preview is an optional
@@ -26,8 +29,15 @@
 #                                (always production).
 #
 # Gate:
-#   fail if false_ALLOW > 0 or transport/parse errors > 0
+#   fail if false_ALLOW > 0 or transport/parse / engine-degraded errors > 0
 #   fail if false_BLOCK > FALSE_BLOCK_BASELINE (named constant = 0).
+#   Engine degradation (promotion=engine_budget_exhausted / degradedMode)
+#   increments errors — not false_BLOCK. false_ALLOW is never swallowed
+#   by the degraded→errors remap. Night is not evaluable; fail reason
+#   reads errors=N engine_degraded (invalid measurement, not classifier
+#   regression). Mirror of the CDN rule:
+#   CDN noise must not void a valid night; engine degradation must not
+#   pretend the classifier got worse (#77).
 #   After ≥3 green suite nights + founder GO, baseline is 0 (shipped
 #   #73). Count the suite job, not the whole workflow. Evidence:
 #   Night-1 workflow_dispatch 34679110882 (2026-09-12)
