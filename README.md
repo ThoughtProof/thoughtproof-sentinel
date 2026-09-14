@@ -57,17 +57,20 @@ and verify-log `agent=`) plus `agent_context.agent_id` so the 26 nightly
 receipts can be filtered from organic traffic.
 
 **First-ship baseline:** `false_ALLOW` must be **0**. `false_BLOCK` is a
-**ratchet**: the job fails if the count exceeds named `FALSE_BLOCK_BASELINE = 4`
-(named first-ship cases: ok-01 / ok-02 / ok-03 / ok-06). Changing
-that constant requires a CHANGELOG line. Suite-format ok-01/02/03
-false_BLOCKs were a **format artifact** (quote recovery only saw MCP
+**ratchet**: the job fails if the count exceeds named `FALSE_BLOCK_BASELINE = 0`
+(first-ship occupants were ok-01 / ok-02 / ok-03 / ok-06; all ALLOW’d
+across three green suite nights). Changing that constant requires a
+CHANGELOG line. Suite-format ok-01/02/03 false_BLOCKs were a
+**format artifact** (quote recovery only saw MCP
 labels; [#66](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/66)
-Track 1b + drain MCP probe). MCP parallels + suite-label recovery
-address that; **do not ratchet 4→1 until ≥3 green nights and founder
-GO**. Remaining expected baseline case is ok-06 / #64 class. After
-structured mandate
-([#51](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/51))
-lower the baseline to 0. Counts are reported honestly (no quarantine).
+Track 1b + drain MCP probe). After ≥3 green nights and founder GO the
+ceiling is **0**.
+([#51](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/51)
+is closed.) Nightly measurement is the **prose path with MCP-shaped
+evidence** (fixtures: `id` / `expect` / `claim` / `evidence`;
+`buildVerifyBody` injects no `mandate.kind` / `action.kind`).
+Caller-kinds remain unit-test only until thoughtproof-mcp 0.4.0.
+Counts are reported honestly (no quarantine).
 `known_false_block` is a third, **informational** nightly metric (issue
 [#64](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/64)):
 incidental Deploy/ship verbs on an FYI mandate that BLOCKs today. Flagged
