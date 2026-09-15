@@ -224,7 +224,7 @@ ALLOWs** bar is paired with in-scope **false-BLOCK measurement** on
 suite `ok-*` (verdict ∉ {ALLOW} when `expect: allow`). Nightly GitHub
 Action `action-authorization-suite.yml` hits **production**
 `https://sentinel.thoughtproof.ai` `/sentinel/verify` (~20–25¢/night
-at `standard`, 26 × $0.008) and emits both counters plus failing
+at `standard`, 27 × $0.008) and emits both counters plus failing
 scenario ids and receipt ids. Preview is an optional dispatch/PR
 override only.
 
@@ -242,7 +242,11 @@ Gate (ratchet, not a permanent soft-pass):
   [Night-2 34751435696](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34751435696)
   (2026-09-13 `schedule`) same suite line, SRI job success;
   [Night-3 34834139083](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34834139083)
-  (2026-09-14 `schedule`) same suite line, SRI job success.
+  (2026-09-14 `schedule`) same suite line, SRI job success;
+  [Night-4 34955914579](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34955914579)
+  (2026-09-15 `schedule`, tip `d168a17`) last 26-scenario green night —
+  `false_ALLOW=0 false_BLOCK=0 known_false_block=2 errors=0 ok=24/26 PASS`.
+  Post-#76 nights: 27 scenarios, expect `known_false_block=3`.
   Suite-format ok-01/02/03 false_BLOCKs were a format artifact
   (#66 Track 1b: quote recovery only saw MCP labels). ok-06 ALLOW’d
   for three nights and is not a residual occupant. Counts are
@@ -287,7 +291,9 @@ PASS path for amount/recipient gold steps (cascade calibration);
 digit noise therefore fails closed. Follow-up issue **#75**; suite fixture
 `kfb-03-deploy-ship-ops-merge-gate` (`known_false_block: true`,
 `since: 2026-09-14`) measures the claim form on the prose path without
-raising the baseline. Required fix remains cascade-side PASS hint — not
+raising the baseline. First clean kfb-03 observation is the night AFTER
+#76 merge; prior `sent_62d3e975` stays provisional (budget contamination).
+Required fix remains cascade-side PASS hint — not
 "no digits in claim".
 
 Each request is attributed as `nightly-suite`

@@ -74,7 +74,10 @@ export function isEngineDegraded(row) {
  * GO, the named constant is 0 (shipped #73). Cited suite jobs:
  * Night-1 workflow_dispatch 34679110882 (2026-09-12), Night-2
  * schedule 34751435696 (2026-09-13), Night-3 schedule 34834139083
- * (2026-09-14). ok-06 ALLOW’d for those nights; it is not a residual
+ * (2026-09-14). Night-4 schedule 34955914579 (2026-09-15, tip
+ * d168a17) is the last 26-scenario green night (ok=24/26);
+ * post-#76 nights are 27 scenarios / known_false_block=3.
+ * ok-06 ALLOW’d for those nights; it is not a residual
  * baseline occupant. Fail the job when the live count exceeds this.
  * #51 is closed.
  */

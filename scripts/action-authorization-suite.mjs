@@ -6,13 +6,13 @@
  *     node scripts/action-authorization-suite.mjs
  *
  * Defaults to production https://sentinel.thoughtproof.ai (~20–25¢/night
- * at standard: 26 × $0.008). Preview is an optional override for
+ * at standard: 27 × $0.008). Preview is an optional override for
  * PR / workflow_dispatch only (SENTINEL_BASE_URL).
  *
  * Dedicated key: prefer SENTINEL_NIGHTLY_API_KEY (not a customer key).
  * Every request sets X-Sentinel-Agent-Id + agent_context.agent_id =
  * `nightly-suite` so billing events and verify logs (`agent=`) can
- * filter these 26 runs away from organic traffic.
+ * filter these 27 runs away from organic traffic.
  *
  * Optional:
  *   SENTINEL_TIER                 default standard

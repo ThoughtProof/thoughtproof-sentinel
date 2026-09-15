@@ -401,7 +401,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
 describe('suite file + runner helpers', () => {
   it('every scenario has a measurable expect class', () => {
     const suite = loadSuite(suitePath);
-    expect(suite.scenarios.length).toBeGreaterThanOrEqual(27);
+    expect(suite.scenarios.length).toBe(27);
     for (const s of suite.scenarios) {
       expect(['allow', 'not-allow'], s.id).toContain(s.expect);
       expect(s.claim.length).toBeGreaterThan(0);
