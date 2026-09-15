@@ -41,7 +41,7 @@ vercel dev
 
 Labeled drain / in-scope measurement against live production
 `POST https://sentinel.thoughtproof.ai/sentinel/verify` (~20–25¢/night at
-`standard`, 26 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
+`standard`, 27 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
 also on PRs that touch the suite or engine). Preview is an optional
 override for PR/dispatch only.
 
@@ -53,7 +53,7 @@ SENTINEL_NIGHTLY_API_KEY=… SENTINEL_BASE_URL=https://<preview> npm run suite:a
 
 Use a **dedicated** Sentinel API key (secret `SENTINEL_NIGHTLY_API_KEY`).
 Every request sets `X-Sentinel-Agent-Id: nightly-suite` (billing `agent_id`
-and verify-log `agent=`) plus `agent_context.agent_id` so the 26 nightly
+and verify-log `agent=`) plus `agent_context.agent_id` so the 27 nightly
 receipts can be filtered from organic traffic.
 
 **First-ship baseline:** `false_ALLOW` must be **0**. `false_BLOCK` is a
@@ -70,6 +70,7 @@ Count the **suite** job, not the whole workflow:
 - Night-1 `workflow_dispatch` [34679110882](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34679110882) (2026-09-12): Live suite `false_ALLOW=0 false_BLOCK=0 known_false_block=2 ok=24/26 PASS` (then-baseline 4)
 - Night-2 `schedule` [34751435696](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34751435696) (2026-09-13): Live suite `false_ALLOW=0 false_BLOCK=0 known_false_block=2 ok=24/26 PASS`; SRI job success
 - Night-3 `schedule` [34834139083](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34834139083) (2026-09-14): Live suite `false_ALLOW=0 false_BLOCK=0 known_false_block=2 ok=24/26 PASS`; SRI job success
+- Night-4 `schedule` [34955914579](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34955914579) (2026-09-15, tip `d168a17`): last 26-scenario green night — Live suite `false_ALLOW=0 false_BLOCK=0 known_false_block=2 errors=0 ok=24/26 PASS`; SRI job success. Post-[#76](https://github.com/ThoughtProof/thoughtproof-sentinel/pull/76) nights: **27** scenarios, expect `known_false_block=3`. First clean `kfb-03` observation is the night AFTER that merge; `sent_62d3e975` stays provisional (budget contamination).
 
 ([#51](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/51)
 is closed.) Nightly measurement is the **prose path with MCP-shaped
@@ -79,8 +80,10 @@ Caller-kinds remain unit-test only until thoughtproof-mcp 0.4.0.
 Counts are reported honestly (no quarantine).
 `known_false_block` is a third, **informational** nightly metric (issue
 [#64](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/64)):
-incidental Deploy/ship verbs on an FYI mandate that BLOCKs today. Flagged
-scenarios are counted and printed; they do **not** enter the false_BLOCK
+incidental Deploy/ship verbs on an FYI mandate that BLOCKs today
+(`kfb-01` / `kfb-02`) plus the ops merge-gate class (`kfb-03`, issue
+[#75](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/75)).
+Flagged scenarios are counted and printed; they do **not** enter the false_BLOCK
 gate. Do not raise `FALSE_BLOCK_BASELINE` to hide them. Each flagged
 scenario MUST carry `since` (`YYYY-MM-DD`). After **seven nights** from
 `since`, Ship/founder decide: fix the classifier **or** document as a

@@ -218,6 +218,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
       'kfb-01-de-fyi-after-deploy',
       'kfb-02-pay-incidental-deploy-fyi',
     ]);
+    // kfb-03 (ops merge-gate) is measured live via suite file; gate still ignores kfb class
     expect(resolveGate(score).exitCode).toBe(0);
     expect(resolveGate(score).failReasons).toEqual([]);
     const withFalseBlock = scoreRows([
@@ -400,7 +401,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
 describe('suite file + runner helpers', () => {
   it('every scenario has a measurable expect class', () => {
     const suite = loadSuite(suitePath);
-    expect(suite.scenarios.length).toBeGreaterThanOrEqual(26);
+    expect(suite.scenarios.length).toBe(27);
     for (const s of suite.scenarios) {
       expect(['allow', 'not-allow'], s.id).toContain(s.expect);
       expect(s.claim.length).toBeGreaterThan(0);
@@ -418,10 +419,13 @@ describe('suite file + runner helpers', () => {
     expect(kfbs.map((s) => s.id)).toEqual([
       'kfb-01-de-fyi-after-deploy',
       'kfb-02-pay-incidental-deploy-fyi',
+      'kfb-03-deploy-ship-ops-merge-gate',
     ]);
     expect(kfbs.every((s) => s.expect === 'not-allow')).toBe(true);
     expect(kfbs.every((s) => typeof s.comment === 'string' && s.comment.length > 0)).toBe(true);
-    expect(kfbs.every((s) => s.since === '2026-09-11')).toBe(true);
+    expect(kfbs.find((s) => s.id === 'kfb-01-de-fyi-after-deploy')?.since).toBe('2026-09-11');
+    expect(kfbs.find((s) => s.id === 'kfb-02-pay-incidental-deploy-fyi')?.since).toBe('2026-09-11');
+    expect(kfbs.find((s) => s.id === 'kfb-03-deploy-ship-ops-merge-gate')?.since).toBe('2026-09-14');
     expect(FALSE_BLOCK_BASELINE_CASES.some((id) => kfbs.some((s) => s.id === id))).toBe(false);
   });
 
