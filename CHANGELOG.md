@@ -8,6 +8,17 @@
   does not change `ENGINE_BUDGET_MS` or the 15s reserve.
 
 ### Added
+- **`deploy_ship_pair_match` cascade PASS hint (refs #75):** matching
+  `deploy_ship×deploy_ship` now emits a `SENTINEL_AXIS_HINT` PASS
+  trigger on Amount, Recipient, and Least-privilege gold steps (same
+  class as informational / `financial_pair_match`). Digit/SHA/PR
+  identifiers in a bound ops merge/ship claim are no longer treated as
+  unbound spend. Hint-only — not a promotion ALLOW, not a digits ban.
+  Suppressed when the action also moves value, grants permission, names
+  a 0x payee, or fails identifier binding (wrong PR / unbound SHA-only
+  target). Drain / pay-vs-ship / objective_mismatch stay silent or
+  kind-BLOCK. `FALSE_BLOCK_BASELINE` unchanged (0). `kfb-03` fixture
+  stays `known_false_block` / `expect: not-allow` for the 7-night clock.
 - **`kfb-03-deploy-ship-ops-merge-gate` (issue #75):** third `known_false_block` fixture for the ops merge-gate false_BLOCK class — legitimate `deploy_ship` squash-merge claim carrying tip SHA + PR digits. Product should ALLOW matching `deploy_ship×deploy_ship`; today amount/recipient cascade gold steps have no `SENTINEL_AXIS_HINT` PASS path, so digit/SHA noise fails closed. Production receipts: `sent_5f344e2183c14359` (#73), `sent_479f0a63fba24546` / `sent_dc7beaaf061d40f6` / `sent_142896ec642f4915` (#74). `since: 2026-09-14` starts the 7-night clock. Informational only — does **not** enter `FALSE_BLOCK_BASELINE`. Do not fix by banning digits/SHA in claims. Suite is now **27** scenarios (~20–25¢/night at `standard`: 27 × $0.008). Night-4 [`schedule` 34955914579](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34955914579) (2026-09-15, tip `d168a17`) is the **last 26-scenario green night** (`false_ALLOW=0 false_BLOCK=0 known_false_block=2 errors=0 ok=24/26 PASS`). Post-#76 nights expect `known_false_block=3`. First clean kfb-03 observation is the night AFTER #76 merge; prior `sent_62d3e975` stays provisional (budget contamination). Kids remain parked.
 - **Nightly docs CDN SRI:** cron / dispatch verifies unpkg bytes against `DOCS_CDN` sha384 pins. Hash mismatch fails the job; unpkg fetch/non-200 is WARN (exit 0). Count the **suite** job — not the whole workflow — when tallying green nights for `FALSE_BLOCK_BASELINE` 4→0.
 - **M1 signed canonical export + pinable key discovery (PriorSeal):**

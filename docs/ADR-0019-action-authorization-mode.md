@@ -296,6 +296,17 @@ raising the baseline. First clean kfb-03 observation is the night AFTER
 Required fix remains cascade-side PASS hint — not
 "no digits in claim".
 
+**#75 cascade PASS hint (prompt-only, same class as #55):** matching
+`deploy_ship×deploy_ship` emits `SENTINEL_AXIS_HINT` with
+`deploy_ship_pair_match=true` on Amount, Recipient, and Least-privilege
+gold steps when the ship target is bound (PR / SHA / semver overlap,
+or no bindable identifiers) and the action does not move value, grant
+permission, or name a 0x payee. Digit/SHA/PR tokens are identifiers,
+not spend amounts. Hint-only — never a promotion ALLOW. Wrong-PR,
+drain, pay-vs-ship, and unauthorized 0x stay silent or kind-BLOCK.
+`kfb-03` stays `known_false_block` until the 7-night decision; do not
+raise `FALSE_BLOCK_BASELINE`.
+
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;
 `agent_context.agent_id` on the receipt) using a dedicated

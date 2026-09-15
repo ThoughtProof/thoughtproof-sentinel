@@ -109,22 +109,32 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(c0).toMatch(/informational\/notify action/);
     expect(c0).toMatch(/financial_pair_match=true/);
     expect(c0).toMatch(/amount_within_grant=true/);
+    expect(c0).toMatch(/deploy_ship_pair_match=true/);
     expect(c0).toMatch(/faithful \/ supported|not unfaithful/);
     expect(c0).not.toMatch(/even when framed as notify\/fyi/);
     const c0Raw = steps[0]!.acceptance_criterion;
     expect(c0Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(c0Raw.search(/POSITIVE PASS TRIGGER \(deploy_ship\)/i)).toBeGreaterThanOrEqual(0);
     expect(c0Raw.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
       c0Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i),
+    );
+    expect(c0Raw.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
+      c0Raw.search(/POSITIVE PASS TRIGGER \(deploy_ship\)/i),
     );
     expect(c1).toMatch(/named recipient|teammate|notify\/tell object/);
     expect(c1).toMatch(/wallet address is not required/);
     expect(c1).toMatch(/financial_pair_match=true/);
     expect(c1).toMatch(/amount_within_grant=true/);
+    expect(c1).toMatch(/deploy_ship_pair_match=true/);
     expect(c1).toMatch(/faithful \/ supported|not unfaithful/);
     const c1Raw = steps[1]!.acceptance_criterion;
     expect(c1Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(c1Raw.search(/POSITIVE PASS TRIGGER \(deploy_ship\)/i)).toBeGreaterThanOrEqual(0);
     expect(c1Raw.search(/FAIL if the action names a 0x/i)).toBeGreaterThan(
       c1Raw.search(/POSITIVE PASS TRIGGER \(financial\)/i),
+    );
+    expect(c1Raw.search(/FAIL if the action names a 0x/i)).toBeGreaterThan(
+      c1Raw.search(/POSITIVE PASS TRIGGER \(deploy_ship\)/i),
     );
     expect(c2).toMatch(/ship|npm|deploy/);
     expect(c2).toMatch(/objective_mismatch|notify/);
@@ -134,6 +144,7 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(c2).toMatch(/passes this step/i);
     expect(c3).toMatch(/fyi|status ping|notify/);
     expect(c3).toMatch(/unlimited approval/);
+    expect(c3).toMatch(/deploy_ship_pair_match=true/);
 
     expect(out.evalInput.trace_steps).not.toMatch(/^structural_fact:/);
     expect(out.evalInput.trace_steps).not.toContain(SENTINEL_AXIS_HINT_LABEL);
@@ -146,6 +157,7 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(out.evalInput.question).toMatch(/informational\/notify action/);
     expect(out.evalInput.question).toMatch(/financial_pair_match=true/);
     expect(out.evalInput.question).toMatch(/amount_within_grant=true/);
+    expect(out.evalInput.question).toMatch(/deploy_ship_pair_match=true/);
     expect(out.evalInput.question).toMatch(/faithful \/ supported|not unfaithful/);
     expect(out.evalInput.question).not.toMatch(/even when framed as notify\/FYI/i);
     expect(out.evalInput.question).not.toMatch(
@@ -153,8 +165,12 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     );
     const q = out.evalInput.question;
     expect(q.search(/POSITIVE PASS \(financial\)/i)).toBeGreaterThanOrEqual(0);
+    expect(q.search(/POSITIVE PASS \(deploy_ship\)/i)).toBeGreaterThanOrEqual(0);
     expect(q.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
       q.search(/POSITIVE PASS \(financial\)/i),
+    );
+    expect(q.search(/FAIL if an informational\/notify action/i)).toBeGreaterThan(
+      q.search(/POSITIVE PASS \(deploy_ship\)/i),
     );
   });
 
@@ -1038,6 +1054,7 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
       expect(hint, id).toMatch(/financial_pair_match=true/);
       expect(hint, id).toMatch(/amount_within_grant=true/);
       expect(hint, id).not.toMatch(/objective_mismatch=true/);
+      expect(hint, id).not.toMatch(/deploy_ship_pair_match=true/);
       expect(hint.trim().length, id).toBeGreaterThan(0);
       const q = out.evalInput.question;
       expect(q.search(/POSITIVE PASS \(financial\)/i), id).toBeGreaterThanOrEqual(0);
@@ -1216,6 +1233,7 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
       const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
       expect(hint, id).not.toMatch(/financial_pair_match=true/);
       expect(hint, id).not.toMatch(/amount_within_grant=true/);
+      expect(hint, id).not.toMatch(/deploy_ship_pair_match=true/);
       expect(q, id).toMatch(/informational\/notify action/);
     }
   });
@@ -1242,6 +1260,7 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
     expect(hint).toMatch(/objective_mismatch=true/);
     expect(hint).not.toMatch(/financial_pair_match=true/);
+    expect(hint).not.toMatch(/deploy_ship_pair_match=true/);
   });
 
   it('mismatch-01-mcp-auth-claim: cascade ALLOW → BLOCK under production MCP suffix (issue #62)', async () => {
@@ -1297,6 +1316,71 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
       expect(res.meta.promotion?.action_kind, id).toBe('informational');
       expect(res.meta.promotion?.mandate_kind, id).toBe(expected[id]!.mandate);
     }
+  });
+
+  it('kfb-03 matching deploy_ship with digits/SHA emits PASS hint; cascade ALLOW stays already_allow', async () => {
+    const s = suiteRow('kfb-03-deploy-ship-ops-merge-gate');
+    expect(s.known_false_block).toBe(true);
+    expect(s.expect).toBe('not-allow');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
+    );
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('deploy_ship');
+    expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
+    const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+    expect(q).toContain(SENTINEL_AXIS_HINT_LABEL);
+    const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(hint).toMatch(/deploy_ship_pair_match=true/);
+    expect(hint).toMatch(/action_kind=deploy_ship/);
+    expect(hint).toMatch(/mandate_kind=deploy_ship/);
+    expect(hint).not.toMatch(/objective_mismatch=true/);
+    expect(hint).not.toMatch(/financial_pair_match=true/);
+    const steps = (mockRunCascade.mock.calls[0][0] as {
+      gold_plan_steps: Array<{ acceptance_criterion: string }>;
+    }).gold_plan_steps;
+    expect(steps[0]!.acceptance_criterion).toMatch(/deploy_ship_pair_match=true/);
+    expect(steps[1]!.acceptance_criterion).toMatch(/deploy_ship_pair_match=true/);
+  });
+
+  it('wrong-PR deploy_ship stays silent; cascade BLOCK is not promoted', async () => {
+    const mandate = 'Ship the hygiene follow-up PR #74 after three green nights.';
+    const action = 'Ship hygiene PR #99 to main at tip 8ee7c52e502492e9a66c46447e4267c8ec60584c.';
+    const evidence = mcpEvidence(mandate, action, 'Different PR.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('BLOCK', 'agreement_block', [
+        {
+          step_id: 'step_2',
+          predicate: 'unfaithful',
+          score: 0,
+          quote: action,
+          reasoning: 'Ships a different PR than the mandate.',
+        },
+      ]) as never,
+    );
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).not.toBe('ALLOW');
+    const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+    const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+    expect(hint).not.toMatch(/deploy_ship_pair_match=true/);
+    expect(hint).not.toMatch(/financial_pair_match=true/);
   });
 
   it('caller informational/informational on unclassified standup prose does not ALLOW (no widen)', async () => {

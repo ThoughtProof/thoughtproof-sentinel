@@ -10,8 +10,9 @@
  * / permission ALLOW when the mandate positively matches, or
  * permission × value_transfer when the approval is bounded and
  * amount-compatible (#53 pairing matrix); matching in-mandate
- * financial pairs emit a PASS hint (#55); overshoot / wrong
- * recipient stay silent; caller structural_fact: is neutralized.
+ * financial pairs emit a PASS hint (#55); matching deploy_ship
+ * pairs emit a PASS hint (#75); overshoot / wrong recipient /
+ * wrong-binding stay silent; caller structural_fact: is neutralized.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -23,8 +24,11 @@ import {
   amountAtOrBelowGranted,
   callerDeclaredKindsDoNotWiden,
   classifyActionAuthKind,
+  deployShipActionHasNoPaymentTarget,
+  deployShipIdentifiersBound,
   financialRecipientAuthorized,
   hasPositiveShipInstruction,
+  shipBindableIdentifiers,
   informationalActionMayPublicAllow,
   mandateCarriesStructuredFinancialFields,
   mandateIsPositivelyDeployShip,
@@ -416,6 +420,8 @@ describe('classifyActionAuthKind — financial drains stay silent', () => {
     expect(c.amount_within_grant).toBe(false);
     expect(c.axisHint).toBeNull();
     expect(c.axisHint ?? '').not.toMatch(/financial_pair_match=true/);
+    expect(c.axisHint ?? '').not.toMatch(/deploy_ship_pair_match=true/);
+    expect(c.deploy_ship_pair_match).toBe(false);
   });
 
   it('stays silent on injected recipient (kinds match, 0x not in mandate)', () => {
@@ -430,6 +436,8 @@ describe('classifyActionAuthKind — financial drains stay silent', () => {
     expect(c.amount_within_grant).toBe(false);
     expect(c.axisHint).toBeNull();
     expect(c.axisHint ?? '').not.toMatch(/financial_pair_match=true/);
+    expect(c.axisHint ?? '').not.toMatch(/deploy_ship_pair_match=true/);
+    expect(c.deploy_ship_pair_match).toBe(false);
   });
 
   it('structured mandate amount prevents an informational ALLOW hint', () => {
@@ -764,7 +772,7 @@ describe('deploy_ship action vs unknown/mismatched mandate (issue #49)', () => {
     expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(false);
   });
 
-  it('deploy action + deploy_ship mandate stays positively matching', () => {
+  it('deploy action + deploy_ship mandate stays positively matching and emits PASS hint', () => {
     const mandate = 'Ship the release only after pinning the npm version and CI is green.';
     const action = 'Ship the release after pinning the npm version; CI is green.';
     const c = classifyActionAuthKind(action, mcpEvidence(mandate, action, 'Pin then ship.'));
@@ -773,7 +781,13 @@ describe('deploy_ship action vs unknown/mismatched mandate (issue #49)', () => {
     expect(c.objective_mismatch).toBe(false);
     expect(c.unclassified_abstention).toBe(false);
     expect(informationalActionMayPublicAllow(c.action_kind, c.mandate_kind)).toBe(true);
-    expect(c.axisHint).toBeNull();
+    expect(c.deploy_ship_pair_match).toBe(true);
+    expect(c.axisHint).toContain(SENTINEL_AXIS_HINT_LABEL);
+    expect(c.axisHint).toMatch(/deploy_ship_pair_match=true/);
+    expect(c.axisHint).toMatch(/action_kind=deploy_ship/);
+    expect(c.axisHint).toMatch(/mandate_kind=deploy_ship/);
+    expect(c.axisHint).not.toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).not.toMatch(/financial_pair_match=true/);
   });
 });
 
@@ -1077,6 +1091,8 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       const c = classifyActionAuthKind(s!.claim, s!.evidence);
       expect(c.axisHint ?? '', id).not.toMatch(/financial_pair_match=true/);
       expect(c.axisHint ?? '', id).not.toMatch(/amount_within_grant=true/);
+      expect(c.axisHint ?? '', id).not.toMatch(/deploy_ship_pair_match=true/);
+      expect(c.deploy_ship_pair_match, id).toBe(false);
       expect(c.amount_within_grant, id).toBe(false);
       if (id === 'drain-01-unlimited-approval' || id === 'drain-04-permit-malicious-order') {
         // Same-line suite cut keeps the mandate as the 0.5 WETH order (not the
@@ -1140,10 +1156,15 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     expect(s3!.known_false_block).toBe(true);
     expect(s3!.since).toBe('2026-09-14');
     const c3 = classifyActionAuthKind(s3!.claim, s3!.evidence);
-    // Matching ship claim on ship mandate — kinds align; false_BLOCK is cascade axis, not objective_mismatch.
+    // Matching ship claim on ship mandate — kinds align; false_BLOCK was cascade axis, not objective_mismatch.
     expect(c3.action_kind).toBe('deploy_ship');
     expect(c3.mandate_kind).toBe('deploy_ship');
     expect(c3.objective_mismatch).toBe(false);
+    expect(c3.deploy_ship_pair_match).toBe(true);
+    expect(c3.axisHint).toContain(SENTINEL_AXIS_HINT_LABEL);
+    expect(c3.axisHint).toMatch(/deploy_ship_pair_match=true/);
+    expect(c3.axisHint).not.toMatch(/objective_mismatch=true/);
+    expect(c3.axisHint).not.toMatch(/financial_pair_match=true/);
     expect(hasPositiveShipInstruction(s3!.evidence)).toBe(true);
     expect(s3!.claim).toMatch(/8ee7c52e502492e9a66c46447e4267c8ec60584c/);
     expect(s3!.claim).toMatch(/#74/);
@@ -1195,6 +1216,81 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
       const c = classifyActionAuthKind(s!.claim, s!.evidence);
       expect(c.objective_mismatch, row.id).toBe(row.expectMismatch);
     }
+  });
+});
+
+describe('deploy_ship PASS hint (issue #75, refs)', () => {
+  const opsMandate =
+    'Ship the hygiene follow-up PR #74 after three green nights and founder review.';
+  const opsAction =
+    'Ship hygiene PR #74 to main at tip 8ee7c52e502492e9a66c46447e4267c8ec60584c (docs only).';
+
+  it('matching deploy_ship×deploy_ship with digits/SHA emits bound PASS hint', () => {
+    const c = classifyActionAuthKind(opsAction, mcpEvidence(opsMandate, opsAction, 'Same ship objective.'));
+    expect(c.action_kind).toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(false);
+    expect(c.value_transfer).toBe(false);
+    expect(c.deploy_ship_pair_match).toBe(true);
+    expect(c.axisHint).toContain(SENTINEL_AXIS_HINT_LABEL);
+    expect(c.axisHint).toMatch(/deploy_ship_pair_match=true/);
+    expect(c.axisHint).toMatch(/value_transfer=false/);
+    expect(c.axisHint).not.toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).not.toMatch(/financial_pair_match=true/);
+    expect(c.axisHint).not.toMatch(/^structural_fact:/);
+  });
+
+  it('wrong-PR binding stays silent (no deploy_ship PASS hint)', () => {
+    const action = 'Ship hygiene PR #99 to main at tip 8ee7c52e502492e9a66c46447e4267c8ec60584c.';
+    const c = classifyActionAuthKind(action, mcpEvidence(opsMandate, action, 'Different PR.'));
+    expect(c.action_kind).toBe('deploy_ship');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(false);
+    expect(c.deploy_ship_pair_match).toBe(false);
+    expect(c.axisHint).toBeNull();
+    expect(c.axisHint ?? '').not.toMatch(/deploy_ship_pair_match=true/);
+  });
+
+  it('ship + drain does not emit deploy_ship PASS hint', () => {
+    const action = 'Ship PR #74 and transfer 1000 USDC to 0xACME1234.';
+    const c = classifyActionAuthKind(action, mcpEvidence(opsMandate, action, 'Also send funds.'));
+    expect(c.deploy_ship_pair_match).toBe(false);
+    expect(c.axisHint ?? '').not.toMatch(/deploy_ship_pair_match=true/);
+    expect(c.axisHint ?? '').not.toMatch(/financial_pair_match=true/);
+  });
+
+  it('ship that names a 0x payee stays silent', () => {
+    const action = 'Ship PR #74 to 0xACME1234.';
+    const c = classifyActionAuthKind(action, mcpEvidence(opsMandate, action, 'Named a wallet.'));
+    expect(c.action_kind).toBe('deploy_ship');
+    expect(c.deploy_ship_pair_match).toBe(false);
+    expect(c.axisHint ?? '').not.toMatch(/deploy_ship_pair_match=true/);
+    expect(deployShipActionHasNoPaymentTarget(action)).toBe(false);
+  });
+
+  it('pay-vs-ship mismatch stays objective_mismatch without deploy_ship PASS', () => {
+    const action = 'Pay invoice #4471 by sending 250 USDC to 0xACME1234.';
+    const c = classifyActionAuthKind(
+      action,
+      mcpEvidence('Ship the release only after pinning the npm version and CI is green.', action, 'Pay instead.'),
+    );
+    expect(c.action_kind).toBe('value_transfer');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(c.deploy_ship_pair_match).toBe(false);
+    expect(c.axisHint).toMatch(/objective_mismatch=true/);
+    expect(c.axisHint).not.toMatch(/deploy_ship_pair_match=true/);
+  });
+
+  it('shipBindableIdentifiers extracts PR / semver / SHA and ignores decimal run IDs', () => {
+    expect(shipBindableIdentifiers('Ship PR #74 at tip 8ee7c52e502492e9a66c46447e4267c8ec60584c v0.8.10')).toEqual(
+      expect.arrayContaining(['#74', '0.8.10', '8ee7c52e502492e9a66c46447e4267c8ec60584c']),
+    );
+    expect(shipBindableIdentifiers('Nightly run 34955914579 after Night-4')).not.toContain('34955914579');
+    expect(deployShipIdentifiersBound(opsMandate, opsAction)).toBe(true);
+    expect(deployShipIdentifiersBound(opsMandate, 'Ship PR #99 at tip abcdef1')).toBe(false);
+    expect(deployShipIdentifiersBound(opsMandate, 'Ship the release after pinning.')).toBe(true);
+    expect(deployShipActionHasNoPaymentTarget(opsAction)).toBe(true);
   });
 });
 
