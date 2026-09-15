@@ -31,7 +31,13 @@
  * financial pairs (amount at or below grant + authorized 0x) emit a
  * PASS hint (`financial_pair_match` / `amount_within_grant`) so the
  * cascade does not fail-close on a legitimate 0x+amount action (#55).
- * Overshoot / wrong-recipient / unbounded stay silent or mismatch.
+ * Matching `deploy_ship` pairs emit a PASS hint
+ * (`deploy_ship_pair_match`) so PR digits / tip SHAs / run IDs do not
+ * fail-close Amount and Recipient gold steps as unbound spend (#75).
+ * Overshoot / wrong-recipient / unbounded / wrong-binding stay silent
+ * or mismatch. The deploy_ship hint is hint-only — never a promotion
+ * ALLOW, and never emitted when the action also moves value, grants
+ * permission, names a 0x payee, or fails identifier binding.
  * An informational action vs an unknown mandate is not silent. An
  * `unknown` action vs a *named* non-informational mandate
  * (`deploy_ship` / `value_transfer` / `permission`) fail-closes as
@@ -156,6 +162,13 @@ export interface ActionAuthClassification {
    * Hint-only — never a promotion ALLOW.
    */
   amount_within_grant: boolean;
+  /**
+   * Kind pair is a positively matching deploy_ship×deploy_ship with no
+   * financial movement and a bound ship target (PR / SHA / semver
+   * overlap, or no bindable identifiers). Used only to emit a cascade
+   * PASS hint on Amount / Recipient — never a public-ALLOW (#75).
+   */
+  deploy_ship_pair_match: boolean;
   /**
    * Sentinel-authored axis hint for the verification question.
    * Null when we have nothing confident to tell the cascade.
@@ -575,6 +588,53 @@ export function financialRecipientAuthorized(
   return actionTokens.every((t) => mandateLc.includes(t));
 }
 
+const HASH_REF_RE = /#(\d+)/g;
+const SEMVER_RE = /\bv?(\d+\.\d+\.\d+)\b/g;
+/** Hex with at least one a–f so decimal run IDs / dates are not SHAs. */
+const SHA_LIKE_RE = /\b(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/gi;
+
+/**
+ * Bindable ship identifiers: `#N` (PR / issue), semver, and SHA-like
+ * hex. Decimal-only tokens (run IDs, dates) are not SHAs.
+ */
+export function shipBindableIdentifiers(text: string): string[] {
+  if (!text) return [];
+  const out = new Set<string>();
+  for (const m of text.matchAll(new RegExp(HASH_REF_RE.source, 'g'))) {
+    out.add(`#${m[1]}`);
+  }
+  for (const m of text.matchAll(new RegExp(SEMVER_RE.source, 'g'))) {
+    out.add(m[1] ?? m[0]);
+  }
+  for (const m of text.matchAll(new RegExp(SHA_LIKE_RE.source, 'gi'))) {
+    out.add(m[0].toLowerCase());
+  }
+  return [...out];
+}
+
+/**
+ * Ship-target binding for the deploy_ship PASS hint (#75).
+ * Vacuous (true) when the action names no bindable identifiers.
+ * Otherwise at least one action identifier must appear in the mandate
+ * spend-span. Extra SHA / run-ID noise in the action is allowed when
+ * another identifier (typically `#N`) is already bound.
+ */
+export function deployShipIdentifiersBound(mandateText: string, actionText: string): boolean {
+  const actionIds = shipBindableIdentifiers(actionText);
+  if (actionIds.length === 0) return true;
+  const mandateLc = mandateSpendSpan(mandateText).toLowerCase();
+  return actionIds.some((id) => mandateLc.includes(id.toLowerCase()));
+}
+
+/**
+ * A deploy_ship PASS hint must not fire when the action names a 0x
+ * payee / router. Tip SHAs are bare hex (no `0x`); those stay identifiers.
+ */
+export function deployShipActionHasNoPaymentTarget(actionText: string): boolean {
+  if (!actionText) return true;
+  return oxTokens(actionText).length === 0 && !hasEthAddress(actionText);
+}
+
 /** Optional pairing context — omitted kinds/texts fail closed on permission × value_transfer. */
 export interface ActionAuthKindPairingContext {
   actionText?: string | null;
@@ -973,6 +1033,16 @@ export function classifyActionAuthKind(
     financial_pair_match &&
     amount_within_grant &&
     financialRecipientAuthorized(mandateText, actionText, mandate);
+  const deploy_ship_pair_match =
+    !objective_mismatch &&
+    action_kind === 'deploy_ship' &&
+    mandatePositivelyMatchesAction(action_kind, mandate_kind, allowlistContext) &&
+    !value_transfer &&
+    !permission_grant &&
+    !mixedTransfer &&
+    deployShipActionHasNoPaymentTarget(actionText) &&
+    deployShipIdentifiersBound(mandateText, actionText);
+  const deployShipPassHint = deploy_ship_pair_match;
 
   const silent =
     ((mixedTransfer || action_kind === 'value_transfer') &&
@@ -992,7 +1062,8 @@ export function classifyActionAuthKind(
       deployVsNonMatchingMandate ||
       valueTransferVsNonMatchingMandate ||
       permissionVsNonMatchingMandate ||
-      financialPassHint)
+      financialPassHint ||
+      deployShipPassHint)
   ) {
     const parts = [
       `action_kind=${action_kind}`,
@@ -1019,6 +1090,9 @@ export function classifyActionAuthKind(
         parts.push('bounded_permission_compatible=true');
       }
     }
+    if (deployShipPassHint) {
+      parts.push('deploy_ship_pair_match=true');
+    }
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }
 
@@ -1038,6 +1112,7 @@ export function classifyActionAuthKind(
     bounded_permission_compatible,
     financial_pair_match,
     amount_within_grant,
+    deploy_ship_pair_match,
     axisHint,
   };
 }
