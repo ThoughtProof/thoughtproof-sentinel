@@ -246,7 +246,13 @@ Gate (ratchet, not a permanent soft-pass):
   [Night-4 34955914579](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34955914579)
   (2026-09-15 `schedule`, tip `d168a17`) last 26-scenario green night —
   `false_ALLOW=0 false_BLOCK=0 known_false_block=2 errors=0 ok=24/26 PASS`.
-  Post-#76 nights: 27 scenarios, expect `known_false_block=3`.
+  Post-#76 / pre-conversion nights: 27 scenarios, then-expect
+  `known_false_block=3`. Night-5
+  [35082208313](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/35082208313)
+  (2026-09-16, tip `b1ff8ea`) `false_ALLOW=0 false_BLOCK=0
+  known_false_block=2 errors=0` Gate PASS — former `kfb-03`
+  ALLOW-drift (`sent_7bdb44965cef4821`). After `ok-07` conversion,
+  expect `known_false_block=2` (`kfb-01` / `kfb-02` only).
   Suite-format ok-01/02/03 false_BLOCKs were a format artifact
   (#66 Track 1b: quote recovery only saw MCP labels). ok-06 ALLOW’d
   for three nights and is not a residual occupant. Counts are
@@ -285,16 +291,16 @@ financial signals removed (digits/tip SHA; avoid negation near
 publish), kinds unchanged. **Lesart 1:** the first claim was
 misframed for the cascade (`false_BLOCK`-class), not a mandate
 collapse. Documented at the same honesty bar as Merlini / external
-collapses so the pair is auditable. Product gap: matching
-`deploy_ship×deploy_ship` currently emits no `SENTINEL_AXIS_HINT`
+collapses so the pair is auditable. Product gap (closed by #80): matching
+`deploy_ship×deploy_ship` previously emitted no `SENTINEL_AXIS_HINT`
 PASS path for amount/recipient gold steps (cascade calibration);
-digit noise therefore fails closed. Follow-up issue **#75**; suite fixture
-`kfb-03-deploy-ship-ops-merge-gate` (`known_false_block: true`,
-`since: 2026-09-14`) measures the claim form on the prose path without
-raising the baseline. First clean kfb-03 observation is the night AFTER
-#76 merge; prior `sent_62d3e975` stays provisional (budget contamination).
-Required fix remains cascade-side PASS hint — not
-"no digits in claim".
+digit noise therefore failed closed. Follow-up issue **#75** (closed via
+#80). Suite fixture was `kfb-03-deploy-ship-ops-merge-gate`
+(`known_false_block: true`, `since: 2026-09-14`) to measure the claim
+form on the prose path without raising the baseline. First clean kfb-03
+observation is the night AFTER #76 merge; prior `sent_62d3e975` stays
+provisional (budget contamination). Required fix was cascade-side PASS
+hint — not "no digits in claim".
 
 **#75 cascade PASS hint (prompt-only, same class as #55):** matching
 `deploy_ship×deploy_ship` emits `SENTINEL_AXIS_HINT` with
@@ -304,8 +310,13 @@ or no bindable identifiers) and the action does not move value, grant
 permission, or name a 0x payee. Digit/SHA/PR tokens are identifiers,
 not spend amounts. Hint-only — never a promotion ALLOW. Wrong-PR,
 drain, pay-vs-ship, and unauthorized 0x stay silent or kind-BLOCK.
-`kfb-03` stays `known_false_block` until the 7-night decision; do not
-raise `FALSE_BLOCK_BASELINE`.
+Night-5 [`schedule` 35082208313](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/35082208313)
+on tip `b1ff8ea` ALLOWed the former `kfb-03` row
+(`sent_7bdb44965cef4821`, `class=ok`). The fixture is now
+`ok-07-deploy-ship-ops-merge-gate` (`expect: allow`) — a normal
+regression scenario, not `known_false_block`. Remaining kfb:
+`kfb-01` / `kfb-02` only (refs #64 HOLD until post-2026-09-18).
+Do not raise `FALSE_BLOCK_BASELINE`.
 
 Each request is attributed as `nightly-suite`
 (`X-Sentinel-Agent-Id` → billing `agent_id` + verify log `agent=`;

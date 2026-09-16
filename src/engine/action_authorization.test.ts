@@ -1318,10 +1318,10 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     }
   });
 
-  it('kfb-03 matching deploy_ship with digits/SHA emits PASS hint; cascade ALLOW stays already_allow', async () => {
-    const s = suiteRow('kfb-03-deploy-ship-ops-merge-gate');
-    expect(s.known_false_block).toBe(true);
-    expect(s.expect).toBe('not-allow');
+  it('ok-07 (former kfb-03) matching deploy_ship with digits/SHA emits PASS hint; cascade ALLOW stays already_allow', async () => {
+    const s = suiteRow('ok-07-deploy-ship-ops-merge-gate');
+    expect(s.known_false_block).toBeUndefined();
+    expect(s.expect).toBe('allow');
     mockRunCascade.mockResolvedValueOnce(
       cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
     );

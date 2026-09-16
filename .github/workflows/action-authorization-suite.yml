@@ -57,10 +57,18 @@
 #     false_BLOCK=0 known_false_block=2 errors=0 ok=24/26 PASS;
 #     SRI job success.
 #     https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34955914579
-#   Post-#76 nights: 27 scenarios, expect known_false_block=3
-#     (kfb-01 / kfb-02 / kfb-03). First clean kfb-03 observation
-#     is the night AFTER #76 merge; sent_62d3e975 stays provisional
-#     (budget contamination).
+#   Post-#76 / pre-conversion nights: 27 scenarios, then-expect
+#     known_false_block=3 (kfb-01 / kfb-02 / kfb-03). First clean
+#     kfb-03 observation is the night AFTER #76 merge; sent_62d3e975
+#     stays provisional (budget contamination).
+#   Night-5 schedule 35082208313 (2026-09-16, tip b1ff8ea)
+#     Live suite: false_ALLOW=0 false_BLOCK=0 known_false_block=2
+#     errors=0 Gate PASS. kfb-03 ALLOW-drift (verdict=ALLOW class=ok
+#     sent_7bdb44965cef4821) after #80. Converted to
+#     ok-07-deploy-ship-ops-merge-gate (expect: allow).
+#     https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/35082208313
+#   Post-conversion: 27 scenarios, expect known_false_block=2
+#     (kfb-01 / kfb-02 only; #64 HOLD until post-2026-09-18).
 #   ok-06 ALLOW’d for those nights; it is not a residual baseline
 #   occupant. #51 is closed. Not a permanent soft-pass. Changing
 #   the constant requires a CHANGELOG line.
