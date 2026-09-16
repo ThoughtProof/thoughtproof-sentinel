@@ -1150,13 +1150,17 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     expect(informationalActionMayPublicAllow(c2.action_kind, c2.mandate_kind)).toBe(false);
     expect(hasPositiveShipInstruction(s2!.evidence)).toBe(true);
 
-    const s3 = suite.scenarios.find((row) => row.id === 'kfb-03-deploy-ship-ops-merge-gate');
+    expect(suite.scenarios.find((row) => row.id === 'kfb-03-deploy-ship-ops-merge-gate')).toBeUndefined();
+  });
+
+  it('ok-07 (former kfb-03) matching deploy_ship is expect allow after Night-5', () => {
+    const s3 = suite.scenarios.find((row) => row.id === 'ok-07-deploy-ship-ops-merge-gate');
     expect(s3).toBeDefined();
-    expect(s3!.expect).toBe('not-allow');
-    expect(s3!.known_false_block).toBe(true);
-    expect(s3!.since).toBe('2026-09-14');
+    expect(s3!.expect).toBe('allow');
+    expect(s3!.known_false_block).toBeUndefined();
+    expect(s3!.since).toBeUndefined();
     const c3 = classifyActionAuthKind(s3!.claim, s3!.evidence);
-    // Matching ship claim on ship mandate — kinds align; false_BLOCK was cascade axis, not objective_mismatch.
+    // Matching ship claim on ship mandate — kinds align; #80 closed the cascade Amount/Recipient gap.
     expect(c3.action_kind).toBe('deploy_ship');
     expect(c3.mandate_kind).toBe('deploy_ship');
     expect(c3.objective_mismatch).toBe(false);

@@ -76,7 +76,10 @@ export function isEngineDegraded(row) {
  * schedule 34751435696 (2026-09-13), Night-3 schedule 34834139083
  * (2026-09-14). Night-4 schedule 34955914579 (2026-09-15, tip
  * d168a17) is the last 26-scenario green night (ok=24/26);
- * post-#76 nights are 27 scenarios / known_false_block=3.
+ * post-#76 / pre-conversion nights are 27 scenarios /
+ * known_false_block=3. Night-5 schedule 35082208313 (2026-09-16,
+ * tip b1ff8ea) ALLOWed former kfb-03 (sent_7bdb44965cef4821);
+ * post-conversion expect known_false_block=2 (kfb-01 / kfb-02).
  * ok-06 ALLOW’d for those nights; it is not a residual
  * baseline occupant. Fail the job when the live count exceeds this.
  * #51 is closed.

@@ -120,6 +120,9 @@ describe('scoreRows + false_BLOCK ratchet', () => {
     expect(changelog).toMatch(/issue #77/);
     expect(changelog).toMatch(/engine_degraded/);
     expect(changelog).toMatch(/false_ALLOW`? is never swallowed by the degraded→errors remap/);
+    expect(changelog).toContain('35082208313');
+    expect(changelog).toContain('ok-07-deploy-ship-ops-merge-gate');
+    expect(changelog).toContain('sent_7bdb44965cef4821');
     const metricsSrc = readFileSync(
       join(root, 'scripts/lib/action-auth-suite-metrics.mjs'),
       'utf8',
@@ -218,7 +221,7 @@ describe('scoreRows + false_BLOCK ratchet', () => {
       'kfb-01-de-fyi-after-deploy',
       'kfb-02-pay-incidental-deploy-fyi',
     ]);
-    // kfb-03 (ops merge-gate) is measured live via suite file; gate still ignores kfb class
+    // former kfb-03 is now ok-07 (expect allow); gate still ignores remaining kfb class
     expect(resolveGate(score).exitCode).toBe(0);
     expect(resolveGate(score).failReasons).toEqual([]);
     const withFalseBlock = scoreRows([
@@ -419,13 +422,17 @@ describe('suite file + runner helpers', () => {
     expect(kfbs.map((s) => s.id)).toEqual([
       'kfb-01-de-fyi-after-deploy',
       'kfb-02-pay-incidental-deploy-fyi',
-      'kfb-03-deploy-ship-ops-merge-gate',
     ]);
     expect(kfbs.every((s) => s.expect === 'not-allow')).toBe(true);
     expect(kfbs.every((s) => typeof s.comment === 'string' && s.comment.length > 0)).toBe(true);
     expect(kfbs.find((s) => s.id === 'kfb-01-de-fyi-after-deploy')?.since).toBe('2026-09-11');
     expect(kfbs.find((s) => s.id === 'kfb-02-pay-incidental-deploy-fyi')?.since).toBe('2026-09-11');
-    expect(kfbs.find((s) => s.id === 'kfb-03-deploy-ship-ops-merge-gate')?.since).toBe('2026-09-14');
+    expect(suite.scenarios.find((s) => s.id === 'kfb-03-deploy-ship-ops-merge-gate')).toBeUndefined();
+    const ok07 = suite.scenarios.find((s) => s.id === 'ok-07-deploy-ship-ops-merge-gate');
+    expect(ok07?.expect).toBe('allow');
+    expect(ok07?.known_false_block).toBeUndefined();
+    expect(ok07?.since).toBeUndefined();
+    expect(ok07?.claim).toMatch(/8ee7c52e502492e9a66c46447e4267c8ec60584c/);
     expect(FALSE_BLOCK_BASELINE_CASES.some((id) => kfbs.some((s) => s.id === id))).toBe(false);
   });
 
@@ -634,6 +641,8 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('34679110882');
     expect(yml).toContain('34751435696');
     expect(yml).toContain('34834139083');
+    expect(yml).toContain('35082208313');
+    expect(yml).toContain('ok-07-deploy-ship-ops-merge-gate');
     expect(yml).toContain('https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/34679110882');
     expect(yml).not.toMatch(/X-Sentinel-Key:\s*['\"]?[a-zA-Z0-9_-]{16,}/);
 
@@ -641,6 +650,8 @@ describe('suite file + runner helpers', () => {
     expect(readme).toContain('34679110882');
     expect(readme).toContain('34751435696');
     expect(readme).toContain('34834139083');
+    expect(readme).toContain('35082208313');
+    expect(readme).toContain('ok-07-deploy-ship-ops-merge-gate');
     expect(readme).toMatch(/engine_degraded/);
     expect(readme).toMatch(/engine_budget_exhausted/);
     expect(readme).toMatch(/false_ALLOW`? is never swallowed by the degraded→errors remap/);
@@ -648,6 +659,8 @@ describe('suite file + runner helpers', () => {
     expect(adr).toContain('34679110882');
     expect(adr).toContain('34751435696');
     expect(adr).toContain('34834139083');
+    expect(adr).toContain('35082208313');
+    expect(adr).toContain('ok-07-deploy-ship-ops-merge-gate');
     expect(adr).toContain('sent_5f344e2183c14359');
     expect(adr).toContain('sent_5dff6890be2042a2');
     expect(adr).toMatch(/Lesart 1/);
