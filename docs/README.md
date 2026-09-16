@@ -8,6 +8,7 @@
 | [ERC8004-VALIDATION-RECEIPT-v0-2026-07-30.md](./ERC8004-VALIDATION-RECEIPT-v0-2026-07-30.md) | Validation-shaped artifact schema |
 | [VERIDEX-VS-TP-BOUNDARY-2026-07-30.md](./VERIDEX-VS-TP-BOUNDARY-2026-07-30.md) | Deterministic authz vs decision validation |
 | [agent-context-2026-07-29.md](./agent-context-2026-07-29.md) | Optional `agent_context` on verify |
+| [SPEC-REBUTTAL-REVERIFY-v0.md](./SPEC-REBUTTAL-REVERIFY-v0.md) | Protocol upgrade: parent-linked reverify; V1 immutable; no impl |
 
 Public keys: `https://sentinel.thoughtproof.ai/.well-known/validation-keys.json`  
 Portable verify: `scripts/verify-validation-artifact.mjs`
