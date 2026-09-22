@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-05-13
 **Decision Makers:** Raul Jäger (Founder)
-**Related:** ADR-0012 (Sentinel Architecture), ADR-0013 (Payment Architecture), ADR-0015 (Tier Consolidation)
+**Related:** ADR-0012 (Sentinel Architecture), ADR-0013 (Payment Architecture), ADR-0015 (Tier Consolidation). Rebuttal/Reverify protocol upgrade (not this API surface): `docs/SPEC-REBUTTAL-REVERIFY-v0.md` — concept lock 2026-09-16, no impl.
 
 ---
 
@@ -172,3 +172,4 @@ Same pattern as Enterprise v2:
 - ADR-0013: Payment Architecture
 - ADR-0015: Tier Consolidation
 - Templates: `openserv-sentinel/templates/01-04`
+- Rebuttal/Reverify (protocol upgrade, not a new product): `docs/SPEC-REBUTTAL-REVERIFY-v0.md` — pointer only; no schema/impl in this ADR
