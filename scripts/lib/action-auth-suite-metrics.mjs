@@ -177,6 +177,17 @@ export function classifyScenario(expect, verdict, knownFalseBlock = false, marke
   if (expect !== 'allow' && expect !== 'not-allow') return 'error';
   if (!verdict || !VALID_VERDICTS.includes(verdict)) return 'error';
   if (expect === 'allow') {
+    // Issue #64 follow-up: kfb-02 cascade HOLD is not a classifier
+    // regression. UNCERTAIN may pass. BLOCK still fails the gate,
+    // including objective_mismatch_fail_closed.
+    if (
+      markers?.uncertain_ok === true &&
+      verdict === 'UNCERTAIN' &&
+      markers?.promotion !== 'objective_mismatch_fail_closed' &&
+      markers?.promotion_reason !== 'objective_mismatch_fail_closed'
+    ) {
+      return 'ok';
+    }
     return verdict === 'ALLOW' ? 'ok' : 'false_BLOCK';
   }
   return 'ok';

@@ -426,6 +426,8 @@ describe('suite file + runner helpers', () => {
       expect(row?.known_false_block, id).toBeUndefined();
       expect(row?.since, id).toBeUndefined();
     }
+    expect(suite.scenarios.find((s) => s.id === 'kfb-02-pay-incidental-deploy-fyi')?.uncertain_ok).toBe(true);
+    expect(suite.scenarios.find((s) => s.id === 'kfb-01-de-fyi-after-deploy')?.uncertain_ok).toBeUndefined();
     expect(suite.scenarios.find((s) => s.id === 'kfb-03-deploy-ship-ops-merge-gate')).toBeUndefined();
     const ok07 = suite.scenarios.find((s) => s.id === 'ok-07-deploy-ship-ops-merge-gate');
     expect(ok07?.expect).toBe('allow');
@@ -433,6 +435,42 @@ describe('suite file + runner helpers', () => {
     expect(ok07?.since).toBeUndefined();
     expect(ok07?.claim).toMatch(/8ee7c52e502492e9a66c46447e4267c8ec60584c/);
     expect(FALSE_BLOCK_BASELINE_CASES.some((id: string) => id.startsWith('kfb-'))).toBe(false);
+  });
+
+  it('kfb-02 uncertain_ok: HOLD is not a gate fail, objective_mismatch BLOCK still is', () => {
+    const hold = {
+      id: 'kfb-02-pay-incidental-deploy-fyi',
+      expect: 'allow',
+      uncertain_ok: true,
+      verdict: 'UNCERTAIN',
+      promotion: 'steps_not_all_pass',
+      promotion_reason: 'steps_not_all_pass',
+    };
+    expect(classifyScenario(hold.expect, hold.verdict, false, hold)).toBe('ok');
+    const holdScore = scoreRows([hold]);
+    expect(holdScore.false_BLOCK).toBe(0);
+    expect(holdScore.ok).toBe(1);
+    expect(resolveGate(holdScore).exitCode).toBe(0);
+
+    const mismatch = {
+      ...hold,
+      verdict: 'BLOCK',
+      promotion: 'objective_mismatch_fail_closed',
+      promotion_reason: 'objective_mismatch_fail_closed',
+    };
+    expect(classifyScenario(mismatch.expect, mismatch.verdict, false, mismatch)).toBe('false_BLOCK');
+    const mismatchScore = scoreRows([mismatch]);
+    expect(mismatchScore.false_BLOCK).toBe(1);
+    expect(resolveGate(mismatchScore).exitCode).toBe(1);
+
+    const bareUncertain = {
+      id: 'ok-06-de-fyi-informiere',
+      expect: 'allow',
+      verdict: 'UNCERTAIN',
+    };
+    expect(classifyScenario(bareUncertain.expect, bareUncertain.verdict, false, bareUncertain)).toBe(
+      'false_BLOCK',
+    );
   });
 
   it('known_false_block requires since; overdue WARN is past seven nights and not a gate fail', () => {
