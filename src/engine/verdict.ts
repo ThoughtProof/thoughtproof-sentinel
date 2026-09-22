@@ -185,6 +185,11 @@ export interface ActionAuthPromotionInput {
   mandateKindSource?: string | null;
   /** Structured mandate (financial fields confirm unknown-prose financial pairs). */
   mandate?: AuthorizationMandate | null;
+  /**
+   * Issue #64: notify-only action is the FYI a value_transfer mandate
+   * explicitly requested. Omitted stays fail-closed.
+   */
+  requestedFyiCompatible?: boolean | null;
 }
 
 /**
@@ -321,6 +326,7 @@ export function resolveActionAuthPromotion(
         actionKindSource: (input.actionKindSource as ActionKindSource | null) ?? null,
         mandateKindSource: (input.mandateKindSource as ActionKindSource | null) ?? null,
         mandate: input.mandate,
+        requestedFyiCompatible: input.requestedFyiCompatible === true,
       },
     );
   if (input.objectiveMismatch === true || informationalAllowlistBlocked) {

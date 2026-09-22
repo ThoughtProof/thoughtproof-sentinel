@@ -141,6 +141,12 @@ export interface ActionAuthClassification {
   value_transfer: boolean;
   permission_grant: boolean;
   named_recipient_in_mandate: boolean;
+  /**
+   * Notify-only action is the FYI the mandate explicitly asked for, and
+   * the mandate is a payment (not a ship instruction). Issue #64 kfb-02.
+   * Does not authorize skipping a ship mandate by notifying.
+   */
+  requested_fyi_compatible: boolean;
   objective_mismatch: boolean;
   /** Both kinds unknown — abstention, not a named mandate conflict. */
   unclassified_abstention: boolean;
@@ -208,6 +214,15 @@ const POSITIVE_SHIP_RE =
 
 const SHIP_NEGATION_BEFORE_RE =
   /(?:\bno\b|\bnot\b|\bnever\b|\bwithout\b|\bdon'?t\b|\bdo\s+not\b|\bkein(?:e|en|em|er)?\b|\bnicht\b|\bohne\b|\bniemals\b)\s+(?:\w+\s+){0,4}$/i;
+
+/**
+ * Temporal frame, not an instruction to ship (issue #64).
+ * "Nach dem Deploy informiere…" / "After the deploy, notify…" must not
+ * count as a positive ship verb. A real verb elsewhere in the same text
+ * ("Ship after the deploy") still counts.
+ */
+const TEMPORAL_SHIP_BEFORE_RE =
+  /(?:\bnach(?:\s+de[mnsr])?|\bafter(?:\s+the)?|\bfollowing(?:\s+the)?)\s+$/i;
 
 /** English informational heads (no language-specific particles). */
 const EN_INFO_HEAD =
@@ -376,6 +391,8 @@ function identifiersAreNotSpendAmounts(corpus: string): boolean {
 /**
  * True when the text contains a positive ship/pin/deploy/publish instruction.
  * Negated mentions do not count. Bare "release" is ignored.
+ * A deploy/ship token that is only the object of a temporal preposition
+ * ("Nach dem Deploy", "after the deploy") does not count (issue #64).
  */
 export function hasPositiveShipInstruction(text: string): boolean {
   if (!text) return false;
@@ -384,6 +401,7 @@ export function hasPositiveShipInstruction(text: string): boolean {
   while ((m = re.exec(text)) !== null) {
     const before = text.slice(Math.max(0, m.index - 48), m.index);
     if (SHIP_NEGATION_BEFORE_RE.test(before)) continue;
+    if (TEMPORAL_SHIP_BEFORE_RE.test(before)) continue;
     return true;
   }
   return false;
@@ -642,6 +660,11 @@ export interface ActionAuthKindPairingContext {
   boundedPermissionCompatible?: boolean | null;
   /** Structured mandate — preferred for amount/recipient when present. */
   mandate?: AuthorizationMandate | null;
+  /**
+   * Issue #64: informational action is the FYI a value_transfer mandate
+   * explicitly requested. Kind-only calls omit this and stay fail-closed.
+   */
+  requestedFyiCompatible?: boolean | null;
   /** Prose-derived kinds (before caller override). Required to block caller widen. */
   proseActionKind?: ActionKind | null;
   proseMandateKind?: ActionKind | null;
@@ -764,6 +787,16 @@ export function mandatePositivelyMatchesAction(
   let pairFits = false;
   if (actionKind === 'informational' || actionKind === 'unknown') {
     pairFits = mandateIsPositivelyInformational(mandateKind);
+    // Issue #64: a payment mandate that explicitly asks for this FYI may
+    // public-ALLOW the notify-only action. Kind-only calls omit the flag.
+    // A deploy_ship mandate never takes this path.
+    if (
+      actionKind === 'informational' &&
+      mandateKind === 'value_transfer' &&
+      context?.requestedFyiCompatible === true
+    ) {
+      pairFits = true;
+    }
   } else if (actionKind === 'deploy_ship') {
     pairFits = mandateIsPositivelyDeployShip(mandateKind);
   } else if (actionKind === 'value_transfer') {
@@ -977,6 +1010,17 @@ export function classifyActionAuthKind(
     !hasPermissionGrant(actionText) &&
     !mixedTransfer;
 
+  // Issue #64 kfb-02: payment mandate that also asks for this FYI.
+  // Ship + "also notify" stays a mismatch (positive ship instruction).
+  // Pay-only mandate + unrequested notify stays a mismatch (no info verb
+  // or no shared recipient).
+  const requested_fyi_compatible =
+    actionIsNotifyOnly &&
+    mandate_kind === 'value_transfer' &&
+    named_recipient_in_mandate &&
+    INFO_ANY_RE.test(mandateText) &&
+    !hasPositiveShipInstruction(mandateText);
+
   const unclassified_abstention = isUnclassifiedAbstention(action_kind, mandate_kind);
   const unknownActionVsNamedMandate =
     action_kind === 'unknown' && mandateIsNamedNonInformational(mandate_kind);
@@ -994,7 +1038,9 @@ export function classifyActionAuthKind(
     !bounded_permission_compatible;
 
   const namedKindMismatch =
-    (actionIsNotifyOnly && !mandateIsPositivelyInformational(mandate_kind)) ||
+    (actionIsNotifyOnly &&
+      !mandateIsPositivelyInformational(mandate_kind) &&
+      !requested_fyi_compatible) ||
     unknownActionVsNamedMandate ||
     deployVsNonMatchingMandate ||
     valueTransferVsNonMatchingMandate ||
@@ -1004,6 +1050,7 @@ export function classifyActionAuthKind(
     actionText,
     mandateText,
     boundedPermissionCompatible: bounded_permission_compatible,
+    requestedFyiCompatible: requested_fyi_compatible,
     mandate,
     proseActionKind: prose_action_kind,
     proseMandateKind: prose_mandate_kind,
@@ -1076,6 +1123,9 @@ export function classifyActionAuthKind(
     if (named_recipient_in_mandate) {
       parts.push('named_recipient_in_mandate=true');
     }
+    if (requested_fyi_compatible) {
+      parts.push('requested_fyi_compatible=true');
+    }
     parts.push(`mandate_kind=${mandate_kind}`);
     if (objective_mismatch) {
       parts.push('objective_mismatch=true');
@@ -1106,6 +1156,7 @@ export function classifyActionAuthKind(
     value_transfer,
     permission_grant,
     named_recipient_in_mandate,
+    requested_fyi_compatible,
     objective_mismatch,
     unclassified_abstention,
     identifiers_are_not_spend_amounts,

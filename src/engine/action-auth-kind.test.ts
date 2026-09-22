@@ -1125,30 +1125,40 @@ describe('suite mismatch / FYI lock (issue #38)', () => {
     }
   });
 
-  it('known_false_block fixtures BLOCK today via classifier mismatch (issue #64)', () => {
+  it('issue #64: temporal deploy is not a ship instruction; requested payment FYI may ALLOW', () => {
+    expect(hasPositiveShipInstruction('Nach dem Deploy informiere QA')).toBe(false);
+    expect(hasPositiveShipInstruction('After the deploy, notify QA')).toBe(false);
+    expect(hasPositiveShipInstruction('Ship the release after the deploy')).toBe(true);
+    expect(hasPositiveShipInstruction('Nach dem Deploy, deploye nochmal')).toBe(true);
+
     const s1 = suite.scenarios.find((row) => row.id === 'kfb-01-de-fyi-after-deploy');
     expect(s1).toBeDefined();
-    expect(s1!.expect).toBe('not-allow');
-    expect(s1!.known_false_block).toBe(true);
-    expect(s1!.since).toBe('2026-09-11');
+    expect(s1!.expect).toBe('allow');
+    expect(s1!.known_false_block).toBeUndefined();
     const c1 = classifyActionAuthKind(s1!.claim, s1!.evidence);
     expect(c1.action_kind).toBe('informational');
-    expect(c1.mandate_kind).toBe('deploy_ship');
-    expect(c1.objective_mismatch).toBe(true);
-    expect(informationalActionMayPublicAllow(c1.action_kind, c1.mandate_kind)).toBe(false);
-    expect(hasPositiveShipInstruction(s1!.evidence)).toBe(true);
+    expect(c1.mandate_kind).toBe('informational');
+    expect(c1.objective_mismatch).toBe(false);
+    expect(c1.requested_fyi_compatible).toBe(false);
+    expect(informationalActionMayPublicAllow(c1.action_kind, c1.mandate_kind)).toBe(true);
+    expect(hasPositiveShipInstruction(s1!.evidence)).toBe(false);
 
     const s2 = suite.scenarios.find((row) => row.id === 'kfb-02-pay-incidental-deploy-fyi');
     expect(s2).toBeDefined();
-    expect(s2!.expect).toBe('not-allow');
-    expect(s2!.known_false_block).toBe(true);
-    expect(s2!.since).toBe('2026-09-11');
+    expect(s2!.expect).toBe('allow');
+    expect(s2!.known_false_block).toBeUndefined();
     const c2 = classifyActionAuthKind(s2!.claim, s2!.evidence);
     expect(c2.action_kind).toBe('informational');
     expect(c2.mandate_kind).toBe('value_transfer');
-    expect(c2.objective_mismatch).toBe(true);
+    expect(c2.requested_fyi_compatible).toBe(true);
+    expect(c2.objective_mismatch).toBe(false);
     expect(informationalActionMayPublicAllow(c2.action_kind, c2.mandate_kind)).toBe(false);
-    expect(hasPositiveShipInstruction(s2!.evidence)).toBe(true);
+    expect(
+      informationalActionMayPublicAllow(c2.action_kind, c2.mandate_kind, {
+        requestedFyiCompatible: c2.requested_fyi_compatible,
+      }),
+    ).toBe(true);
+    expect(hasPositiveShipInstruction(s2!.evidence)).toBe(false);
 
     expect(suite.scenarios.find((row) => row.id === 'kfb-03-deploy-ship-ops-merge-gate')).toBeUndefined();
   });
