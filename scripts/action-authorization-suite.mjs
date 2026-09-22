@@ -99,6 +99,9 @@ export function loadSuite(path = DEFAULT_SUITE) {
     if (s.known_false_block != null && typeof s.known_false_block !== 'boolean') {
       throw new Error(`scenario ${s.id} known_false_block must be boolean`);
     }
+    if (s.uncertain_ok != null && typeof s.uncertain_ok !== 'boolean') {
+      throw new Error(`scenario ${s.id} uncertain_ok must be boolean`);
+    }
     if (s.known_false_block === true && !parseIsoDate(s.since)) {
       throw new Error(
         `scenario ${s.id} known_false_block requires since as ISO date (YYYY-MM-DD)`,
@@ -184,6 +187,7 @@ function rowFromResponse(scenario, res) {
     id: scenario.id,
     expect: scenario.expect,
     known_false_block: scenario.known_false_block === true,
+    uncertain_ok: scenario.uncertain_ok === true,
     http_status: res.status,
     verdict: res.json?.verdict ?? null,
     receipt_id: res.json?.id ?? null,
@@ -374,6 +378,7 @@ export async function runSuite(opts = {}) {
         id: scenario.id,
         expect: scenario.expect,
         known_false_block: scenario.known_false_block === true,
+        uncertain_ok: scenario.uncertain_ok === true,
         verdict: null,
         receipt_id: null,
         http_status: null,

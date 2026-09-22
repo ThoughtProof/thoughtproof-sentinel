@@ -1,6 +1,12 @@
 ## Unreleased
 
 ### Changed
+- **kfb-02 cascade HOLD is not a gate fail (founder GO 2026-09-22):**
+  live probe after #83 returned UNCERTAIN (`primary_hold`), not
+  `objective_mismatch_fail_closed`. `uncertain_ok` on kfb-02 only:
+  UNCERTAIN does not increment `false_BLOCK`. BLOCK still does,
+  including a return of the old classifier. `FALSE_BLOCK_BASELINE`
+  unchanged (0). kfb-01 stays `expect: allow` with no hold exception.
 - **Issue #64 classifier fix (founder GO 2026-09-22):** temporal
   "Nach dem Deploy" / "after the deploy" is not a ship instruction.
   A payment mandate that explicitly asks for the same FYI may
