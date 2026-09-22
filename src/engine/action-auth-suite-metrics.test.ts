@@ -419,21 +419,20 @@ describe('suite file + runner helpers', () => {
     expect(oks.map((s) => s.id)).toEqual(expect.arrayContaining(FALSE_BLOCK_BASELINE_CASES));
 
     const kfbs = suite.scenarios.filter((s) => s.known_false_block === true);
-    expect(kfbs.map((s) => s.id)).toEqual([
-      'kfb-01-de-fyi-after-deploy',
-      'kfb-02-pay-incidental-deploy-fyi',
-    ]);
-    expect(kfbs.every((s) => s.expect === 'not-allow')).toBe(true);
-    expect(kfbs.every((s) => typeof s.comment === 'string' && s.comment.length > 0)).toBe(true);
-    expect(kfbs.find((s) => s.id === 'kfb-01-de-fyi-after-deploy')?.since).toBe('2026-09-11');
-    expect(kfbs.find((s) => s.id === 'kfb-02-pay-incidental-deploy-fyi')?.since).toBe('2026-09-11');
+    expect(kfbs).toEqual([]);
+    for (const id of ['kfb-01-de-fyi-after-deploy', 'kfb-02-pay-incidental-deploy-fyi']) {
+      const row = suite.scenarios.find((s) => s.id === id);
+      expect(row?.expect, id).toBe('allow');
+      expect(row?.known_false_block, id).toBeUndefined();
+      expect(row?.since, id).toBeUndefined();
+    }
     expect(suite.scenarios.find((s) => s.id === 'kfb-03-deploy-ship-ops-merge-gate')).toBeUndefined();
     const ok07 = suite.scenarios.find((s) => s.id === 'ok-07-deploy-ship-ops-merge-gate');
     expect(ok07?.expect).toBe('allow');
     expect(ok07?.known_false_block).toBeUndefined();
     expect(ok07?.since).toBeUndefined();
     expect(ok07?.claim).toMatch(/8ee7c52e502492e9a66c46447e4267c8ec60584c/);
-    expect(FALSE_BLOCK_BASELINE_CASES.some((id) => kfbs.some((s) => s.id === id))).toBe(false);
+    expect(FALSE_BLOCK_BASELINE_CASES.some((id: string) => id.startsWith('kfb-'))).toBe(false);
   });
 
   it('known_false_block requires since; overdue WARN is past seven nights and not a gate fail', () => {

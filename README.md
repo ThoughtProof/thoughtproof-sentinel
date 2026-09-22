@@ -80,10 +80,11 @@ evidence** (fixtures: `id` / `expect` / `claim` / `evidence`;
 Caller-kinds remain unit-test only until thoughtproof-mcp 0.4.0.
 Counts are reported honestly (no quarantine).
 `known_false_block` is a third, **informational** nightly metric (issue
-[#64](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/64)):
-incidental Deploy/ship verbs on an FYI mandate that BLOCKs today
-(`kfb-01` / `kfb-02` only; refs [#64](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/64)
-HOLD until post-2026-09-18). Former `kfb-03` (ops merge-gate, refs
+[#64](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/64)).
+As of the 2026-09-22 classifier fix, the suite file has no
+`known_false_block` fixtures: `kfb-01` / `kfb-02` are `expect: allow`.
+The metric itself remains (overdue WARN does not fail the gate).
+Former `kfb-03` (ops merge-gate, refs
 [#75](https://github.com/ThoughtProof/thoughtproof-sentinel/issues/75))
 is now `ok-07-deploy-ship-ops-merge-gate` (`expect: allow`) after Night-5
 ALLOW and [#80](https://github.com/ThoughtProof/thoughtproof-sentinel/pull/80).

@@ -1289,16 +1289,16 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(hint).not.toMatch(/financial_pair_match=true/);
   });
 
-  it('kfb-01 / kfb-02: cascade ALLOW → BLOCK today (known_false_block, issue #64)', async () => {
-    const expected: Record<string, { mandate: string }> = {
-      'kfb-01-de-fyi-after-deploy': { mandate: 'deploy_ship' },
-      'kfb-02-pay-incidental-deploy-fyi': { mandate: 'value_transfer' },
+  it('kfb-01 / kfb-02: cascade ALLOW stays ALLOW after issue #64 classifier fix', async () => {
+    const expected: Record<string, { mandate: string; fyi: boolean }> = {
+      'kfb-01-de-fyi-after-deploy': { mandate: 'informational', fyi: false },
+      'kfb-02-pay-incidental-deploy-fyi': { mandate: 'value_transfer', fyi: true },
     };
     for (const id of Object.keys(expected)) {
       vi.clearAllMocks();
       const s = suiteRow(id);
-      expect(s.known_false_block, id).toBe(true);
-      expect(s.expect, id).toBe('not-allow');
+      expect(s.known_false_block, id).toBeUndefined();
+      expect(s.expect, id).toBe('allow');
       mockRunCascade.mockResolvedValueOnce(
         cascade('ALLOW', 'agreement_allow', allPassSteps(s.claim)) as never,
       );
@@ -1310,11 +1310,17 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
         tier: 'standard',
       });
 
-      expect(res.verdict, id).toBe('BLOCK');
-      expect(res.verdict, id).not.toBe('ALLOW');
-      expect(res.meta.promotion?.reason, id).toBe('objective_mismatch_fail_closed');
+      expect(res.verdict, id).toBe('ALLOW');
+      expect(res.meta.promotion?.reason, id).toBe('already_allow');
+      expect(res.meta.promotion?.reason, id).not.toBe('objective_mismatch_fail_closed');
       expect(res.meta.promotion?.action_kind, id).toBe('informational');
       expect(res.meta.promotion?.mandate_kind, id).toBe(expected[id]!.mandate);
+      const q = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+      const hint = q.split(SENTINEL_AXIS_HINT_LABEL)[1] ?? '';
+      expect(hint, id).not.toMatch(/objective_mismatch=true/);
+      if (expected[id]!.fyi) {
+        expect(hint, id).toMatch(/requested_fyi_compatible=true/);
+      }
     }
   });
 

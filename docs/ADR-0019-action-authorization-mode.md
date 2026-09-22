@@ -314,8 +314,9 @@ Night-5 [`schedule` 35082208313](https://github.com/ThoughtProof/thoughtproof-se
 on tip `b1ff8ea` ALLOWed the former `kfb-03` row
 (`sent_7bdb44965cef4821`, `class=ok`). The fixture is now
 `ok-07-deploy-ship-ops-merge-gate` (`expect: allow`) — a normal
-regression scenario, not `known_false_block`. Remaining kfb:
-`kfb-01` / `kfb-02` only (refs #64 HOLD until post-2026-09-18).
+regression scenario, not `known_false_block`. Issue #64 classifier
+fix (2026-09-22): `kfb-01` / `kfb-02` are `expect: allow`. The suite
+file has no remaining `known_false_block` fixtures.
 Do not raise `FALSE_BLOCK_BASELINE`.
 
 Each request is attributed as `nightly-suite`

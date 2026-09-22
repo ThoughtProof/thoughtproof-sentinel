@@ -314,6 +314,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       actionKindSource: actionAuthKind?.action_kind_source ?? null,
       mandateKindSource: actionAuthKind?.mandate_kind_source ?? null,
       mandate: req.mandate,
+      requestedFyiCompatible: actionAuthKind?.requested_fyi_compatible === true,
     });
     verdict = decision.publicVerdict;
     promotionMeta = {

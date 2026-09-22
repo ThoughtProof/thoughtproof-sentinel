@@ -1,6 +1,15 @@
 ## Unreleased
 
 ### Changed
+- **Issue #64 classifier fix (founder GO 2026-09-22):** temporal
+  "Nach dem Deploy" / "after the deploy" is not a ship instruction.
+  A payment mandate that explicitly asks for the same FYI may
+  public-ALLOW that notify-only action (`requested_fyi_compatible`).
+  Ship-plus-notify and pay-only-plus-unrequested-notify stay BLOCK.
+  `kfb-01` / `kfb-02` are `expect: allow` (no `known_false_block`).
+  Suite stays 27 scenarios. `known_false_block` count on the file is 0.
+  `FALSE_BLOCK_BASELINE` unchanged (0). No merge of this fix until a
+  later GO.
 - **`kfb-03` → `ok-07` after Night-5 ALLOW (refs #75):** Night-5
   [`schedule` 35082208313](https://github.com/ThoughtProof/thoughtproof-sentinel/actions/runs/35082208313)
   on tip `b1ff8ea` ALLOWed the ops-merge fixture
