@@ -361,6 +361,16 @@ export interface SentinelVerifyResponse {
       /** Classifier kinds (issues #38 / #47 allowlist). Present on action_authorization. */
       action_kind?: string;
       mandate_kind?: string;
+      /** Issue #85: Prose-derived kinds before caller override. */
+      prose_action_kind?: string;
+      prose_mandate_kind?: string;
+      /** Issue #85: Caller kinds diagnostic for receipt logging. */
+      caller_kinds_diagnostic?: {
+        caller_action_kind?: string;
+        caller_mandate_kind?: string;
+        caller_kinds_do_not_widen?: boolean;
+        triggering_rule?: string;
+      };
       /**
        * Where each kind came from (issue #51). `caller` = declared on
        * `mandate.kind` / `mandate.action.kind` and valid (API caller, often
