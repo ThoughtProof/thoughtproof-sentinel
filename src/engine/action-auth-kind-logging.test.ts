@@ -12,7 +12,6 @@ describe('Issue #85: Receipt logging diagnostics', () => {
       {
         kind: 'informational' as const,
         action: { kind: 'informational' as const },
-        context: { outcome: 'post' }
       }
     );
 
@@ -31,7 +30,7 @@ describe('Issue #85: Receipt logging diagnostics', () => {
       mandateKindSource: 'caller' as const,
       actionText: 'Post message',
       mandateText: 'Post agenda with settlement info',
-      mandate: { context: { outcome: 'post' } },
+      mandate: { kind: 'unknown' as const },
       boundedPermissionCompatible: false,
       requestedFyiCompatible: false,
     };
@@ -55,7 +54,7 @@ describe('Issue #85: Receipt logging diagnostics', () => {
     // Diagnostic info should not contain full text
     expect(result.prose_mandate_kind).not.toContain('abc123');
     expect(result.prose_action_kind).not.toContain('abc123');
-    
+
     // But should have classification
     expect(['informational', 'unknown', 'value_transfer', 'permission', 'deploy_ship'])
       .toContain(result.prose_mandate_kind);
@@ -70,7 +69,6 @@ describe('Issue #85: Receipt logging diagnostics', () => {
       {
         kind: 'informational' as const, // Caller claims informational
         action: { kind: 'informational' as const },
-        context: { outcome: 'transfer' }
       }
     );
 

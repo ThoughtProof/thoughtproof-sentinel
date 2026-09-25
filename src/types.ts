@@ -369,7 +369,7 @@ export interface SentinelVerifyResponse {
         caller_action_kind?: string;
         caller_mandate_kind?: string;
         caller_kinds_do_not_widen?: boolean;
-        triggering_rule?: string;
+        triggering_rule?: 'callerDeclaredKindsDoNotWiden';
       };
       /**
        * Where each kind came from (issue #51). `caller` = declared on

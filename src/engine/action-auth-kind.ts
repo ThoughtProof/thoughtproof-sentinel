@@ -143,7 +143,7 @@ export interface ActionAuthClassification {
     caller_action_kind?: ActionKind;
     caller_mandate_kind?: ActionKind;
     caller_kinds_do_not_widen?: boolean;
-    triggering_rule?: string;
+    triggering_rule?: 'callerDeclaredKindsDoNotWiden';
   };
   value_transfer: boolean;
   permission_grant: boolean;
@@ -1156,18 +1156,13 @@ export function classifyActionAuthKind(
   // Issue #85: Add caller kinds diagnostic for receipt logging
   let caller_kinds_diagnostic: ActionAuthClassification['caller_kinds_diagnostic'];
   if (callerActionKind || callerMandateKind) {
-    const callerKindsDoNotWiden = 
+    const callerKindsDoNotWiden =
       callerDeclaredKindsDoNotWiden(action_kind, mandate_kind, allowlistContext);
-    
-    let triggering_rule: string | undefined;
-    if (!callerKindsDoNotWiden) {
-      if (action_kind === 'informational' || mandate_kind === 'informational') {
-        triggering_rule = 'informational_requires_prose_match';
-      } else if (allowlistContext.proseActionKind === 'unknown' || 
-                 allowlistContext.proseMandateKind === 'unknown') {
-        triggering_rule = 'caller_widening_blocked_by_unknown_prose';
-      }
-    }
+
+    // Exact predicate failure; no parallel heuristic explanation.
+    const triggering_rule = callerKindsDoNotWiden
+      ? undefined
+      : 'callerDeclaredKindsDoNotWiden' as const;
 
     caller_kinds_diagnostic = {
       caller_action_kind: callerActionKind,
