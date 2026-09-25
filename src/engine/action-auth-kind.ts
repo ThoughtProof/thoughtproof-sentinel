@@ -138,6 +138,13 @@ export interface ActionAuthClassification {
   prose_action_kind: ActionKind;
   /** Prose-derived mandate kind before caller override (ALLOW-direction check). */
   prose_mandate_kind: ActionKind;
+  /** Issue #85: Caller kinds and triggering rule diagnostics for receipt logging. */
+  caller_kinds_diagnostic?: {
+    caller_action_kind?: ActionKind;
+    caller_mandate_kind?: ActionKind;
+    caller_kinds_do_not_widen?: boolean;
+    triggering_rule?: 'callerDeclaredKindsDoNotWiden';
+  };
   value_transfer: boolean;
   permission_grant: boolean;
   named_recipient_in_mandate: boolean;
@@ -1146,6 +1153,25 @@ export function classifyActionAuthKind(
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }
 
+  // Issue #85: Add caller kinds diagnostic for receipt logging
+  let caller_kinds_diagnostic: ActionAuthClassification['caller_kinds_diagnostic'];
+  if (callerActionKind || callerMandateKind) {
+    const callerKindsDoNotWiden =
+      callerDeclaredKindsDoNotWiden(action_kind, mandate_kind, allowlistContext);
+
+    // Exact predicate failure; no parallel heuristic explanation.
+    const triggering_rule = callerKindsDoNotWiden
+      ? undefined
+      : 'callerDeclaredKindsDoNotWiden' as const;
+
+    caller_kinds_diagnostic = {
+      caller_action_kind: callerActionKind,
+      caller_mandate_kind: callerMandateKind,
+      caller_kinds_do_not_widen: callerKindsDoNotWiden,
+      triggering_rule,
+    };
+  }
+
   return {
     action_kind,
     mandate_kind,
@@ -1153,6 +1179,7 @@ export function classifyActionAuthKind(
     mandate_kind_source,
     prose_action_kind,
     prose_mandate_kind,
+    caller_kinds_diagnostic,
     value_transfer,
     permission_grant,
     named_recipient_in_mandate,
