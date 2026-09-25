@@ -361,7 +361,9 @@ export interface SentinelVerifyResponse {
       /** Classifier kinds (issues #38 / #47 allowlist). Present on action_authorization. */
       action_kind?: string;
       mandate_kind?: string;
-      /** Issue #85: Prose-derived kinds before caller override. */
+      /** UNSIGNED DIAGNOSTICS (#85): outside canonical.v1/M1 signature.
+       * Neither these prose kinds nor promotion/effective/caller kinds are
+       * authenticated by signed-export verification. Never use as signed proof. */
       prose_action_kind?: string;
       prose_mandate_kind?: string;
       /** Issue #85: Caller kinds diagnostic for receipt logging. */

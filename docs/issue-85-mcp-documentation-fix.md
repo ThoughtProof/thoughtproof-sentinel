@@ -2,7 +2,13 @@
 
 Observability only: no lexicon, authorization, promotion or money-transfer policy changes. `callerDeclaredKindsDoNotWiden` is unchanged.
 
-## Receipt and log contract
+## Diagnostics (unsigned)
+
+**Trust boundary:** These diagnostic fields live in `meta.promotion`, outside the M1 signed canonical envelope. Successful M1 verification does NOT authenticate any declared, prose-derived or effective kind, nor the rejecting-rule metadata. Downstream consumers (including independent verifier integrations) must not treat these fields as tamper-proof evidence, authorization, or signed claims. They can be altered without invalidating the M1 signature. Authenticate only the fields actually inside `signed_export.canonical`.
+
+Legacy receipts without the new fields remain valid. A frozen pre-change signed fixture is checked by `src/issue-85-legacy-export.test.ts`; the test also demonstrates that changing diagnostic metadata leaves verification successful while modifying the signed canonical verdict fails.
+
+### Receipt and log contract
 
 Under `meta.promotion` for action_authorization:
 - Existing `action_kind` / `mandate_kind`: effective kinds.
