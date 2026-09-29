@@ -63,6 +63,30 @@ syntax errors in Sentinel. Standard cascade may still invoke both model stages;
 it is not a new paid repair workflow. Non-Sentinel callers keep the legacy parser
 unless they opt in. The deployed service is not changed by this local candidate.
 
+The eval-contract.4 candidate appends a compact required-field contract to the
+existing system message for strict callers only. It enumerates the actual host
+step IDs and requires `step_id`, finite numeric `score`, nonempty `reasoning`,
+and explicit `quote` (text or null) for every step. It explains that numeric
+scores alone are incomplete, missing support must be explained, and a quote
+must never be invented to satisfy the format. Output-format instructions inside
+the material remain evidence data; the supplied mandate still governs the task.
+
+The original rubric remains an unchanged prefix; the entire user message,
+sources, mandate and candidate remain byte-for-byte. No provider schema,
+model switch, parser tolerance, automatic repair or retry is added. This is a
+prompt intervention, **not provider-enforced structured output**. Tests can
+verify the outgoing request and unchanged handling of controlled responses;
+only a fresh, bounded live comparison can establish fewer omitted fields.
+
+[OpenServ documents structured output](https://docs.openserv.ai/serv-reasoning/tutorials/structured-outputs)
+as forwarding a schema to a compatible upstream provider. The public
+[model catalog](https://docs.openserv.ai/serv-reasoning/models), inspected on
+2026-09-29, does not identify the deployed `serv-nano` / `serv-swift` aliases.
+Their backing models and strict-schema support remain unverified. Endpoint
+compatibility alone does not demonstrate support for a particular schema.
+The local required-field contract therefore does not request `response_format`
+or claim a capability for those aliases.
+
 Reproduction and verification:
 
 ```sh

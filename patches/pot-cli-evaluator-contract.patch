@@ -1,9 +1,10 @@
 --- a/src/plan/graded-support-evaluator.ts
 +++ b/src/plan/graded-support-evaluator.ts
-@@ -16 +16,2 @@
+@@ -16 +16,3 @@
 -import { callModelStructured, type ChatMessage } from '../utils/model-router.js';
 +import { callModel, callModelStructured, type ChatMessage } from '../utils/model-router.js';
 +import { decodeEvaluationOutput, type EvaluationOutputContract } from './evaluation-output-contract.js';
++import { withRequiredEvaluationFields } from './evaluation-request-contract.js';
 @@ -187,0 +189,2 @@
 +  /** Strict opt-in: validity of the model assessment, not truth of the assessed claim. */
 +  output_contract?: EvaluationOutputContract;
@@ -13,7 +14,7 @@
 +
 +  if (contractState) {
 +    // Exactly one model request: malformed assessment output does not trigger hidden repair retries.
-+    const response = await callModel(model, messages, {maxTokens, temperature: 0, seed: DEFAULT_EVAL_SEED});
++    const response = await callModel(model, withRequiredEvaluationFields(messages, stepsToEvaluate.map(s => `step_${s.index}`)), {maxTokens, temperature: 0, seed: DEFAULT_EVAL_SEED});
 +    const decoded = decodeEvaluationOutput(response.content, stepsToEvaluate.map(s => `step_${s.index}`), mode);
 +    contractState.value = decoded.contract;
 +    return decoded.data as StepEvaluation[];

@@ -25,6 +25,6 @@
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
     "canonicalize": "^3.0.0",
-    "pot-cli": "file:vendor/pot-cli-0.8.10-tp.2-eval-contract.3.tgz"
+    "pot-cli": "file:vendor/pot-cli-0.8.10-tp.2-eval-contract.4.tgz"
   }
 }

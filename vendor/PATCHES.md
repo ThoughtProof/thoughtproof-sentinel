@@ -4,6 +4,20 @@ Do not replace this tarball with upstream `pot-cli@0.8.10`. The installed
 `package.json` `version` must remain the ThoughtProof identity below so
 `GET /sentinel/health` `pot_cli` (PR #30) distinguishes binaries.
 
+## 0.8.10-tp.2-eval-contract.4 (local required-field request, 2026-09-29)
+
+- Strict evaluator requests add a compact system-message contract with every
+  actual host step ID and explicit score, reasoning and quote requirements.
+- The original rubric and complete user message are preserved. This is a
+  prompt intervention, not provider-enforced structured output.
+- No model, provider options, validation, scoring, quote checks or cascade
+  policy changes; incomplete responses still hold without retry or repair.
+- The live diagnostic observation remains negative. Reduced field omissions
+  require a separately bounded live comparison, not synthetic model replies.
+- Prior archive and manifest remain; rebuild offline with the existing script.
+- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.4.tgz`.
+- sha512 (hex): `261a8beffc677c0717955b59992dced805c22207fb165ed50feafc51c22e16a940138506d20a373c0dbfb78f6cf71e2a2fc2392b86d9a5d23dce9b1756a53e57`
+
 ## 0.8.10-tp.2-eval-contract.3 (local shape diagnostics, 2026-09-29)
 
 - Adds `plv.evaluator-shape.v1` metadata: absent fields, wrong types, empty
