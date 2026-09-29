@@ -34,6 +34,11 @@ a primary HOLD was justified or reduce false stops by itself.
   criterion-only fallback or evidence-binding rewrite. `missing_reason_steps`
   and `evaluator_reasoning_present` identify omitted original explanations.
   The presence of prose does not establish its accuracy or repair sufficiency.
+- `output_contract.shape`, when present, describes assessment structure with
+  fixed enums and bounded samples. It separates absent fields, wrong types and
+  known nesting without disclosing raw field values. It is unsigned and never
+  changes a verdict or repairs a malformed assessment. See
+  [the evaluator contract](evaluator-output-contract.md).
 
 For primary HOLD / secondary ALLOW, inspect the primary stage. If its reasoning
 is absent, obtain the verifier detail or clarify the disagreement. Do not invent

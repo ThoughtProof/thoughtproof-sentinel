@@ -33,6 +33,30 @@ available, not that the task passed. These fields remain unsigned diagnostics;
 the final response verdict remains authoritative. Confidence is zero when an
 assessment stage is invalid.
 
+The eval-contract.3 candidate adds optional `output_contract.shape`, version
+`plv.evaluator-shape.v1`. It reports whether JSON was parsed, root shape,
+expected and recognized step counts, and the type and validity state of the
+three consumed fields. Missing fields, wrong types, blank text, numeric overflow
+and out-of-range scores are distinct. A null quote is structurally valid; the
+unchanged provenance rules may still reject its evidentiary support.
+
+Only fixed container names are inspected: `assessment`, `evaluation`, `result`
+inside a row, plus their plural forms, `steps` and `objections` at the root.
+There are at most eight sampled rows across all containers together and at most
+three known child objects per row. Unknown model IDs are null, arbitrary keys
+are ignored, and no field values or raw text are included. `truncated` describes
+diagnostic sampling only: every supplied step still undergoes full validation.
+Known alternate envelopes are described but not extracted or silently accepted.
+The old validity codes, model prompts, scoring and cascade policy are unchanged.
+
+These diagnostics address a demonstrated observability gap: missing fields,
+wrong types and nested assessments can produce the same old issue codes.
+They do not recover the unseen pre-parser text of a historical response and
+do not establish which shape actually caused that failure. Synthetic before/after
+reproduction is available via `scripts/reproduce-evaluator-shape.mjs`; native
+integration and bounded-disclosure checks are in
+`src/engine/evaluator-output-shape.test.ts`.
+
 Strict mode makes one model request per evaluator invocation, with no automatic
 format-repair retries. This replaces the old parser's up-to-three attempts for
 syntax errors in Sentinel. Standard cascade may still invoke both model stages;

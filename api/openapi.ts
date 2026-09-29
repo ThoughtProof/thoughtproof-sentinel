@@ -4,6 +4,7 @@ import {
   GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT,
 } from '../src/rate-limit-policy.js';
 import { getPotCliVersion } from '../src/runtime-versions.js';
+import { evaluatorShapeSchema } from '../src/evaluator-shape-schema.js';
 
 const spec = {
   openapi: '3.1.0',
@@ -367,6 +368,7 @@ const spec = {
                                     schema_version: {type: 'string', enum: ['plv.evaluator-output.v1']},
                                     status: {type: 'string', enum: ['valid', 'invalid']},
                                     response_sha256: {type: 'string', pattern: '^[a-f0-9]{64}$'},
+                                    shape: evaluatorShapeSchema,
                                     issues: {type: 'array', maxItems: 128, items: {type: 'object', properties: {code: {type: 'string'}, step_id: {type: ['string', 'null']}}}},
                                   },
                                 },

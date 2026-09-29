@@ -1,5 +1,6 @@
 import type { AuthorizationMandate, GateMode, GateViolation } from './engine/authorization-gate.js';
 import type { RateLimitBackend } from './upstash-env.js';
+import type { ItemResult } from 'pot-cli/plv';
 
 export type { RateLimitBackend };
 
@@ -436,6 +437,7 @@ export interface SentinelVerifierTrace {
       status: 'valid' | 'invalid';
       response_sha256: string;
       issues: Array<{code: string; step_id: string | null}>;
+      shape?: NonNullable<ItemResult['output_contract']>['shape'];
     };
     verdict: string | null;
     reasoning: string | null;

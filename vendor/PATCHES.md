@@ -4,6 +4,20 @@ Do not replace this tarball with upstream `pot-cli@0.8.10`. The installed
 `package.json` `version` must remain the ThoughtProof identity below so
 `GET /sentinel/health` `pot_cli` (PR #30) distinguishes binaries.
 
+## 0.8.10-tp.2-eval-contract.3 (local shape diagnostics, 2026-09-29)
+
+- Adds `plv.evaluator-shape.v1` metadata: absent fields, wrong types, empty
+  text, out-of-range scores and known nested assessment containers are distinct.
+- At most eight row samples across the root and fixed container names;
+  no raw values, arbitrary keys or unknown model IDs are exposed.
+- Validation, scores, quote checks, prompts and cascade decisions are unchanged.
+  Sampling diagnostics does not truncate validation or authorize a repair.
+- The prior archive and manifest remain available. The original live Q-03
+  response text is unknown; these diagnostics cannot reconstruct it.
+- Rebuild offline: `node scripts/build-evaluator-contract-vendor.mjs`.
+- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.3.tgz`.
+- sha512 (hex): `e7b55c590e5d31291cfbdbd43bbfedbd4c9ff1f0e054a7a9f3f01607fc4b09f4f4cb0c7e7e9d49379b58192652c21719f9cc268858b44f2df619c7b385c82822`
+
 ## 0.8.10-tp.2-eval-contract.2 (local compatibility correction, 2026-09-29)
 
 - Derived `predicate` is no longer a required model field. Any incoming label
