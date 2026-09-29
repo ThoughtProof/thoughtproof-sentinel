@@ -4,6 +4,7 @@ import {
   GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT,
 } from '../src/rate-limit-policy.js';
 import { getPotCliVersion } from '../src/runtime-versions.js';
+import { evaluatorShapeSchema } from '../src/evaluator-shape-schema.js';
 
 const spec = {
   openapi: '3.1.0',
@@ -299,8 +300,8 @@ const spec = {
                               'cascade: evaluator cited this span. recovered_mandate: Sentinel filled a missing cite from the MCP Principal mandate (verbatim quote) span. Null when quote is null.',
                           },
                           quote_match_mode: {
-                            type: 'string',
-                            enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none'],
+                            type: ['string', 'null'],
+                            enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none', null],
                             description:
                               'How quote matched evidence. unicode/whitespace matches return the evidence span, not the LLM folding.',
                           },
@@ -339,6 +340,58 @@ const spec = {
                           example: ['serv-nano', 'serv-swift'],
                         },
                         verified_at: { type: 'string', format: 'date-time' },
+                        verifier_trace: {
+                          type: 'object',
+                          description: 'Optional unsigned evaluator diagnostics; not covered by the M1 canonical export or its signature. Preserves primary and secondary findings without changing the verdict. response.verdict remains authoritative; engine_verdict precedes possible middleware downgrades. Missing details are not inferred. Omitted on deterministic short-circuits and engine-budget exits.',
+                          properties: {
+                            schema_version: { type: 'string', enum: ['sentinel.verifier-trace.v1'] },
+                            signature_scope: { type: 'string', enum: ['unsigned_diagnostics'] },
+                            cascade_reason: { type: ['string', 'null'] },
+                            internal_verdict: { type: 'string' },
+                            engine_verdict: { type: 'string', enum: ['ALLOW', 'BLOCK', 'UNCERTAIN'] },
+                            legacy_surface_stage: { type: ['string', 'null'], enum: ['solo', 'primary', 'secondary', null] },
+                            retained_primary_restriction: { type: 'boolean' },
+                            missing_reason_steps: { type: 'array', items: {
+                              type: 'object', properties: {
+                                stage: { type: 'string', enum: ['solo', 'primary', 'secondary'] },
+                                step_id: { type: 'string' },
+                              },
+                            } },
+                            stages: { type: 'array', items: {
+                              type: 'object', properties: {
+                                stage: { type: 'string', enum: ['solo', 'primary', 'secondary'] },
+                                model: { type: 'string', description: 'Configured verifier alias, not an attested model identity.' },
+                                status: { type: 'string', enum: ['completed', 'unavailable', 'not_invoked'] },
+                                output_contract: {
+                                  type: 'object', description: 'Optional validation of consumed model assessment fields before scoring. Invalid assessment means technical review needed, not a finding against the task; never an ALLOW. No raw model text is exposed. Signature scope remains unsigned diagnostics.',
+                                  properties: {
+                                    schema_version: {type: 'string', enum: ['plv.evaluator-output.v1']},
+                                    status: {type: 'string', enum: ['valid', 'invalid']},
+                                    response_sha256: {type: 'string', pattern: '^[a-f0-9]{64}$'},
+                                    shape: evaluatorShapeSchema,
+                                    issues: {type: 'array', maxItems: 128, items: {type: 'object', properties: {code: {type: 'string'}, step_id: {type: ['string', 'null']}}}},
+                                  },
+                                },
+                                verdict: { type: ['string', 'null'] },
+                                reasoning: { type: ['string', 'null'] },
+                                reasoning_source: { type: 'string', enum: ['evaluator', 'evidence_bind', 'missing'] },
+                                objections: { type: 'array', items: {
+                                  type: 'object', description: 'Normalized, evidence-bound per-step surface for this evaluator. A provided reason is not proof of a useful or sufficient repair.',
+                                  properties: {
+                                    step_id: { type: 'string' }, criterion: { type: 'string' },
+                                    score: { type: 'number', minimum: 0, maximum: 1 }, predicate: { type: 'string' },
+                                    quote: { type: ['string', 'null'] },
+                                    quote_source: { type: ['string', 'null'], enum: ['cascade', 'recovered_mandate', null] },
+                                    quote_match_mode: { type: ['string', 'null'], enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none', null] },
+                                    reasoning: { type: 'string' },
+                                    reasoning_source: { type: 'string', enum: ['evaluator', 'surface_normalizer', 'criterion_fallback', 'evidence_bind'] },
+                                    evaluator_reasoning_present: { type: 'boolean' },
+                                  },
+                                } },
+                              },
+                            } },
+                          },
+                        },
                       },
                     },
                   },

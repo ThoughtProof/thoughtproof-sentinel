@@ -1,0 +1,44 @@
+--- a/src/plan/graded-support-evaluator.ts
++++ b/src/plan/graded-support-evaluator.ts
+@@ -16 +16,3 @@
+-import { callModelStructured, type ChatMessage } from '../utils/model-router.js';
++import { callModel, callModelStructured, type ChatMessage } from '../utils/model-router.js';
++import { decodeEvaluationOutput, type EvaluationOutputContract } from './evaluation-output-contract.js';
++import { withRequiredEvaluationFields } from './evaluation-request-contract.js';
+@@ -187,0 +189,2 @@
++  /** Strict opt-in: validity of the model assessment, not truth of the assessed claim. */
++  output_contract?: EvaluationOutputContract;
+@@ -1144,0 +1148 @@
++  contractState?: {value?: EvaluationOutputContract},
+@@ -1193,0 +1198,8 @@
++
++  if (contractState) {
++    // Exactly one model request: malformed assessment output does not trigger hidden repair retries.
++    const response = await callModel(model, withRequiredEvaluationFields(messages, stepsToEvaluate.map(s => `step_${s.index}`)), {maxTokens, temperature: 0, seed: DEFAULT_EVAL_SEED});
++    const decoded = decodeEvaluationOutput(response.content, stepsToEvaluate.map(s => `step_${s.index}`), mode);
++    contractState.value = decoded.contract;
++    return decoded.data as StepEvaluation[];
++  }
+@@ -1259,0 +1272,2 @@
++  /** Validate complete core step fields; invalid assessment is a technical HOLD, never a semantic BLOCK. */
++  strictOutputContract?: boolean;
+@@ -1335,0 +1350 @@
++  const contractState: {value?: EvaluationOutputContract} | undefined = options.strictOutputContract ? {} : undefined;
+@@ -1339 +1354 @@
+-      item, stepsForTier2, model, options.maxTokens ?? 4096, mode
++      item, stepsForTier2, model, options.maxTokens ?? 4096, mode, contractState
+@@ -1340,0 +1356,6 @@
++    if (contractState?.value?.status === 'invalid') {
++      // Do not invent failed research steps, numeric scores, missing evidence or model explanations.
++      return {id: item.id, step_evaluations: [], verdict: 'HOLD',
++        verdict_reasoning: 'Evaluator output is incomplete or invalid. Correct the evaluator response before deciding; this is not a finding against the assessed task.',
++        provenance_violations: [], output_contract: contractState.value, tier1_stats: tier1Stats};
++    }
+@@ -1367,2 +1388,3 @@
+-    // Skip provenance for Tier-1 results (no quotes to check)
+-    if (ev.reasoning?.startsWith('[TIER1')) return ev;
++    // Only actual host-created Tier-1 results are exempt. Model reasoning is
++    // untrusted text and cannot impersonate that stage or bypass score floors.
++    if (tier1ResolvedEvals.includes(ev)) return ev;
+@@ -1413,0 +1436 @@
++    ...(contractState?.value ? {output_contract: contractState.value} : {}),

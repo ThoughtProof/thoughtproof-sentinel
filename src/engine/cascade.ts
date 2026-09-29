@@ -48,6 +48,17 @@ export interface CascadeOutput {
   degradedMode?: boolean;
   /** True if cascade completed under budget without abort. */
   budget_ok?: boolean;
+  /** Individual evaluations, before the final verdict is composed. Never inferred from prose. */
+  evaluations?: CascadeEvaluation[];
+  /** Origin of the legacy result's steps and reasoning (not necessarily the deciding stage). */
+  surfaceStage?: 'solo' | 'primary' | 'secondary';
+}
+
+export interface CascadeEvaluation {
+  stage: 'solo' | 'primary' | 'secondary';
+  model: string;
+  status: 'completed' | 'unavailable' | 'not_invoked';
+  item?: ItemResult;
 }
 
 /**
@@ -66,14 +77,17 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
   const evalOptions: EvalOptions = {
     mode: input.evalMode,
     maxTokens: 4096,
+    strictOutputContract: true,
   };
 
   // Partial knowledge for budget exhaustion: only BLOCK is preservable.
   let knownInternalVerdict: string | null = null;
   let stage: BudgetStage = 'pre_cascade';
   const modelsUsedAcc: string[] = [];
+  const attemptedModels = new Set<string>();
 
   const evaluate = async (modelAlias: string, evalInput: EvalInput): Promise<ItemResult> => {
+    attemptedModels.add(modelAlias);
     // Infer stage from call order for standard cascade.
     if (stages.length === 1) {
       stage = 'solo';
@@ -116,6 +130,9 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
         result,
         modelsUsed: [stages[0]],
         budget_ok: true,
+        degradedMode: result.output_contract?.status === 'invalid',
+        evaluations: [{stage: 'solo', model: stages[0], status: 'completed', item: result}],
+        surfaceStage: 'solo',
       };
     }
 
@@ -154,8 +171,15 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
       result,
       modelsUsed,
       cascadeReason: cr.reason,
-      degradedMode: cr.degradedMode === true,
+      degradedMode: cr.degradedMode === true || cr.primary?.output_contract?.status === 'invalid' || cr.secondary?.output_contract?.status === 'invalid',
       budget_ok: true,
+      evaluations: [
+        {stage: 'primary', model: stages[0], status: cr.primary ? 'completed' : 'unavailable', item: cr.primary},
+        {stage: 'secondary', model: stages[1],
+          status: cr.secondary ? 'completed' : cr.secondaryInvoked || attemptedModels.has(stages[1]) ? 'unavailable' : 'not_invoked',
+          item: cr.secondary},
+      ],
+      surfaceStage: cr.secondary ? 'secondary' : 'primary',
     };
   } catch (err) {
     if (err instanceof EngineBudgetExhaustedError) {
