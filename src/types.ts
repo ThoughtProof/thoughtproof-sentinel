@@ -262,7 +262,7 @@ export interface SentinelStepObjection {
    * How `quote` matched `evidence` (exact vs folded). Present when a quote
    * was accepted on the surface.
    */
-  quote_match_mode?: 'exact' | 'trimmed' | 'line_whitespace' | 'unicode' | 'none';
+  quote_match_mode?: 'exact' | 'trimmed' | 'line_whitespace' | 'unicode' | 'none' | null;
   /**
    * Who authored this objection surface. `deterministic_gate` means Sentinel
    * overwrote predicate/score/reasoning after a machine-checkable mismatch
@@ -307,6 +307,13 @@ export interface SentinelVerifyResponse {
     duration_ms: number;
     models_used: string[];
     verified_at: string;
+    /**
+     * Individual verifier stages, before the cascade combines their verdicts.
+     * Additive unsigned diagnostics: NOT covered by the M1 canonical export.
+     * No execution permission, repair sufficiency or independent truth claim.
+     * Absent on deterministic short-circuits and engine-budget exits.
+     */
+    verifier_trace?: SentinelVerifierTrace;
     /**
      * Present only when objection-evidence-bind gated at least one surface reason.
      * Verdict is never changed by the bind (surface text only).
@@ -404,6 +411,33 @@ export interface SentinelVerifyResponse {
       late_result_ignored: boolean;
     };
   };
+}
+
+export interface SentinelVerifierTrace {
+  schema_version: 'sentinel.verifier-trace.v1';
+  signature_scope: 'unsigned_diagnostics';
+  cascade_reason: string | null;
+  internal_verdict: string;
+  /** Engine result before later middleware may downgrade it; response.verdict remains authoritative. */
+  engine_verdict: SentinelVerdict;
+  legacy_surface_stage: 'solo' | 'primary' | 'secondary' | null;
+  /** The cascade retained a primary HOLD/BLOCK even if the secondary disagreed. */
+  retained_primary_restriction: boolean;
+  /** Missing original per-step explanations, including steps with a generated surface notice. */
+  missing_reason_steps: Array<{stage: 'solo' | 'primary' | 'secondary'; step_id: string}>;
+  stages: Array<{
+    stage: 'solo' | 'primary' | 'secondary';
+    /** Configured verifier alias, not an independently attested model identity. */
+    model: string;
+    status: 'completed' | 'unavailable' | 'not_invoked';
+    verdict: string | null;
+    reasoning: string | null;
+    reasoning_source: 'evaluator' | 'evidence_bind' | 'missing';
+    objections: Array<SentinelStepObjection & {
+      reasoning_source: 'evaluator' | 'surface_normalizer' | 'criterion_fallback' | 'evidence_bind';
+      evaluator_reasoning_present: boolean;
+    }>;
+  }>;
 }
 
 /** Whether the public verdict came from the deterministic gate or the cascade. */

@@ -1,0 +1,26 @@
+{
+  "execution": "historical_live_interface_probes",
+  "sources": [
+    {
+      "source": "../thoughtproof-research-lab/results/research-additions-20260928/sentinel-modes-01/evidence/requests/sm1-91005cd67d43e6dc256515b0/native-request.json",
+      "artifact": "q-03-request.json",
+      "sha256": "44ab09ccf671ea3e5051c20f04e47836894079a0764a3286afb5776cf998e3d4"
+    },
+    {
+      "source": "../thoughtproof-research-lab/results/research-additions-20260928/sentinel-modes-01/evidence/requests/sm1-91005cd67d43e6dc256515b0/native-response.json",
+      "artifact": "q-03-response.json",
+      "sha256": "41e90ebf67b0d81cadf315a596365935aeebe9004780f8b3d068a12ca5629fa1"
+    },
+    {
+      "source": "../thoughtproof-research-lab/results/research-additions-20260928/sentinel-modes-01/evidence/requests/sm1-634ff907cc0586f4654237ed/native-request.json",
+      "artifact": "q-04-request.json",
+      "sha256": "0ee97ac7095bb8e6e7f145fbe7bbc39d19b76b770088d1209fbff8bf798e5261"
+    },
+    {
+      "source": "../thoughtproof-research-lab/results/research-additions-20260928/sentinel-modes-01/evidence/requests/sm1-634ff907cc0586f4654237ed/native-response.json",
+      "artifact": "q-04-response.json",
+      "sha256": "9459613be587c339d8d5b362eea733ef4b53538f9a6922d5711b77548be3c491"
+    }
+  ],
+  "internal_evaluations": "synthetic_not_recovered"
+}
