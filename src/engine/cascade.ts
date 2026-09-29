@@ -77,6 +77,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
   const evalOptions: EvalOptions = {
     mode: input.evalMode,
     maxTokens: 4096,
+    strictOutputContract: true,
   };
 
   // Partial knowledge for budget exhaustion: only BLOCK is preservable.
@@ -129,6 +130,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
         result,
         modelsUsed: [stages[0]],
         budget_ok: true,
+        degradedMode: result.output_contract?.status === 'invalid',
         evaluations: [{stage: 'solo', model: stages[0], status: 'completed', item: result}],
         surfaceStage: 'solo',
       };
@@ -169,7 +171,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
       result,
       modelsUsed,
       cascadeReason: cr.reason,
-      degradedMode: cr.degradedMode === true,
+      degradedMode: cr.degradedMode === true || cr.primary?.output_contract?.status === 'invalid' || cr.secondary?.output_contract?.status === 'invalid',
       budget_ok: true,
       evaluations: [
         {stage: 'primary', model: stages[0], status: cr.primary ? 'completed' : 'unavailable', item: cr.primary},

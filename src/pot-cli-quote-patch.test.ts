@@ -1,5 +1,5 @@
 /**
- * Lock the vendored pot-cli 0.8.10-tp.2 ThoughtProof patch.
+ * Lock the vendored pot-cli evaluator-contract overlay and earlier quote fixes.
  *
  * Must fail if someone swaps back an unpatched upstream 0.8.10 tarball
  * that happens to export the same function names.
@@ -17,10 +17,10 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const VENDORED_POT_CLI_VERSION = '0.8.10-tp.2';
-export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.2.tgz';
+export const VENDORED_POT_CLI_VERSION = '0.8.10-tp.2-eval-contract.1';
+export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.2-eval-contract.1.tgz';
 export const VENDORED_POT_CLI_SHA512 =
-  '97214d724a7babef496f6360cb5b3e89b95c80b46ae55464a65276d209b3097108f5ad61f5acc9e6f2f2f4038e3d0d44822ef3a5aa4fb1d341f5e81863082804';
+  '4184e1152b4e0a29f22290531cbe00bfd6e6738220638c6e5e457e4ec4ee0f72c6d97871c0dffdb555baae1296b3e5b8b9477a2fec1443b1ccac1c07d893e948';
 
 const COERCE_CASES: unknown[] = [
   undefined,

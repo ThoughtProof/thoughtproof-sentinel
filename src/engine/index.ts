@@ -239,6 +239,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
 
   // 3. Map verdict (mode-aware: trade_execution & trade_reasoning are conservative)
   const internalVerdict = cascadeOutput.result.verdict;
+  const invalidOutputStages = (cascadeOutput.evaluations ?? []).filter(s => s.item?.output_contract?.status === 'invalid').map(s => s.stage);
+  const hasInvalidOutput = invalidOutputStages.length > 0;
   let verdict = mapVerdict(internalVerdict, req.mode);
   let promotionMeta: SentinelVerifyResponse['meta']['promotion'] | undefined;
 
@@ -251,6 +253,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const steps3b = cascadeOutput.result.step_evaluations;
   if (
     req.mode === 'trade_reasoning' &&
+    !hasInvalidOutput &&
     verdict === 'UNCERTAIN' &&
     canPromoteStep2Only(
       steps3b.map((s) => ({
@@ -349,6 +352,13 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     };
   }
 
+  // Assessment-format failure cannot become an ALLOW through any promotion path.
+  // A separate genuine BLOCK remains restrictive; no fabricated research objection is added.
+  if (hasInvalidOutput && verdict === 'ALLOW') {
+    verdict = 'UNCERTAIN';
+    if (promotionMeta) promotionMeta = {...promotionMeta, public_verdict: verdict, promoted: false, reason: 'evaluator_output_invalid'};
+  }
+
   // 4. Calculate confidence from step scores.
   //    Non-finite / missing scores coerce to 0 (fail-closed). `steps.length > 0`
   //    does not protect against undefined/NaN scores — those produced
@@ -394,16 +404,19 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
 
   const durationMs = Date.now() - startMs;
   const verifierTrace = buildVerifierTrace(cascadeOutput, criterionByStepId, evidence, req, verdict);
-  const publicReasoning = unclassifiedAbstention
+  const existingReasoning = unclassifiedAbstention
     ? UNCLASSIFIED_ABSTENTION_REASON
     : objectiveMismatch && internalVerdict !== 'BLOCK'
       ? OBJECTIVE_MISMATCH_BLOCK_REASON
       : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
+  const publicReasoning = hasInvalidOutput
+    ? `Evaluator output is invalid or incomplete (${invalidOutputStages.join(', ')}). Correct the evaluator response before deciding; missing assessment fields are not missing task evidence.\n\n${existingReasoning}`
+    : existingReasoning;
 
   return {
     id,
     verdict,
-    confidence: receiptConfidence(avgScore),
+    confidence: receiptConfidence(hasInvalidOutput ? 0 : avgScore),
     reasoning: publicReasoning,
     objections,
     mode: req.mode,

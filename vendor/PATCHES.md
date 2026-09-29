@@ -4,6 +4,23 @@ Do not replace this tarball with upstream `pot-cli@0.8.10`. The installed
 `package.json` `version` must remain the ThoughtProof identity below so
 `GET /sentinel/health` `pot_cli` (PR #30) distinguishes binaries.
 
+## 0.8.10-tp.2-eval-contract.1 (local candidate, 2026-09-29)
+
+- Base remains the exact tp.2 archive below; original source and archive retained.
+- `strictOutputContract` opts into validation before scoring: each expected ID
+  exactly once, numeric score in [0,1], nonempty reason, mode-compatible predicate,
+  and explicit string-or-null quote. Unused optional metadata is not required.
+- Invalid output returns technical HOLD, no fabricated steps or semantic BLOCK.
+  One model request per strict evaluator invocation; no hidden format retries.
+- Existing quote provenance, score floors and cascade policy remain unchanged.
+  Sentinel opts in and prevents promotion around any invalid evaluator stage.
+- Rebuild offline: `node scripts/build-evaluator-contract-vendor.mjs`.
+  Runtime JS and sourcemaps are emitted with pinned installed TypeScript; the
+  declaration overlay is explicit in that script. Installed package and archive
+  are tested separately from mocked evaluator tests.
+- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.1.tgz`.
+- sha512 (hex): `4184e1152b4e0a29f22290531cbe00bfd6e6738220638c6e5e457e4ec4ee0f72c6d97871c0dffdb555baae1296b3e5b8b9477a2fec1443b1ccac1c07d893e948`
+
 ## 0.8.10-tp.2 (2026-09-11)
 
 - Tarball: `vendor/pot-cli-0.8.10-tp.2.tgz`

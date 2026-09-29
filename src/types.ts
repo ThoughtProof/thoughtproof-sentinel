@@ -430,6 +430,13 @@ export interface SentinelVerifierTrace {
     /** Configured verifier alias, not an independently attested model identity. */
     model: string;
     status: 'completed' | 'unavailable' | 'not_invoked';
+    /** Validity of the evaluator response, not proof of the task's truth or falsity. */
+    output_contract?: {
+      schema_version: 'plv.evaluator-output.v1';
+      status: 'valid' | 'invalid';
+      response_sha256: string;
+      issues: Array<{code: string; step_id: string | null}>;
+    };
     verdict: string | null;
     reasoning: string | null;
     reasoning_source: 'evaluator' | 'evidence_bind' | 'missing';

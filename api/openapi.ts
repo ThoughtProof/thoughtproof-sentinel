@@ -361,6 +361,15 @@ const spec = {
                                 stage: { type: 'string', enum: ['solo', 'primary', 'secondary'] },
                                 model: { type: 'string', description: 'Configured verifier alias, not an attested model identity.' },
                                 status: { type: 'string', enum: ['completed', 'unavailable', 'not_invoked'] },
+                                output_contract: {
+                                  type: 'object', description: 'Optional validation of consumed model assessment fields before scoring. Invalid assessment means technical review needed, not a finding against the task; never an ALLOW. No raw model text is exposed. Signature scope remains unsigned diagnostics.',
+                                  properties: {
+                                    schema_version: {type: 'string', enum: ['plv.evaluator-output.v1']},
+                                    status: {type: 'string', enum: ['valid', 'invalid']},
+                                    response_sha256: {type: 'string', pattern: '^[a-f0-9]{64}$'},
+                                    issues: {type: 'array', maxItems: 128, items: {type: 'object', properties: {code: {type: 'string'}, step_id: {type: ['string', 'null']}}}},
+                                  },
+                                },
                                 verdict: { type: ['string', 'null'] },
                                 reasoning: { type: ['string', 'null'] },
                                 reasoning_source: { type: 'string', enum: ['evaluator', 'evidence_bind', 'missing'] },

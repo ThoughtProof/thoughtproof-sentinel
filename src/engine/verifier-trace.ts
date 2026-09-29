@@ -49,6 +49,7 @@ export function buildVerifierTrace(
       {mandate: request.mandate, claim: request.claim, evidence: request.evidence}) : null;
     return {stage: stage.stage, model: stage.model, status: stage.status,
       verdict: item.verdict, reasoning: summary?.surface_objections[0].reasoning || null,
+      ...(item.output_contract ? {output_contract: item.output_contract} : {}),
       reasoning_source: !summary ? 'missing' : summary.items[0].surface === 'pass_through' ? 'evaluator' : 'evidence_bind', objections};
   });
   const primary = stages.find(s => s.stage === 'primary');
