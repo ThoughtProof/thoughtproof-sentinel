@@ -4,6 +4,22 @@ Do not replace this tarball with upstream `pot-cli@0.8.10`. The installed
 `package.json` `version` must remain the ThoughtProof identity below so
 `GET /sentinel/health` `pot_cli` (PR #30) distinguishes binaries.
 
+## 0.8.10-tp.2-eval-contract.2 (local compatibility correction, 2026-09-29)
+
+- Derived `predicate` is no longer a required model field. Any incoming label
+  is discarded; existing provenance checks and score floors compute the output.
+  This preserves usable reasons when only the redundant label is missing or
+  uses another mode's vocabulary.
+- Required step coverage, numeric scores, nonempty reasons and explicit quote
+  fields remain checked. Invalid assessments retain their technical HOLD.
+- Only actual host-created Tier 1 result objects skip provenance; model text
+  starting with `[TIER1` cannot impersonate the internal stage.
+- The earlier archive and manifest are retained; live negative results are not
+  relabeled. This is an offline correction, not a demonstrated model improvement.
+- Rebuild offline: `node scripts/build-evaluator-contract-vendor.mjs`.
+- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.2.tgz`.
+- sha512 (hex): `6228fcd16048e83321f02e8672071c54c8ebc5f17303ec29f5c2d6af63f65e828ba684335e6ca411e5fe8221822db029040faae125f438b5100a0c46c448f7b7`
+
 ## 0.8.10-tp.2-eval-contract.1 (local candidate, 2026-09-29)
 
 - Base remains the exact tp.2 archive below; original source and archive retained.

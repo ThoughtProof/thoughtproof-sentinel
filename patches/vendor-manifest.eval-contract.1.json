@@ -1,0 +1,10 @@
+{
+  "base_sha256": "3325e44c36238583d95c90eeec0202a41e8c8e0555190450e362ea126b963b1e",
+  "version": "0.8.10-tp.2-eval-contract.1",
+  "archive": "pot-cli-0.8.10-tp.2-eval-contract.1.tgz",
+  "sha256": "953251515fdd974ef8dab660655a32e1cc8b41db06d43eb3198f108405ce7e92",
+  "typescript_version": "5.9.3",
+  "patch_sha256": "2b5312228f25eb22927dc6b7b99209ca01003bc00fd4320b2ce465da1072f061",
+  "decoder_sha256": "0f2e419cea5a22544d67f7652629d511b243ce62f9a0ff02e0a790e2ec1f05cc",
+  "network_requests": 0
+}

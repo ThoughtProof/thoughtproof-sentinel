@@ -8,7 +8,7 @@ import ts from 'typescript';
 const root=resolve(import.meta.dirname,'..'),base=join(root,'vendor/pot-cli-0.8.10-tp.2.tgz');
 const hash=(p,algorithm='sha256')=>createHash(algorithm).update(readFileSync(p)).digest('hex');
 if(hash(base)!=='3325e44c36238583d95c90eeec0202a41e8c8e0555190450e362ea126b963b1e')throw Error('BASE_VENDOR_CHANGED');
-const version='0.8.10-tp.2-eval-contract.1',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
+const version='0.8.10-tp.2-eval-contract.2',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
 try{
  execFileSync('tar',['-xzf',base,'-C',temp]);
  execFileSync('patch',['-p1','--batch','--forward','-i',join(root,'patches/pot-cli-evaluator-contract.patch')],{cwd:pkg});

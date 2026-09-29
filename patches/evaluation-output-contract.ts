@@ -14,7 +14,7 @@ export interface EvaluationOutputContract {
 }
 
 /** A malformed assessment is not evidence against the task being assessed. No retries here. */
-export function decodeEvaluationOutput(text: string, expectedIds: string[], mode: string): {
+export function decodeEvaluationOutput(text: string, expectedIds: string[], _mode: string): {
   data: unknown[]; contract: EvaluationOutputContract;
 } {
   const raw=typeof text==='string'?text:'',issues: EvaluationOutputIssue[]=[];
@@ -31,9 +31,6 @@ export function decodeEvaluationOutput(text: string, expectedIds: string[], mode
   if(!issues.length&&!Array.isArray(data))issue('expected_array');
   if(Array.isArray(data)){
     const expected=new Set(expectedIds),seen=new Set<string>();
-    const predicates=mode==='faithfulness'
-      ?new Set(['faithful','partially_faithful','weakly_faithful','unfaithful'])
-      :new Set(['supported','partial','unsupported','skipped']);
     for(const value of data){
       if(!value||typeof value!=='object'||Array.isArray(value)){issue('invalid_step');continue;}
       const row=value as Record<string,unknown>,id=typeof row.step_id==='string'&&expected.has(row.step_id)?row.step_id:null;
@@ -43,10 +40,15 @@ export function decodeEvaluationOutput(text: string, expectedIds: string[], mode
       if(typeof row.reasoning!=='string'||!row.reasoning.trim())issue('missing_reason',id);
       // A null quote is allowed. The existing provenance rules still decide whether it supports the score.
       if(!Object.hasOwn(row,'quote')||(row.quote!==null&&(typeof row.quote!=='string'||!row.quote.trim())))issue('invalid_quote',id);
-      if(typeof row.predicate!=='string'||!predicates.has(row.predicate))issue('invalid_predicate',id);
     }
     for(const id of expected)if(!seen.has(id))issue('missing_step',id);
   }
   if(issues.length)contract.status='invalid';
-  return {data:contract.status==='valid'?data as unknown[]:[],contract};
+  // Predicate is a host-derived output, not an independent model input. The
+  // evaluator recomputes it after provenance checks and score floors. Discard
+  // any model-supplied label so it cannot override those checks or leak out.
+  const assessments=contract.status==='valid'?(data as Record<string,unknown>[]).map(row=>{
+    const assessment={...row};delete assessment.predicate;return assessment;
+  }):[];
+  return {data:assessments,contract};
 }

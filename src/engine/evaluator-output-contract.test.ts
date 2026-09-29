@@ -30,7 +30,6 @@ const mutations: Array<[string,(rows:any[])=>unknown,string]>=[
  ['score outside range',r=>r.map(x=>({...x,score:1.1})),'invalid_score'],
  ['negative score',r=>r.map(x=>({...x,score:-.1})),'invalid_score'],
  ['null score',r=>r.map(x=>({...x,score:null})),'invalid_score'],
- ['wrong predicate',r=>r.map(x=>({...x,predicate:'supported'})),'invalid_predicate'],
  ['wrong envelope',r=>({verdict:'ALLOW',objections:r}),'expected_array'],
  ['empty array',()=>[],'missing_step'],
  ['null row',()=>[null],'invalid_step'],
