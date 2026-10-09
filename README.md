@@ -17,10 +17,12 @@ Agentic verification API — lightweight verification for autonomous agent workf
 
 ## Tiers
 
-| Tier | Price | Cascade | Accuracy | FA |
-|------|-------|---------|----------|-----|
-| checkpoint | $0.003 | Nano solo | 83.3% | 0 |
-| standard | $0.005 | Nano→Pro | 81.3% | 0 |
+| Tier | Price | Cascade | Accuracy | FA | Latency |
+|------|-------|---------|----------|-----|---------|
+| checkpoint | $0.003 | Nano solo | 83.3% | 0 | typically 2–4 s; up to ~16 s on escalation |
+| standard | $0.005 | Nano→Pro | 81.3% | 0 | typically 2–4 s; up to ~16 s on escalation |
+
+Latency is the measured production envelope (`GET /sentinel/tiers` field `latency_median`, still a string). Cascade escalation has been observed at 8.5–15.6 s; advertise the ceiling as ~16 s.
 
 ## Modes
 

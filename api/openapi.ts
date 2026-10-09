@@ -332,7 +332,12 @@ const spec = {
                     meta: {
                       type: 'object',
                       properties: {
-                        duration_ms: { type: 'integer', example: 1200 },
+                        duration_ms: {
+                          type: 'integer',
+                          description:
+                            'Observed verify duration in milliseconds. Typical responses are 2–4 s; cascade escalation can reach ~16 s.',
+                          example: 3000,
+                        },
                         models_used: {
                           type: 'array',
                           items: { type: 'string' },
@@ -472,7 +477,12 @@ const spec = {
                           cascade: { type: 'array', items: { type: 'string' } },
                           accuracy: { type: 'number' },
                           false_allows: { type: 'integer' },
-                          latency_median: { type: 'string' },
+                          latency_median: {
+                            type: 'string',
+                            description:
+                              'Advertised end-to-end latency. Typically 2–4 s; up to ~16 s when the cascade escalates (observed 8.5–15.6 s). Not a ~1 s median and not a timeout.',
+                            example: 'typically 2–4 s; up to ~16 s on escalation',
+                          },
                           default: { type: 'boolean' },
                           notes: { type: 'string' },
                         },

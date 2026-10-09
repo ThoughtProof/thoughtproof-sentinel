@@ -1,6 +1,11 @@
 ## Unreleased
 
 ### Changed
+- **Advertised `/sentinel/tiers` latency:** `latency_median` (still a string)
+  and the matching README, OpenAPI, and ADR copy now say typically 2–4 s,
+  up to ~16 s on cascade escalation. Replaces the old ~1 s medians
+  (0.9 s / 1.2 s / 1.3 s). Timeouts, cascade, and verdict behavior are
+  unchanged.
 - **kfb-02 cascade HOLD is not a gate fail (founder GO 2026-09-22):**
   live probe after #83 returned UNCERTAIN (`primary_hold`), not
   `objective_mismatch_fail_closed`. `uncertain_ok` on kfb-02 only:

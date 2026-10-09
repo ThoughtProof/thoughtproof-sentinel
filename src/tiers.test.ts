@@ -1,5 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { listTiers, listAllTiers, getTierConfig, TIER_CONFIGS } from './tiers.js';
+import {
+  ADVERTISED_LATENCY_MEDIAN,
+  listTiers,
+  listAllTiers,
+  getTierConfig,
+  TIER_CONFIGS,
+} from './tiers.js';
 
 describe('Sentinel tiers', () => {
   it('publicly lists exactly 2 tiers (checkpoint + standard)', () => {
@@ -55,5 +63,29 @@ describe('Sentinel tiers', () => {
     expect(getTierConfig().tier).toBe('standard');
     expect(getTierConfig(undefined).tier).toBe('standard');
     expect(getTierConfig('checkpoint').tier).toBe('checkpoint');
+  });
+
+  it('advertises measured prod latency, not a ~1 s median', () => {
+    expect(ADVERTISED_LATENCY_MEDIAN).toBe(
+      'typically 2–4 s; up to ~16 s on escalation',
+    );
+    for (const tier of listAllTiers()) {
+      expect(tier.latency_median).toBe(ADVERTISED_LATENCY_MEDIAN);
+      expect(tier.latency_median).not.toMatch(/0\.9s|1\.2s|1\.3s|~1\s*s/);
+    }
+  });
+
+  it('README, OpenAPI, and tier ADRs repeat the measured envelope', () => {
+    const files = [
+      'README.md',
+      'api/openapi.ts',
+      'docs/ADR-0016-sentinel-api-spec.md',
+      'docs/ADR-0020-sentinel-to-rv-escalation.md',
+    ];
+    for (const rel of files) {
+      const text = readFileSync(join(process.cwd(), rel), 'utf8');
+      expect(text, rel).toContain(ADVERTISED_LATENCY_MEDIAN);
+      expect(text, rel).not.toMatch(/0\.9s|1\.2s|1\.3s|2\.3s/);
+    }
   });
 });

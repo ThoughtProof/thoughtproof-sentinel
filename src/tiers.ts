@@ -7,6 +7,11 @@ export interface TierConfig {
   cascade: string[];
   accuracy: number;
   false_allows: number;
+  /**
+   * Advertised end-to-end latency (string). Measured production is typically
+   * 2–4 s, and up to ~16 s when the cascade escalates (observed 8.5–15.6 s).
+   * Not a timeout and not a per-model budget.
+   */
   latency_median: string;
   default: boolean;
   /** When true, the tier is routable (accepted by /verify) but NOT advertised
@@ -16,6 +21,14 @@ export interface TierConfig {
   notes: string;
 }
 
+/**
+ * Copy returned by GET /sentinel/tiers (`latency_median` stays a string).
+ * Same envelope on every tier: prod is typically 2–4 s, and up to ~16 s
+ * when the cascade escalates. Do not advertise a ~1 s median.
+ */
+export const ADVERTISED_LATENCY_MEDIAN =
+  'typically 2–4 s; up to ~16 s on escalation';
+
 export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
   checkpoint: {
     tier: 'checkpoint',
@@ -24,7 +37,7 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano'],
     accuracy: 0.833,
     false_allows: 0,
-    latency_median: '0.9s',
+    latency_median: ADVERTISED_LATENCY_MEDIAN,
     default: false,
     notes: 'Nano solo. High-volume, individually low-stakes checks.',
   },
@@ -39,7 +52,7 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano', 'serv-swift'],
     accuracy: 0.813,
     false_allows: 0,
-    latency_median: '1.2s',
+    latency_median: ADVERTISED_LATENCY_MEDIAN,
     default: true,
     notes: 'Nano→cascade. Default Sentinel tier. 0 False ALLOWs.',
   },
@@ -52,7 +65,7 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano', 'serv-pro'],
     accuracy: 0.813,
     false_allows: 0,
-    latency_median: '1.3s',
+    latency_median: ADVERTISED_LATENCY_MEDIAN,
     default: false,
     hidden: true,
     notes: 'Nano→Pro cascade. Reserved premium/enterprise tier — not publicly listed.',
@@ -67,7 +80,7 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano', 'serv-swift'],
     accuracy: 0.813,
     false_allows: 0,
-    latency_median: '1.2s',
+    latency_median: ADVERTISED_LATENCY_MEDIAN,
     default: false,
     hidden: true,
     notes: 'Nano→Swift cascade. Internal alias of standard — not publicly listed.',

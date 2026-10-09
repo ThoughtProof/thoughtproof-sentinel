@@ -51,7 +51,8 @@ const OUTPUT_EXAMPLE = {
   mode: 'trade_execution',
   tier: 'checkpoint',
   meta: {
-    duration_ms: 1200,
+    // Illustrative duration inside the measured 2–4 s band (not a ~1 s median).
+    duration_ms: 3000,
     models_used: ['serv-nano'],
   },
 };

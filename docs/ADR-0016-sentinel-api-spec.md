@@ -52,12 +52,14 @@ POST /sentinel/verify
 
 | Tier | Price | Cascade | Accuracy | FA | Latency | Default |
 |------|-------|---------|----------|-----|---------|---------|
-| `checkpoint` | $0.003 | Nano solo | ~83.3% | 0* | 0.9s | No |
-| `standard` | $0.005 | Nano→Pro | 81.3% | 0 | 1.3s | Yes |
+| `checkpoint` | $0.003 | Nano solo | ~83.3% | 0* | typically 2–4 s; up to ~16 s on escalation | No |
+| `standard` | $0.005 | Nano→Pro | 81.3% | 0 | typically 2–4 s; up to ~16 s on escalation | Yes |
 
 *\*0 FA with asterisk on checkpoint: empirically 0 on current 170-case benchmark, but Nano solo without cascade rescue has theoretical FA risk on adversarial inputs.*
 
-**Reserved:** `thorough` tier slot (Nano→Ultra, ~82.7%, 2.3s) — defined only when market demands it.
+Latency is the measured production envelope (typically 2–4 s; cascade escalation observed 8.5–15.6 s, advertised as up to ~16 s). It is not a ~1 s median and not a timeout.
+
+**Reserved:** `thorough` tier slot (Nano→Ultra, ~82.7%) — defined only when market demands it. Do not advertise a separate ~2.3 s median; use the same measured envelope.
 
 ### 4. Modes
 
@@ -105,7 +107,7 @@ Response (200):
   "mode": "handoff",
   "tier": "standard",
   "meta": {
-    "duration_ms": 1300,
+    "duration_ms": 3000,
     "models_used": ["nano", "pro"],
     "verified_at": "2026-05-13T17:00:00Z"
   }
