@@ -1,5 +1,9 @@
 /**
- * Lock the vendored pot-cli 0.8.10-tp.2 ThoughtProof patch.
+ * Lock the vendored pot-cli ThoughtProof patch.
+ *
+ * Installed package is the 0.8.11 pack of pot-cli 5555360 (PR #52).
+ * The previous 0.8.10-tp.2 tarball stays in vendor/ for comparison and
+ * must keep its recorded sha512.
  *
  * Must fail if someone swaps back an unpatched upstream 0.8.10 tarball
  * that happens to export the same function names.
@@ -17,9 +21,14 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const VENDORED_POT_CLI_VERSION = '0.8.10-tp.2';
-export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.2.tgz';
+export const VENDORED_POT_CLI_VERSION = '0.8.11';
+export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.11.tgz';
 export const VENDORED_POT_CLI_SHA512 =
+  '006a23b4d947837f3bea9443a8f75fee95e289372acb8092f255ad05541a024da046821aa8b410ff87041adcb9f490b1ea2179eb1992dcbe507ab50eef711939';
+
+/** Retained comparison artifact. Not the installed dependency. */
+export const PREVIOUS_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.2.tgz';
+export const PREVIOUS_POT_CLI_SHA512 =
   '97214d724a7babef496f6360cb5b3e89b95c80b46ae55464a65276d209b3097108f5ad61f5acc9e6f2f2f4038e3d0d44822ef3a5aa4fb1d341f5e81863082804';
 
 const COERCE_CASES: unknown[] = [
@@ -53,6 +62,13 @@ describe('vendored pot-cli identity (not upstream 0.8.10)', () => {
     const patches = readFileSync(join(process.cwd(), 'vendor', 'PATCHES.md'), 'utf8');
     expect(patches).toContain(VENDORED_POT_CLI_VERSION);
     expect(patches).toContain(VENDORED_POT_CLI_SHA512);
+  });
+
+  it('keeps the 0.8.10-tp.2 tarball untouched for comparison', () => {
+    const tgz = join(process.cwd(), PREVIOUS_POT_CLI_TGZ);
+    expect(existsSync(tgz)).toBe(true);
+    const hash = createHash('sha512').update(readFileSync(tgz)).digest('hex');
+    expect(hash).toBe(PREVIOUS_POT_CLI_SHA512);
   });
 
   it('installed evaluator source has the Sentinel patch markers (not stub exports)', () => {

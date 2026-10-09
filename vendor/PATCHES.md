@@ -4,6 +4,23 @@ Do not replace this tarball with upstream `pot-cli@0.8.10`. The installed
 `package.json` `version` must remain the ThoughtProof identity below so
 `GET /sentinel/health` `pot_cli` (PR #30) distinguishes binaries.
 
+## 0.8.11 (2026-10-09) — pre-publish check, not a release
+
+Test-only install of a local pack of ThoughtProof/pot-cli
+`5555360b346f9f3e4dd724a093ddbba17905af9f` (PR #52, draft). Not published
+to npm, not tagged, and not a production switch. `0.8.10-tp.2` stays in
+this directory so the two tarballs can be compared.
+
+- Tarball: `vendor/pot-cli-0.8.11.tgz`
+- Built from: pot-cli `5555360` (`npm ci`, `npm run build`, `npm pack`)
+- Package version: `0.8.11`
+
+sha256:
+`eb32000c3b3a0f246995ff1ce0c09dc5e38a0a6fb1ed3cc0effa64b35b9f7f16`
+
+sha512 (hex):
+`006a23b4d947837f3bea9443a8f75fee95e289372acb8092f255ad05541a024da046821aa8b410ff87041adcb9f490b1ea2179eb1992dcbe507ab50eef711939`
+
 ## 0.8.10-tp.2 (2026-09-11)
 
 - Tarball: `vendor/pot-cli-0.8.10-tp.2.tgz`
