@@ -1,6 +1,21 @@
 ## Unreleased
 
 ### Changed
+- **Advertised `/sentinel/tiers` latency:** `latency_median` stays a string
+  and is per tier. Checkpoint is nano-only (`serv-nano`); nano-path latency
+  is not yet measured. Standard (and the hidden swift alias) is Nano→Swift
+  (`serv-nano` → `serv-swift`). Standard ALLOWs: observed in prod live suite
+  8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s. Deterministic
+  BLOCK: observed prod range 2–4 s (sample size not recorded). 45 s is
+  `ENGINE_BUDGET_MS`; exhaustion returns wire `UNCERTAIN` (product REVIEW)
+  unless a BLOCK is already known or the objective-mismatch gate fires.
+  Timeouts, cascade, and verdict behavior are unchanged.
+- **Standard cascade name in docs:** README and ADR-0016 say Nano→Swift,
+  matching `TIER_CONFIGS.standard.cascade`. The hidden `pro` tier remains
+  Nano→Pro.
+- **Documented tier prices:** README, ADR-0016, ADR-0017, and the payment
+  adapter README now match `TIER_CONFIGS` (checkpoint $0.005, standard
+  $0.008). Code prices were already those amounts.
 - **kfb-02 cascade HOLD is not a gate fail (founder GO 2026-09-22):**
   live probe after #83 returned UNCERTAIN (`primary_hold`), not
   `objective_mismatch_fail_closed`. `uncertain_ok` on kfb-02 only:

@@ -7,6 +7,12 @@ export interface TierConfig {
   cascade: string[];
   accuracy: number;
   false_allows: number;
+  /**
+   * Advertised end-to-end latency (string). Per tier — the standard ALLOW
+   * sample does not apply to checkpoint. 45s is ENGINE_BUDGET_MS. Exhaustion
+   * returns wire UNCERTAIN (product REVIEW) unless a BLOCK is already known
+   * or the objective-mismatch gate fires. Never ALLOW.
+   */
   latency_median: string;
   default: boolean;
   /** When true, the tier is routable (accepted by /verify) but NOT advertised
@@ -16,6 +22,36 @@ export interface TierConfig {
   notes: string;
 }
 
+/**
+ * Shared budget clause. 45s is ENGINE_BUDGET_MS. Wire verdict on exhaustion
+ * is UNCERTAIN (product REVIEW) unless BLOCK is already known or the
+ * objective-mismatch gate fires. Never ALLOW.
+ */
+const ENGINE_BUDGET_LATENCY =
+  '45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK';
+
+/** Observed prod range. Sample size was not recorded; not a guarantee. */
+const OBSERVED_DETERMINISTIC_BLOCK =
+  'Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded)';
+
+/**
+ * Checkpoint is serv-nano only (stages.length === 1). No measured
+ * checkpoint latency sample is in the repo.
+ */
+export const CHECKPOINT_ADVERTISED_LATENCY =
+  `Nano-only, no cascade. Nano-path latency not yet measured. ${OBSERVED_DETERMINISTIC_BLOCK}. ${ENGINE_BUDGET_LATENCY}`;
+
+/**
+ * Standard (and the hidden swift alias) run serv-nano → serv-swift.
+ * ALLOW figures are one named sample, not a guarantee.
+ */
+export const STANDARD_ADVERTISED_LATENCY =
+  `Nano→Swift cascade. ${OBSERVED_DETERMINISTIC_BLOCK}. Standard ALLOWs: observed in prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s. ${ENGINE_BUDGET_LATENCY}`;
+
+/** Hidden legacy serv-nano → serv-pro. No separate latency sample. */
+export const PRO_ADVERTISED_LATENCY =
+  `Hidden Nano→Pro cascade. Cascade latency not yet measured. ${OBSERVED_DETERMINISTIC_BLOCK}. ${ENGINE_BUDGET_LATENCY}`;
+
 export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
   checkpoint: {
     tier: 'checkpoint',
@@ -24,7 +60,7 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano'],
     accuracy: 0.833,
     false_allows: 0,
-    latency_median: '0.9s',
+    latency_median: CHECKPOINT_ADVERTISED_LATENCY,
     default: false,
     notes: 'Nano solo. High-volume, individually low-stakes checks.',
   },
@@ -39,9 +75,9 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano', 'serv-swift'],
     accuracy: 0.813,
     false_allows: 0,
-    latency_median: '1.2s',
+    latency_median: STANDARD_ADVERTISED_LATENCY,
     default: true,
-    notes: 'Nano→cascade. Default Sentinel tier. 0 False ALLOWs.',
+    notes: 'Nano→Swift cascade. Default Sentinel tier. 0 False ALLOWs.',
   },
   // Hidden: the legacy Nano->Pro cascade. Kept routable as a reserved premium /
   // enterprise option, but not advertised in /tiers. Same price as standard.
@@ -52,7 +88,7 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano', 'serv-pro'],
     accuracy: 0.813,
     false_allows: 0,
-    latency_median: '1.3s',
+    latency_median: PRO_ADVERTISED_LATENCY,
     default: false,
     hidden: true,
     notes: 'Nano→Pro cascade. Reserved premium/enterprise tier — not publicly listed.',
@@ -67,7 +103,7 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
     cascade: ['serv-nano', 'serv-swift'],
     accuracy: 0.813,
     false_allows: 0,
-    latency_median: '1.2s',
+    latency_median: STANDARD_ADVERTISED_LATENCY,
     default: false,
     hidden: true,
     notes: 'Nano→Swift cascade. Internal alias of standard — not publicly listed.',

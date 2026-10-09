@@ -51,10 +51,14 @@ const OUTPUT_EXAMPLE = {
   mode: 'trade_execution',
   tier: 'checkpoint',
   meta: {
-    duration_ms: 1200,
+    // Checkpoint is nano-only. Nano-path latency is not yet measured, so this
+    // example does not include a duration_ms.
     models_used: ['serv-nano'],
   },
 };
+
+/** Median of the named standard ALLOW sample (prod live suite 8–9 Oct 2026, n=28). */
+const STANDARD_ALLOW_EXAMPLE_DURATION_MS = 10600;
 
 const OUTPUT_PROPERTIES = {
   id: { type: 'string' },
@@ -109,6 +113,22 @@ export function buildBazaarExtensions(opts?: { tierHint?: string; guidance?: str
     mode: 'trade_execution',
     tier: (opts?.tierHint === 'standard' ? 'standard' : 'checkpoint') as 'checkpoint' | 'standard',
   };
+  const outputExample =
+    exampleBody.tier === 'standard'
+      ? {
+          ...OUTPUT_EXAMPLE,
+          tier: 'standard' as const,
+          mode: exampleBody.mode,
+          meta: {
+            duration_ms: STANDARD_ALLOW_EXAMPLE_DURATION_MS,
+            models_used: ['serv-nano', 'serv-swift'],
+          },
+        }
+      : {
+          ...OUTPUT_EXAMPLE,
+          tier: 'checkpoint' as const,
+          mode: exampleBody.mode,
+        };
 
   return {
     bazaar: {
@@ -121,11 +141,7 @@ export function buildBazaarExtensions(opts?: { tierHint?: string; guidance?: str
         },
         output: {
           type: 'json',
-          example: {
-            ...OUTPUT_EXAMPLE,
-            mode: exampleBody.mode,
-            tier: exampleBody.tier,
-          },
+          example: outputExample,
         },
       },
       schema: {

@@ -14,7 +14,7 @@ Route → Platform Adapter (auth) → Engine (verify) → Payment Adapter (bill)
 
 | Adapter | Status | Use Case |
 |---------|--------|----------|
-| `x402.ts` | Skeleton | Batch escrow settlement for agentic customers ($0.003-0.005/call) |
+| `x402.ts` | Skeleton | Batch escrow settlement for agentic customers ($0.005–$0.008/call) |
 | `stripe.ts` | Skeleton | Invoice-based billing for enterprise customers |
 
 ## Implementation Priority

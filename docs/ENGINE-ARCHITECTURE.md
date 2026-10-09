@@ -9,7 +9,7 @@
 ```
 src/
 ├── engine/                    ← Pure verification logic, no auth, no transport
-│   ├── cascade.ts             ← Nano→Pro cascade (standard), Nano-solo (checkpoint)
+│   ├── cascade.ts             ← Nano→Swift cascade (standard), Nano-solo (checkpoint)
 │   ├── modes/
 │   │   ├── handoff.ts
 │   │   ├── plan_revision.ts

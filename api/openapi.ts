@@ -332,7 +332,12 @@ const spec = {
                     meta: {
                       type: 'object',
                       properties: {
-                        duration_ms: { type: 'integer', example: 1200 },
+                        duration_ms: {
+                          type: 'integer',
+                          description:
+                            'Observed verify duration in milliseconds. 10600 is the median of one standard-tier ALLOW sample (prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s), not a checkpoint measurement and not a guarantee. Checkpoint is nano-only; its nano-path latency is not yet measured. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded).',
+                          example: 10600,
+                        },
                         models_used: {
                           type: 'array',
                           items: { type: 'string' },
@@ -472,7 +477,15 @@ const spec = {
                           cascade: { type: 'array', items: { type: 'string' } },
                           accuracy: { type: 'number' },
                           false_allows: { type: 'integer' },
-                          latency_median: { type: 'string' },
+                          latency_median: {
+                            type: 'string',
+                            description:
+                              'Advertised end-to-end latency, per tier. Checkpoint: Nano-only, no cascade. Nano-path latency not yet measured. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK. Standard: Nano→Swift cascade. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). Standard ALLOWs: observed in prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s. 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK.',
+                            examples: [
+                              'Nano-only, no cascade. Nano-path latency not yet measured. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK',
+                              'Nano→Swift cascade. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). Standard ALLOWs: observed in prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s. 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK',
+                            ],
+                          },
                           default: { type: 'boolean' },
                           notes: { type: 'string' },
                         },

@@ -21,7 +21,7 @@
 
 | Layer | Role | Cost / latency | Wrong use |
 |---|---|---|---|
-| **Sentinel** | Fast pre-settlement checkpoint in the agent loop | cheap, ~1–20s | Deep multi-conjunct intent audit as sole final word |
+| **Sentinel** | Fast pre-settlement checkpoint in the agent loop | cheap. Checkpoint: Nano-only, no cascade. Nano-path latency not yet measured. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK. Standard: Nano→Swift cascade. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). Standard ALLOWs: observed in prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s. 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | Deep multi-conjunct intent audit as sole final word |
 | **RV** | Deep multi-model adversarial check of one decision | expensive, ~5–45s+ | Every trade / every loop tick / global prompt hardening |
 | **Deterministic edge** | Amount/payee/router/freshness binding | free–cheap | Substituting for justification |
 

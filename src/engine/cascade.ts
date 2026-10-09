@@ -6,7 +6,7 @@
  *
  * Sentinel tiers:
  * - checkpoint: Nano solo (1 model call)
- * - standard: Nano→Pro cascade (1-2 model calls)
+ * - standard: Nano→Swift cascade (1-2 model calls)
  *
  * Reliability Option 3: optional AbortSignal + engine budget race on each
  * provider call. Late results after abort never decide the outcome.
@@ -54,7 +54,7 @@ export interface CascadeOutput {
  * Run verification through the appropriate cascade for the given tier.
  *
  * - checkpoint: Nano solo (single evaluateItem call)
- * - standard: Nano→Pro cascade (runCascade with early-exit)
+ * - standard: Nano→Swift cascade (runCascade with early-exit)
  */
 export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOutput> {
   const tierConfig = TIER_CONFIGS[input.tier];
@@ -119,7 +119,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
       };
     }
 
-    // Standard: Nano→Pro cascade
+    // Standard: Nano→Swift cascade (serv-nano → serv-swift)
     const cascadeConfig: CascadeConfig = {
       primaryModel: stages[0],
       secondaryModel: stages[1],
