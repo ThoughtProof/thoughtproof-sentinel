@@ -1,0 +1,225 @@
+# Test-only pot-cli pre-publish check. Do not merge.
+#
+# Runs the existing action-authorization suite client against a Sentinel
+# process bound to 127.0.0.1, twice: main's vendored 0.8.10-tp.2 tarball
+# and vendor/pot-cli-0.8.11.tgz. Never calls production or a Preview URL.
+#
+# The scheduled Action-authorization suite workflow is unchanged and still
+# targets production. This file does not add vendor/ to that path filter.
+
+name: pot-cli localhost suite (do not merge)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'vendor/**'
+      - '.github/workflows/pot-cli-localhost-suite.yml'
+      - 'scripts/local-sentinel-server.mjs'
+      - 'scripts/register-ts.mjs'
+      - 'scripts/ts-extension-resolve.mjs'
+      - 'scripts/action-authorization-suite.mjs'
+      - 'scenarios/action-authorization-suite.json'
+
+concurrency:
+  group: pot-cli-localhost-suite-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  secrets:
+    name: Require model and suite secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      # GitHub forbids secrets.* in if: expressions. Map to env, then gate.
+      # An unset or unexposed secret arrives as an empty string. Do not print values.
+      - name: Fail if secrets are missing or not exposed
+        env:
+          SERV_API_KEY: ${{ secrets.SERV_API_KEY }}
+          SENTINEL_NIGHTLY_API_KEY: ${{ secrets.SENTINEL_NIGHTLY_API_KEY }}
+          SENTINEL_API_KEY: ${{ secrets.SENTINEL_API_KEY }}
+        run: |
+          set -euo pipefail
+          missing=()
+          if [ -z "${SERV_API_KEY:-}" ]; then
+            missing+=("SERV_API_KEY")
+          fi
+          if [ -z "${SENTINEL_NIGHTLY_API_KEY:-}" ] && [ -z "${SENTINEL_API_KEY:-}" ]; then
+            missing+=("SENTINEL_NIGHTLY_API_KEY or SENTINEL_API_KEY")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Secrets missing or not exposed to this workflow: ${missing[*]}. pull_request jobs from a fork do not receive repository secrets. Refusing to start Sentinel or the suite."
+            exit 1
+          fi
+          if [ -n "${SENTINEL_NIGHTLY_API_KEY:-}" ]; then
+            echo "Secrets present: SERV_API_KEY and SENTINEL_NIGHTLY_API_KEY (values not printed)."
+          else
+            echo "Secrets present: SERV_API_KEY and SENTINEL_API_KEY fallback (values not printed). SENTINEL_NIGHTLY_API_KEY is empty."
+          fi
+
+  suite:
+    name: localhost ${{ matrix.side }}
+    needs: secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - side: tp2
+            tarball: vendor/pot-cli-0.8.10-tp.2.tgz
+            expect_pot_cli: 0.8.10-tp.2
+          - side: v0811
+            tarball: vendor/pot-cli-0.8.11.tgz
+            expect_pot_cli: 0.8.11
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies and the selected pot-cli tarball
+        env:
+          TARBALL: ${{ matrix.tarball }}
+          EXPECT_POT_CLI: ${{ matrix.expect_pot_cli }}
+        run: |
+          set -euo pipefail
+          test -f "$TARBALL"
+          npm ci
+          npm install --no-save "pot-cli@file:${TARBALL}"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const version = JSON.parse(readFileSync("node_modules/pot-cli/package.json", "utf8")).version;
+            if (version !== process.env.EXPECT_POT_CLI) {
+              console.error(`installed pot-cli ${version}, expected ${process.env.EXPECT_POT_CLI}`);
+              process.exit(1);
+            }
+            console.log(`installed pot-cli ${version}`);
+          '
+
+      - name: Serve localhost and run the suite
+        env:
+          SIDE: ${{ matrix.side }}
+          EXPECT_POT_CLI: ${{ matrix.expect_pot_cli }}
+          SERV_API_KEY: ${{ secrets.SERV_API_KEY }}
+          SENTINEL_NIGHTLY_API_KEY: ${{ secrets.SENTINEL_NIGHTLY_API_KEY }}
+          SENTINEL_API_KEY: ${{ secrets.SENTINEL_API_KEY }}
+          SENTINEL_TIER: standard
+          LOCAL_SENTINEL_PORT: '3011'
+        run: |
+          set -euo pipefail
+          PORT="$LOCAL_SENTINEL_PORT"
+          BASE="http://127.0.0.1:${PORT}"
+          OUT="localhost-suite-${SIDE}"
+          mkdir -p "$OUT/responses"
+
+          assert_localhost() {
+            python3 - "$1" <<'PY'
+          import sys
+          from urllib.parse import urlparse
+          url = sys.argv[1]
+          parsed = urlparse(url)
+          host = (parsed.hostname or "").lower()
+          if parsed.scheme != "http" or host not in ("127.0.0.1", "localhost"):
+              print(f"::error::Refusing base URL that is not http localhost (scheme={parsed.scheme}, host={host or 'missing'})")
+              sys.exit(1)
+          if parsed.port is None:
+              print("::error::Refusing localhost URL without an explicit port")
+              sys.exit(1)
+          lowered = url.lower()
+          if "thoughtproof.ai" in lowered or "vercel.app" in lowered:
+              print("::error::Refusing production or preview host")
+              sys.exit(1)
+          print(f"localhost-ok port={parsed.port}")
+          PY
+          }
+
+          assert_localhost "$BASE"
+          export SENTINEL_BASE_URL="$BASE"
+          export SENTINEL_URL="$BASE"
+          # The suite client falls back to production when both are unset.
+          if [ -z "${SENTINEL_BASE_URL}" ] || [ "$SENTINEL_BASE_URL" != "$BASE" ]; then
+            echo "::error::SENTINEL_BASE_URL escaped the localhost pin"
+            exit 1
+          fi
+
+          export LOCAL_SENTINEL_LOG_DIR="$PWD/$OUT"
+          node --experimental-strip-types --disable-warning=ExperimentalWarning \
+            --import ./scripts/register-ts.mjs scripts/local-sentinel-server.mjs \
+            > "$OUT/server.log" 2>&1 &
+          echo $! > "$OUT/server.pid"
+
+          cleanup() {
+            if [ -f "$OUT/server.pid" ]; then
+              kill "$(cat "$OUT/server.pid")" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          health_ok=0
+          for _ in $(seq 1 40); do
+            if curl -fsS --max-time 2 "$BASE/sentinel/health" -o "$OUT/health.json"; then
+              health_ok=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$health_ok" != 1 ]; then
+            echo "::error::localhost /sentinel/health did not respond"
+            echo "--- server.log ---"
+            cat "$OUT/server.log" || true
+            exit 1
+          fi
+          echo "HEALTH=$(cat "$OUT/health.json")"
+          python3 - "$OUT/health.json" <<'PY'
+          import json, os, sys
+          body = json.load(open(sys.argv[1], encoding="utf-8"))
+          got = body.get("pot_cli")
+          expect = os.environ["EXPECT_POT_CLI"]
+          print(f"health pot_cli={got} ready={body.get('ready')} serv_key={body.get('serv_key')} rate_limit={body.get('rate_limit')}")
+          if got != expect:
+              print(f"::error::health pot_cli={got!r} expected {expect!r}")
+              sys.exit(1)
+          if body.get("serv_key") != "present":
+              print("::error::health serv_key is not present; SERV_API_KEY did not reach the process")
+              sys.exit(1)
+          PY
+
+          echo "SUITE_TARGET=${SENTINEL_BASE_URL}"
+          started=$(date +%s)
+          set +e
+          node scripts/action-authorization-suite.mjs > "$OUT/suite.log" 2>&1
+          code=$?
+          set -e
+          ended=$(date +%s)
+          echo "SUITE_EXIT=${code}" | tee "$OUT/suite.exit"
+          echo "SUITE_ELAPSED_S=$((ended - started))" | tee "$OUT/suite.elapsed"
+          cat "$OUT/suite.log"
+          if ! grep -E '^SUITE_TARGET=http://(127\.0\.0\.1|localhost):[0-9]+$' "$OUT/suite.log" >/dev/null; then
+            echo "::error::suite log did not record a localhost SUITE_TARGET"
+            exit 1
+          fi
+          if grep -E '^SUITE_TARGET=' "$OUT/suite.log" | grep -v -E '^SUITE_TARGET=http://(127\.0\.0\.1|localhost):[0-9]+$' >/dev/null; then
+            echo "::error::suite log contains a non-localhost SUITE_TARGET"
+            exit 1
+          fi
+          if grep -E 'sentinel\.thoughtproof\.ai|vercel\.app' "$OUT/suite.log" >/dev/null; then
+            echo "::error::suite log mentions a production or preview host"
+            exit 1
+          fi
+          exit "$code"
+
+      - name: Upload suite logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: localhost-suite-${{ matrix.side }}
+          path: localhost-suite-${{ matrix.side }}/
+          if-no-files-found: warn
+          retention-days: 14
