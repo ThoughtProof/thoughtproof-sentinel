@@ -19,10 +19,10 @@ Agentic verification API — lightweight verification for autonomous agent workf
 
 | Tier | Price | Cascade | Accuracy | FA | Latency |
 |------|-------|---------|----------|-----|---------|
-| checkpoint | $0.005 | Nano solo | 83.3% | 0 | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK |
-| standard | $0.008 | Nano→Pro | 81.3% | 0 | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK |
+| checkpoint | $0.005 | Nano solo | 83.3% | 0 | Nano-only, no cascade. Nano-path latency not yet measured. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK |
+| standard | $0.008 | Nano→Swift | 81.3% | 0 | Nano→Swift cascade. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). Standard ALLOWs: observed in prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s. 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK |
 
-Prices match `TIER_CONFIGS` (`checkpoint` $0.005, `standard` $0.008). Latency is `GET /sentinel/tiers` field `latency_median` (still a string). Deterministic BLOCKs are 2–4 s. Every standard-tier ALLOW is 8.2–14.6 s (median 10.6 s). The 45 s figure is the engine budget (`ENGINE_BUDGET_MS`); the wire timeout verdict is `UNCERTAIN`, which product language calls REVIEW.
+Prices match `TIER_CONFIGS` (`checkpoint` $0.005, `standard` $0.008). Standard's cascade is `serv-nano` then `serv-swift`. Latency is `GET /sentinel/tiers` field `latency_median` (still a string). Checkpoint is nano-only; its model-path latency is not yet measured. The 2–4 s deterministic BLOCK figure is an observed prod range with no recorded sample size. The standard ALLOW numbers are one observation (prod live suite 8–9 Oct 2026, n=28), not a guarantee. The 45 s figure is the engine budget (`ENGINE_BUDGET_MS`); the wire timeout verdict is `UNCERTAIN`, which product language calls REVIEW.
 
 ## Modes
 

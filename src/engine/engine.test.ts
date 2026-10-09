@@ -94,7 +94,7 @@ describe('Sentinel Engine', () => {
       expect(mockEvaluateItem).toHaveBeenCalledOnce();
     });
 
-    it('should return ALLOW for standard tier (Nano→Pro cascade)', async () => {
+    it('should return ALLOW for standard tier (Nano→Swift cascade)', async () => {
       const primaryResult = makeItemResult('ALLOW', 0.88);
       const secondaryResult = makeItemResult('ALLOW', 0.92);
 
@@ -323,7 +323,7 @@ describe('Sentinel Engine', () => {
       expect(mockRunCascade).not.toHaveBeenCalled();
     });
 
-    it('standard uses runCascade (Nano→Pro)', async () => {
+    it('standard uses runCascade (Nano→Swift)', async () => {
       mockRunCascade.mockResolvedValueOnce({
         verdict: 'ALLOW',
         reason: 'agreement_allow',

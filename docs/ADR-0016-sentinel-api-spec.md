@@ -52,14 +52,14 @@ POST /sentinel/verify
 
 | Tier | Price | Cascade | Accuracy | FA | Latency | Default |
 |------|-------|---------|----------|-----|---------|---------|
-| `checkpoint` | $0.005 | Nano solo | ~83.3% | 0* | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | No |
-| `standard` | $0.008 | Nano→Pro | 81.3% | 0 | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | Yes |
+| `checkpoint` | $0.005 | Nano solo | ~83.3% | 0* | Nano-only, no cascade. Nano-path latency not yet measured. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | No |
+| `standard` | $0.008 | Nano→Swift | 81.3% | 0 | Nano→Swift cascade. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). Standard ALLOWs: observed in prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s. 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | Yes |
 
 *\*0 FA with asterisk on checkpoint: empirically 0 on current 170-case benchmark, but Nano solo without cascade rescue has theoretical FA risk on adversarial inputs.*
 
-Prices match `TIER_CONFIGS` in `src/tiers.ts` (checkpoint $0.005, standard $0.008). Latency: deterministic BLOCK is 2–4 s; every standard-tier ALLOW is 8.2–14.6 s (median 10.6 s). The 45 s hard stop is `ENGINE_BUDGET_MS` (cascade wall; Vercel `maxDuration` is 60 s). On exhaustion the wire verdict is `UNCERTAIN` (product language REVIEW) unless a BLOCK is already known or the objective-mismatch gate fires. Never ALLOW.
+Prices match `TIER_CONFIGS` in `src/tiers.ts` (checkpoint $0.005, standard $0.008). Standard's cascade is `serv-nano` then `serv-swift`. Checkpoint is a single `serv-nano` call. The 2–4 s deterministic BLOCK figure is an observed prod range with no recorded sample size. Standard ALLOW numbers are one observation (prod live suite 8–9 Oct 2026, n=28), not a guarantee. Checkpoint nano-path latency is not yet measured. The 45 s hard stop is `ENGINE_BUDGET_MS` (Vercel `maxDuration` is 60 s). On exhaustion the wire verdict is `UNCERTAIN` (product language REVIEW) unless a BLOCK is already known or the objective-mismatch gate fires. Never ALLOW.
 
-**Reserved:** `thorough` tier slot (Nano→Ultra, ~82.7%) — defined only when market demands it. Use the same measured latency envelope.
+**Reserved:** `thorough` tier slot (Nano→Ultra, ~82.7%) — defined only when market demands it. Latency not yet measured.
 
 ### 4. Modes
 
@@ -108,7 +108,7 @@ Response (200):
   "tier": "standard",
   "meta": {
     "duration_ms": 10600,
-    "models_used": ["nano", "pro"],
+    "models_used": ["serv-nano", "serv-swift"],
     "verified_at": "2026-05-13T17:00:00Z"
   }
 }
@@ -119,11 +119,11 @@ Error (501 — engine not wired):
 {
   "error": "Sentinel engine not yet implemented",
   "code": "ENGINE_NOT_IMPLEMENTED",
-  "hint": "Tier 'standard' (nano→pro) is configured but the verification engine is not yet wired.",
+  "hint": "Tier 'standard' (nano→swift) is configured but the verification engine is not yet wired.",
   "accepted_request": {
     "mode": "handoff",
     "tier": "standard",
-    "cascade": ["nano", "pro"],
+    "cascade": ["serv-nano", "serv-swift"],
     "price_usd": 0.008
   }
 }

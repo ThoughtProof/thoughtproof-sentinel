@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildBazaarExtensions } from './middleware/bazaar-extension.js';
 import {
-  ADVERTISED_LATENCY_MEDIAN,
+  CHECKPOINT_ADVERTISED_LATENCY,
+  STANDARD_ADVERTISED_LATENCY,
+  PRO_ADVERTISED_LATENCY,
   listTiers,
   listAllTiers,
   getTierConfig,
@@ -65,17 +68,25 @@ describe('Sentinel tiers', () => {
     expect(getTierConfig('checkpoint').tier).toBe('checkpoint');
   });
 
-  it('advertises measured prod latency, not a ~1 s median', () => {
-    expect(ADVERTISED_LATENCY_MEDIAN).toBe(
-      '2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK',
+  it('advertises checkpoint and standard latency separately', () => {
+    expect(CHECKPOINT_ADVERTISED_LATENCY).toBe(
+      'Nano-only, no cascade. Nano-path latency not yet measured. Deterministic BLOCK: observed prod range 2–4 s (sample size not recorded). 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK',
     );
+    expect(STANDARD_ADVERTISED_LATENCY).toContain(
+      'observed in prod live suite 8–9 Oct 2026, n=28 standard ALLOWs, 8.2–14.6 s, median 10.6 s',
+    );
+    expect(getTierConfig('checkpoint').latency_median).toBe(CHECKPOINT_ADVERTISED_LATENCY);
+    expect(getTierConfig('standard').latency_median).toBe(STANDARD_ADVERTISED_LATENCY);
+    expect(getTierConfig('swift').latency_median).toBe(STANDARD_ADVERTISED_LATENCY);
+    expect(getTierConfig('pro').latency_median).toBe(PRO_ADVERTISED_LATENCY);
+    expect(CHECKPOINT_ADVERTISED_LATENCY).not.toContain('n=28');
+    expect(PRO_ADVERTISED_LATENCY).not.toContain('n=28');
     for (const tier of listAllTiers()) {
-      expect(tier.latency_median).toBe(ADVERTISED_LATENCY_MEDIAN);
-      expect(tier.latency_median).not.toMatch(/0\.9s|1\.2s|1\.3s|~1\s*s/);
+      expect(tier.latency_median).not.toMatch(/0\.9s|1\.2s|1\.3s|~1\s*s|~8–15 s/);
     }
   });
 
-  it('README, OpenAPI, and tier ADRs repeat the measured envelope', () => {
+  it('README, OpenAPI, and tier ADRs keep checkpoint and standard latency apart', () => {
     const files = [
       'README.md',
       'api/openapi.ts',
@@ -84,9 +95,31 @@ describe('Sentinel tiers', () => {
     ];
     for (const rel of files) {
       const text = readFileSync(join(process.cwd(), rel), 'utf8');
-      expect(text, rel).toContain(ADVERTISED_LATENCY_MEDIAN);
-      expect(text, rel).not.toMatch(/0\.9s|1\.2s|1\.3s|2\.3s|up to ~16 s/);
+      expect(text, rel).toContain(CHECKPOINT_ADVERTISED_LATENCY);
+      expect(text, rel).toContain(STANDARD_ADVERTISED_LATENCY);
+      expect(text, rel).not.toMatch(/0\.9s|1\.2s|1\.3s|2\.3s|up to ~16 s|~8–15 s/);
     }
+    for (const rel of ['README.md', 'docs/ADR-0016-sentinel-api-spec.md']) {
+      const text = readFileSync(join(process.cwd(), rel), 'utf8');
+      expect(text, rel).toContain('Nano→Swift');
+      expect(text, rel).not.toContain('Nano→Pro');
+    }
+  });
+
+  it('bazaar example duration matches the tier it names', () => {
+    type Example = {
+      tier: string;
+      meta: { duration_ms?: number; models_used: string[] };
+    };
+    const checkpoint = buildBazaarExtensions().bazaar.info.output.example as Example;
+    const standard = buildBazaarExtensions({ tierHint: 'standard' }).bazaar.info.output
+      .example as Example;
+    expect(checkpoint.tier).toBe('checkpoint');
+    expect(checkpoint.meta.duration_ms).toBeUndefined();
+    expect(checkpoint.meta.models_used).toEqual(['serv-nano']);
+    expect(standard.tier).toBe('standard');
+    expect(standard.meta.duration_ms).toBe(10600);
+    expect(standard.meta.models_used).toEqual(['serv-nano', 'serv-swift']);
   });
 
   it('README and tier ADRs use the code prices ($0.005 / $0.008)', () => {
