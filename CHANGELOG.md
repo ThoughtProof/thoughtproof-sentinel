@@ -2,10 +2,14 @@
 
 ### Changed
 - **Advertised `/sentinel/tiers` latency:** `latency_median` (still a string)
-  and the matching README, OpenAPI, and ADR copy now say typically 2–4 s,
-  up to ~16 s on cascade escalation. Replaces the old ~1 s medians
-  (0.9 s / 1.2 s / 1.3 s). Timeouts, cascade, and verdict behavior are
-  unchanged.
+  is `2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK`.
+  The 45 s figure is `ENGINE_BUDGET_MS`. Exhaustion returns wire
+  `UNCERTAIN` (product REVIEW) unless a BLOCK is already known or the
+  objective-mismatch gate fires. Never ALLOW. Timeouts, cascade, and
+  verdict behavior are unchanged.
+- **Documented tier prices:** README, ADR-0016, ADR-0017, and the payment
+  adapter README now match `TIER_CONFIGS` (checkpoint $0.005, standard
+  $0.008). Code prices were already those amounts.
 - **kfb-02 cascade HOLD is not a gate fail (founder GO 2026-09-22):**
   live probe after #83 returned UNCERTAIN (`primary_hold`), not
   `objective_mismatch_fail_closed`. `uncertain_ok` on kfb-02 only:

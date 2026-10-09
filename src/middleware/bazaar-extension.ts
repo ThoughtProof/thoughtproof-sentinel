@@ -51,8 +51,8 @@ const OUTPUT_EXAMPLE = {
   mode: 'trade_execution',
   tier: 'checkpoint',
   meta: {
-    // Illustrative duration inside the measured 2–4 s band (not a ~1 s median).
-    duration_ms: 3000,
+    // Illustrative standard-tier ALLOW (median 10.6 s). Deterministic BLOCK is 2–4 s.
+    duration_ms: 10600,
     models_used: ['serv-nano'],
   },
 };

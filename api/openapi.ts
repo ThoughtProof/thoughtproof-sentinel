@@ -335,8 +335,8 @@ const spec = {
                         duration_ms: {
                           type: 'integer',
                           description:
-                            'Observed verify duration in milliseconds. Typical responses are 2–4 s; cascade escalation can reach ~16 s.',
-                          example: 3000,
+                            'Observed verify duration in milliseconds. 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs; standard-tier ALLOW median 10.6 s). 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK.',
+                          example: 10600,
                         },
                         models_used: {
                           type: 'array',
@@ -480,8 +480,9 @@ const spec = {
                           latency_median: {
                             type: 'string',
                             description:
-                              'Advertised end-to-end latency. Typically 2–4 s; up to ~16 s when the cascade escalates (observed 8.5–15.6 s). Not a ~1 s median and not a timeout.',
-                            example: 'typically 2–4 s; up to ~16 s on escalation',
+                              'Advertised end-to-end latency. 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs). 45 s is ENGINE_BUDGET_MS: wire verdict UNCERTAIN (product REVIEW) unless a BLOCK is already known or the objective-mismatch gate fires. Never ALLOW.',
+                            example:
+                              '2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK',
                           },
                           default: { type: 'boolean' },
                           notes: { type: 'string' },

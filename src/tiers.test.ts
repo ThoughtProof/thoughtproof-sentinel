@@ -67,7 +67,7 @@ describe('Sentinel tiers', () => {
 
   it('advertises measured prod latency, not a ~1 s median', () => {
     expect(ADVERTISED_LATENCY_MEDIAN).toBe(
-      'typically 2–4 s; up to ~16 s on escalation',
+      '2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK',
     );
     for (const tier of listAllTiers()) {
       expect(tier.latency_median).toBe(ADVERTISED_LATENCY_MEDIAN);
@@ -85,7 +85,22 @@ describe('Sentinel tiers', () => {
     for (const rel of files) {
       const text = readFileSync(join(process.cwd(), rel), 'utf8');
       expect(text, rel).toContain(ADVERTISED_LATENCY_MEDIAN);
-      expect(text, rel).not.toMatch(/0\.9s|1\.2s|1\.3s|2\.3s/);
+      expect(text, rel).not.toMatch(/0\.9s|1\.2s|1\.3s|2\.3s|up to ~16 s/);
+    }
+  });
+
+  it('README and tier ADRs use the code prices ($0.005 / $0.008)', () => {
+    const files = [
+      'README.md',
+      'docs/ADR-0016-sentinel-api-spec.md',
+      'docs/ADR-0017-payment-adapter-layer.md',
+      'src/adapters/payment/README.md',
+    ];
+    for (const rel of files) {
+      const text = readFileSync(join(process.cwd(), rel), 'utf8');
+      expect(text, rel).toContain('$0.005');
+      expect(text, rel).toContain('$0.008');
+      expect(text, rel).not.toContain('$0.003');
     }
   });
 });

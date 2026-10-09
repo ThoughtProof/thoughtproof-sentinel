@@ -8,9 +8,13 @@ export interface TierConfig {
   accuracy: number;
   false_allows: number;
   /**
-   * Advertised end-to-end latency (string). Measured production is typically
-   * 2–4 s, and up to ~16 s when the cascade escalates (observed 8.5–15.6 s).
-   * Not a timeout and not a per-model budget.
+   * Advertised end-to-end latency (string).
+   * Measured prod: deterministic BLOCK is 2–4 s; every standard-tier ALLOW
+   * is 8.2–14.6 s (median 10.6 s), so cascade work including all ALLOWs
+   * is ~8–15 s. The hard stop is ENGINE_BUDGET_MS (45s) inside the 60s
+   * Vercel maxDuration. On exhaustion the wire verdict is UNCERTAIN
+   * (product REVIEW) unless a BLOCK is already known or the
+   * objective-mismatch gate fires. Never ALLOW.
    */
   latency_median: string;
   default: boolean;
@@ -23,11 +27,13 @@ export interface TierConfig {
 
 /**
  * Copy returned by GET /sentinel/tiers (`latency_median` stays a string).
- * Same envelope on every tier: prod is typically 2–4 s, and up to ~16 s
- * when the cascade escalates. Do not advertise a ~1 s median.
+ * 45s is `ENGINE_BUDGET_MS` in src/engine/budget.ts. Exhaustion returns
+ * wire UNCERTAIN (product language REVIEW) via publicVerdictOnBudgetExhaust,
+ * except an already-known BLOCK (and an objective-mismatch gate) which stay
+ * BLOCK. Never ALLOW.
  */
 export const ADVERTISED_LATENCY_MEDIAN =
-  'typically 2–4 s; up to ~16 s on escalation';
+  '2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK';
 
 export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
   checkpoint: {

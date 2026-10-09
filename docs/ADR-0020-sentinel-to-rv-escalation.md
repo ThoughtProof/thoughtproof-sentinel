@@ -21,7 +21,7 @@
 
 | Layer | Role | Cost / latency | Wrong use |
 |---|---|---|---|
-| **Sentinel** | Fast pre-settlement checkpoint in the agent loop | cheap, typically 2–4 s; up to ~16 s on escalation | Deep multi-conjunct intent audit as sole final word |
+| **Sentinel** | Fast pre-settlement checkpoint in the agent loop | cheap, 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | Deep multi-conjunct intent audit as sole final word |
 | **RV** | Deep multi-model adversarial check of one decision | expensive, ~5–45s+ | Every trade / every loop tick / global prompt hardening |
 | **Deterministic edge** | Amount/payee/router/freshness binding | free–cheap | Substituting for justification |
 

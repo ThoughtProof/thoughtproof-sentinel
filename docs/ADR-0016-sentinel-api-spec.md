@@ -52,14 +52,14 @@ POST /sentinel/verify
 
 | Tier | Price | Cascade | Accuracy | FA | Latency | Default |
 |------|-------|---------|----------|-----|---------|---------|
-| `checkpoint` | $0.003 | Nano solo | ~83.3% | 0* | typically 2–4 s; up to ~16 s on escalation | No |
-| `standard` | $0.005 | Nano→Pro | 81.3% | 0 | typically 2–4 s; up to ~16 s on escalation | Yes |
+| `checkpoint` | $0.005 | Nano solo | ~83.3% | 0* | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | No |
+| `standard` | $0.008 | Nano→Pro | 81.3% | 0 | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK | Yes |
 
 *\*0 FA with asterisk on checkpoint: empirically 0 on current 170-case benchmark, but Nano solo without cascade rescue has theoretical FA risk on adversarial inputs.*
 
-Latency is the measured production envelope (typically 2–4 s; cascade escalation observed 8.5–15.6 s, advertised as up to ~16 s). It is not a ~1 s median and not a timeout.
+Prices match `TIER_CONFIGS` in `src/tiers.ts` (checkpoint $0.005, standard $0.008). Latency: deterministic BLOCK is 2–4 s; every standard-tier ALLOW is 8.2–14.6 s (median 10.6 s). The 45 s hard stop is `ENGINE_BUDGET_MS` (cascade wall; Vercel `maxDuration` is 60 s). On exhaustion the wire verdict is `UNCERTAIN` (product language REVIEW) unless a BLOCK is already known or the objective-mismatch gate fires. Never ALLOW.
 
-**Reserved:** `thorough` tier slot (Nano→Ultra, ~82.7%) — defined only when market demands it. Do not advertise a separate ~2.3 s median; use the same measured envelope.
+**Reserved:** `thorough` tier slot (Nano→Ultra, ~82.7%) — defined only when market demands it. Use the same measured latency envelope.
 
 ### 4. Modes
 
@@ -107,7 +107,7 @@ Response (200):
   "mode": "handoff",
   "tier": "standard",
   "meta": {
-    "duration_ms": 3000,
+    "duration_ms": 10600,
     "models_used": ["nano", "pro"],
     "verified_at": "2026-05-13T17:00:00Z"
   }
@@ -124,7 +124,7 @@ Error (501 — engine not wired):
     "mode": "handoff",
     "tier": "standard",
     "cascade": ["nano", "pro"],
-    "price_usd": 0.005
+    "price_usd": 0.008
   }
 }
 ```

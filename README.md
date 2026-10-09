@@ -19,10 +19,10 @@ Agentic verification API — lightweight verification for autonomous agent workf
 
 | Tier | Price | Cascade | Accuracy | FA | Latency |
 |------|-------|---------|----------|-----|---------|
-| checkpoint | $0.003 | Nano solo | 83.3% | 0 | typically 2–4 s; up to ~16 s on escalation |
-| standard | $0.005 | Nano→Pro | 81.3% | 0 | typically 2–4 s; up to ~16 s on escalation |
+| checkpoint | $0.005 | Nano solo | 83.3% | 0 | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK |
+| standard | $0.008 | Nano→Pro | 81.3% | 0 | 2–4 s for deterministic BLOCK; ~8–15 s with cascade (incl. all ALLOWs); 45 s engine budget → UNCERTAIN (REVIEW); known BLOCK or objective mismatch stays BLOCK |
 
-Latency is the measured production envelope (`GET /sentinel/tiers` field `latency_median`, still a string). Cascade escalation has been observed at 8.5–15.6 s; advertise the ceiling as ~16 s.
+Prices match `TIER_CONFIGS` (`checkpoint` $0.005, `standard` $0.008). Latency is `GET /sentinel/tiers` field `latency_median` (still a string). Deterministic BLOCKs are 2–4 s. Every standard-tier ALLOW is 8.2–14.6 s (median 10.6 s). The 45 s figure is the engine budget (`ENGINE_BUDGET_MS`); the wire timeout verdict is `UNCERTAIN`, which product language calls REVIEW.
 
 ## Modes
 
