@@ -1,11 +1,12 @@
 ## Unreleased
 
 ### Changed
-- Pin `pot-cli` to npm `0.8.11` instead of the vendored `0.8.10-tp.2`
-  tarball. The published release contains the tp.2 quote recovery fixes.
-  Identity checks now pin the registry URL and integrity; historical
+- Pin `pot-cli` to npm `0.8.12` instead of the vendored `0.8.10-tp.2`
+  tarball. The published release contains the tp.2 quote recovery fixes
+  and pins `@pot-sdk2/bridge@1.2.0` on Node.js `>=22`.
+  Identity checks pin the registry URL and integrity; historical
   tarballs remain available for rollback. `/sentinel/health` reports
-  `pot_cli: 0.8.11`. Package and live-test evidence is in `vendor/PATCHES.md`.
+  `pot_cli: 0.8.12`. Package evidence is in `vendor/PATCHES.md`.
 - **kfb-02 cascade HOLD is not a gate fail (founder GO 2026-09-22):**
   live probe after #83 returned UNCERTAIN (`primary_hold`), not
   `objective_mismatch_fail_closed`. `uncertain_ok` on kfb-02 only:

@@ -1,12 +1,38 @@
 # pot-cli release and historical vendored patches
 
-## npm 0.8.11 (2026-10-09)
+## npm 0.8.12 (2026-10-10)
 
-Sentinel now pins the published `pot-cli@0.8.11` exactly. Its TypeScript
-contains the tp.2 quote and reasoning fixes from
+Sentinel pins the published `pot-cli@0.8.12` exactly. It keeps the tp.2
+quote and reasoning fixes from
 [pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52).
+[pot-cli v0.8.12](https://github.com/ThoughtProof/pot-cli/releases/tag/v0.8.12)
+pins `@pot-sdk2/bridge` to the tested `1.2.0`, reads `--version` from the
+installed package, and requires Node.js `>=22`. The `0.8.11` range selected
+`@pot-sdk2/bridge@1.3.0`, which removed `checkAuthorVerifierSeparation` and
+failed CLI module load on a fresh install.
 `GET /sentinel/health` reports the installed package version as `pot_cli`.
 The older tarballs below are retained as historical rollback artifacts.
+
+- Registry tarball: `https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.12.tgz`
+- Registry sha256: `aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1`
+- npm shasum (sha1): `177d70d541adc5956d2c1fd35a66d1cf9ccefbb5`
+- Lockfile integrity:
+  `sha512-8hM8jsVtZXNW+rFdqQw0vD9UbFvSG6HINB8s5JtY7ZvH3pqH7wjgNDz3W2Y4g3rmsexGlv14J4gcojzOjIvMfA==`
+- Tag `v0.8.12`: `d43840434be73e850c2266ce10f523b56de22567`
+- Engines: Node.js `>=22`
+- Published file count: 599
+
+`src/pot-cli-quote-patch.test.ts` pins the exact dependency, registry URL,
+lockfile integrity, installed version, source markers, and behavior.
+Update that pin and this document together when upgrading.
+
+## npm 0.8.11 (2026-10-09, superseded)
+
+Published `pot-cli@0.8.11` contains the tp.2 quote and reasoning fixes from
+[pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52).
+`0.8.12` is the release Sentinel installs. The `0.8.11` CLI bridge range
+selects `@pot-sdk2/bridge@1.3.0`, which lacks an export required by the CLI
+entry point.
 
 - Registry tarball: `https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.11.tgz`
 - Registry sha256: `2c58ea07b9edc864609c56bd93578cbb6ec793c4bd79a63a60dc0228b3e890d5`
@@ -24,15 +50,6 @@ identical (sha256
 `f0373a4f1dbc7897c9b188ad9ee053e803c04f1c1ecfd9dad6275b19c679f9da`).
 All 599 published files also match a fresh build of the release commit.
 The compression implementation responsible for the difference is unconfirmed.
-
-`src/pot-cli-quote-patch.test.ts` pins the exact dependency, registry URL,
-lockfile integrity, installed version, source markers, and behavior.
-Update that pin and this document together when upgrading.
-
-The `0.8.11` CLI has a separate fresh-install issue: its bridge range
-selects `@pot-sdk2/bridge@1.3.0`, which lacks an export required by the CLI
-entry point. Sentinel imports `pot-cli/plv` directly; its unit tests and
-the localhost suite pass on this path. The CLI fix needs a later release.
 
 ## 0.8.10-tp.2 (2026-09-11, superseded)
 
