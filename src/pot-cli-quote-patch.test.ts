@@ -1,11 +1,10 @@
 /**
- * Lock the vendored pot-cli 0.8.10-tp.2 ThoughtProof patch.
+ * Lock the published pot-cli release containing the Sentinel quote fixes.
  *
  * Must fail if someone swaps back an unpatched upstream 0.8.10 tarball
  * that happens to export the same function names.
  */
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -17,10 +16,10 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const VENDORED_POT_CLI_VERSION = '0.8.10-tp.2';
-export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.2.tgz';
-export const VENDORED_POT_CLI_SHA512 =
-  '97214d724a7babef496f6360cb5b3e89b95c80b46ae55464a65276d209b3097108f5ad61f5acc9e6f2f2f4038e3d0d44822ef3a5aa4fb1d341f5e81863082804';
+export const POT_CLI_VERSION = '0.8.12';
+export const POT_CLI_TARBALL = 'https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.12.tgz';
+export const POT_CLI_INTEGRITY =
+  'sha512-8hM8jsVtZXNW+rFdqQw0vD9UbFvSG6HINB8s5JtY7ZvH3pqH7wjgNDz3W2Y4g3rmsexGlv14J4gcojzOjIvMfA==';
 
 const COERCE_CASES: unknown[] = [
   undefined,
@@ -34,25 +33,31 @@ const COERCE_CASES: unknown[] = [
   'Tell CoS host runs git main',
 ];
 
-describe('vendored pot-cli identity (not upstream 0.8.10)', () => {
-  it('package.json version is the ThoughtProof prerelease, not 0.8.10', () => {
+describe('published pot-cli identity with the Sentinel fixes', () => {
+  it('installed package and health version match the pinned npm release', () => {
     const pkg = JSON.parse(
       readFileSync(join(process.cwd(), 'node_modules', 'pot-cli', 'package.json'), 'utf8'),
     ) as { name: string; version: string };
     expect(pkg.name).toBe('pot-cli');
-    expect(pkg.version).toBe(VENDORED_POT_CLI_VERSION);
+    expect(pkg.version).toBe(POT_CLI_VERSION);
     expect(pkg.version).not.toBe('0.8.10');
-    expect(getPotCliVersion()).toBe(VENDORED_POT_CLI_VERSION);
+    expect(getPotCliVersion()).toBe(POT_CLI_VERSION);
   });
 
-  it('vendor tarball sha512 matches the pinned ThoughtProof patch', () => {
-    const tgz = join(process.cwd(), VENDORED_POT_CLI_TGZ);
-    expect(existsSync(tgz)).toBe(true);
-    const hash = createHash('sha512').update(readFileSync(tgz)).digest('hex');
-    expect(hash).toBe(VENDORED_POT_CLI_SHA512);
+  it('manifest and lockfile pin the audited npm tarball and integrity', () => {
+    const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
+    const lock = JSON.parse(readFileSync(join(process.cwd(), 'package-lock.json'), 'utf8'));
+    expect(manifest.dependencies['pot-cli']).toBe(POT_CLI_VERSION);
+    expect(lock.packages[''].dependencies['pot-cli']).toBe(POT_CLI_VERSION);
+    expect(lock.packages['node_modules/pot-cli']).toMatchObject({
+      version: POT_CLI_VERSION,
+      resolved: POT_CLI_TARBALL,
+      integrity: POT_CLI_INTEGRITY,
+    });
     const patches = readFileSync(join(process.cwd(), 'vendor', 'PATCHES.md'), 'utf8');
-    expect(patches).toContain(VENDORED_POT_CLI_VERSION);
-    expect(patches).toContain(VENDORED_POT_CLI_SHA512);
+    expect(patches).toContain(POT_CLI_VERSION);
+    expect(patches).toContain(POT_CLI_TARBALL);
+    expect(patches).toContain(POT_CLI_INTEGRITY);
   });
 
   it('installed evaluator source has the Sentinel patch markers (not stub exports)', () => {
@@ -72,14 +77,14 @@ describe('vendored pot-cli identity (not upstream 0.8.10)', () => {
   });
 });
 
-describe('vendored pot-cli quote patch behavior', () => {
+describe('published pot-cli quote patch behavior', () => {
   it('coerceQuote treats omitted / undefined string as null', () => {
     expect(potCoerceQuote(undefined)).toBeNull();
     expect(potCoerceQuote(null)).toBeNull();
     expect(potCoerceQuote('undefined')).toBeNull();
   });
 
-  it('Sentinel coerceQuote matches vendored pot-cli on shared cases (drift lock)', () => {
+  it('Sentinel coerceQuote matches published pot-cli on shared cases (drift lock)', () => {
     for (const c of COERCE_CASES) {
       expect(sentinelCoerceQuote(c)).toEqual(potCoerceQuote(c));
     }
