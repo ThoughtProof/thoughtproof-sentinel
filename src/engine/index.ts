@@ -334,6 +334,10 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
             mandate_kind: actionAuthKind.mandate_kind,
             action_kind_source: actionAuthKind.action_kind_source,
             mandate_kind_source: actionAuthKind.mandate_kind_source,
+            // Issue #85: Include prose kinds and caller diagnostics in promotion metadata
+            prose_action_kind: actionAuthKind.prose_action_kind,
+            prose_mandate_kind: actionAuthKind.prose_mandate_kind,
+            caller_kinds_diagnostic: actionAuthKind.caller_kinds_diagnostic,
             ...(unknownKinds ?? {}),
             unclassified_abstention: unclassifiedAbstention,
           }

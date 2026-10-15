@@ -15,6 +15,15 @@ Agentic verification API — lightweight verification for autonomous agent workf
 | `/docs` | GET | Swagger UI over `/openapi.json` |
 | `/redoc` | GET | ReDoc over `/openapi.json` |
 
+## Diagnostics (unsigned)
+
+Kind diagnostics in `meta.promotion` (declared, prose-derived and effective kinds,
+plus the rejecting-rule metadata) are **not covered by the M1 signature or canonical
+hash**. Verifying `signed_export` authenticates its canonical payload, not these
+mutable diagnostic fields. Do not use them as tamper-proof evidence or signed
+authorization. Legacy receipts without the new fields continue to verify unchanged.
+See the [diagnostic trust boundary and compatibility tests](docs/issue-85-mcp-documentation-fix.md#diagnostics-unsigned).
+
 ## Tiers
 
 | Tier | Price | Cascade | Accuracy | FA |

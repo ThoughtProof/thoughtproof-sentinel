@@ -166,6 +166,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const unknownAction = processedResponse.meta.promotion?.unknown_action;
     const unknownMandate = processedResponse.meta.promotion?.unknown_mandate;
     const unclassifiedAbstention = processedResponse.meta.promotion?.unclassified_abstention;
+    // Issue #85: Add prose kinds and caller diagnostics to logging
+    const proseActionKind = processedResponse.meta.promotion?.prose_action_kind;
+    const proseMandateKind = processedResponse.meta.promotion?.prose_mandate_kind;
+    const callerKindsDiagnostic = processedResponse.meta.promotion?.caller_kinds_diagnostic;
     console.log(
       `[sentinel/verify:${requestId}] verdict=${processedResponse.verdict} confidence=${processedResponse.confidence} tier=${processedResponse.tier} mode=${processedResponse.mode} duration=${processedResponse.meta.duration_ms}ms platform=${platform} agent=${agentId ?? 'none'}` +
         `${processedResponse.meta.evidence_verification ? ` evidence=${processedResponse.meta.evidence_verification.length}` : ''}` +
@@ -175,6 +179,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `${actionKind ? ` action_kind=${actionKind}` : ''}` +
         `${mandateKindSource ? ` mandate_kind_source=${mandateKindSource}` : ''}` +
         `${actionKindSource ? ` action_kind_source=${actionKindSource}` : ''}` +
+        `${proseActionKind ? ` prose_action_kind=${proseActionKind}` : ''}` +
+        `${proseMandateKind ? ` prose_mandate_kind=${proseMandateKind}` : ''}` +
+        `${callerKindsDiagnostic?.caller_action_kind ? ` caller_action_kind=${callerKindsDiagnostic.caller_action_kind}` : ''}` +
+        `${callerKindsDiagnostic?.caller_mandate_kind ? ` caller_mandate_kind=${callerKindsDiagnostic.caller_mandate_kind}` : ''}` +
+        `${callerKindsDiagnostic?.caller_kinds_do_not_widen !== undefined ? ` caller_kinds_do_not_widen=${callerKindsDiagnostic.caller_kinds_do_not_widen ? 1 : 0}` : ''}` +
+        `${callerKindsDiagnostic?.triggering_rule ? ` triggering_rule=${callerKindsDiagnostic.triggering_rule}` : ''}` +
         `${unknownAction !== undefined ? ` unknown_action=${unknownAction ? 1 : 0}` : ''}` +
         `${unknownMandate !== undefined ? ` unknown_mandate=${unknownMandate ? 1 : 0}` : ''}` +
         `${unclassifiedAbstention !== undefined ? ` unclassified_abstention=${unclassifiedAbstention ? 1 : 0}` : ''}`,
