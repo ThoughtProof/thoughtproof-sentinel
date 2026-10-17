@@ -39,6 +39,14 @@ a primary HOLD was justified or reduce false stops by itself.
   known nesting without disclosing raw field values. It is unsigned and never
   changes a verdict or repairs a malformed assessment. See
   [the evaluator contract](evaluator-output-contract.md).
+- Optional per-step `quote_diagnostics` distinguishes a missing post-evaluator
+  candidate from a nonmatching candidate. It retains the candidate's SHA-256 and
+  length plus allowlisted host failure codes and match path, never rejected quote
+  text or arbitrary diagnostic strings. It does not rerun or weaken provenance,
+  raise a score, recover a quote, or establish the truth of a finding.
+- Optional `numeric_binding` identifies the generic surface binder's status and
+  whether amount/ceiling bounds were found. Those booleans do not establish correct
+  units or independently verify stop-risk arithmetic. The verdict stays unchanged.
 
 For primary HOLD / secondary ALLOW, inspect the primary stage. If its reasoning
 is absent, obtain the verifier detail or clarify the disagreement. Do not invent

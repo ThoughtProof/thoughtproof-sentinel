@@ -65,6 +65,9 @@ describe('Cycle Engine trade-execution quote regression', () => {
     });
     expect(result.objections.map(row => row.quote)).toEqual(quotes);
     expect(result.objections.map(row => row.reasoning)).toEqual(rows.map(row => row.reasoning));
+    expect(result.meta.verifier_trace!.stages[0].objections.every(row =>
+      row.quote_diagnostics?.candidate_present && row.quote_diagnostics.evaluator_match_path === 'exact'
+      && row.quote_diagnostics.evaluator_failure_codes.length === 0)).toBe(true);
     expect(calls).toBe(1);
   });
 
@@ -75,6 +78,39 @@ describe('Cycle Engine trade-execution quote regression', () => {
     expect(result.meta.verifier_trace!.stages[0].output_contract?.status).toBe('valid');
     expect(result.objections).toHaveLength(3);
     expect(result.objections.every(row => row.score <= 0.25 && row.quote === null)).toBe(true);
+    expect(result.meta.verifier_trace!.stages[0].objections.every(row =>
+      row.quote_diagnostics?.candidate_present === false && row.quote_diagnostics.candidate_sha256 === null
+      && row.quote_diagnostics.evaluator_failure_codes.includes('PROV_FAIL_01'))).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it('distinguishes a rejected quote from a missing one without exposing the rejected text or lifting the restriction', async () => {
+    const candidate = 'PRIVATE_UNMATCHED_CANDIDATE: these words are not a source citation.';
+    bodies.push(JSON.stringify(complete().map((row,i) => i === 0 ? {...row,quote:candidate} : row)));
+    const result = await verify(positive);
+    expect(result.verdict).toBe('UNCERTAIN');
+    expect(result.objections[0].quote).toBeNull();
+    expect(result.objections[0].score).toBe(0.25);
+    expect(result.meta.verifier_trace!.stages[0].objections[0].quote_diagnostics).toEqual({
+      candidate_present:true,candidate_length:candidate.length,
+      candidate_sha256:createHash('sha256').update(candidate).digest('hex'),
+      evaluator_match_path:'no-match',evaluator_failure_codes:['PROV_FAIL_02'],
+    });
+    expect(JSON.stringify(result)).not.toContain(candidate);
+    expect(calls).toBe(1);
+  });
+
+  it('identifies missing numeric bounds while preserving valid quotes, scores and the existing verdict', async () => {
+    bodies.push(JSON.stringify(complete().map((row,i) => i === 0
+      ? {...row,reasoning:'The initial stop loss is within budget.'} : row)));
+    const result = await verify(positive);
+    const step = result.meta.verifier_trace!.stages[0].objections[0];
+    expect(result.verdict).toBe('ALLOW');
+    expect(step.score).toBe(1);
+    expect(step.quote).toBe(quotes[0]);
+    expect(step.reasoning).toContain('objection_unverified');
+    expect(step.numeric_binding).toEqual({status:'unverified_insufficient_bounds',has_amount:false,
+      has_ceiling:true,relation:'within',verdict_unchanged:true});
     expect(calls).toBe(1);
   });
 

@@ -445,6 +445,22 @@ export interface SentinelVerifierTrace {
     objections: Array<SentinelStepObjection & {
       reasoning_source: 'evaluator' | 'surface_normalizer' | 'criterion_fallback' | 'evidence_bind';
       evaluator_reasoning_present: boolean;
+      /** Post-evaluator candidate identity and allowlisted host provenance codes; no rejected text. */
+      quote_diagnostics?: {
+        candidate_present: boolean;
+        candidate_length: number;
+        candidate_sha256: string | null;
+        evaluator_match_path: string | null;
+        evaluator_failure_codes: string[];
+      };
+      /** Generic numeric surface binding is distinct from trade arithmetic and never changes a verdict. */
+      numeric_binding?: {
+        status: 'non_numeric' | 'verified' | 'numbers_rewritten' | 'objection_evidence_fail' | 'unverified_insufficient_bounds';
+        has_amount: boolean;
+        has_ceiling: boolean;
+        relation: 'exceed' | 'within' | null;
+        verdict_unchanged: true;
+      };
     }>;
   }>;
 }

@@ -99,6 +99,20 @@ describe('cascade evaluator provenance', () => {
     expect(response.verdict).toBe('UNCERTAIN');
   });
 
+  it('does not echo arbitrary diagnostic strings or another step\'s codes', async () => {
+    const first = item('HOLD', .25, 'The required citation is unavailable.');
+    first.provenance_violations = ['step_0: PROV_FAIL_01: private diagnostic detail',
+      'step_0: PROV_FAIL_01: duplicate', 'step_0: PROV_TRACE: match_path=private-value',
+      'step_0: PROV_FAIL_99: private diagnostic detail', 'step_1: PROV_FAIL_02: another step'];
+    evaluate.mockResolvedValueOnce(first).mockResolvedValueOnce(secondary());
+    const response = await verify(q03Request as SentinelVerifyRequest);
+    const diagnostic = response.meta.verifier_trace!.stages[0].objections[0].quote_diagnostics;
+    expect(diagnostic).toMatchObject({candidate_present:false,evaluator_match_path:null,
+      evaluator_failure_codes:['PROV_FAIL_01']});
+    expect(JSON.stringify(response)).not.toMatch(/private diagnostic detail|private-value|PROV_FAIL_99/);
+    expect(response.verdict).toBe('UNCERTAIN');
+  });
+
   it('distinguishes a failed secondary after primary HOLD from a secondary that was never invoked', async () => {
     evaluate.mockResolvedValueOnce(item('HOLD', .5, syntheticPrimaryReason)).mockRejectedValueOnce(new Error('synthetic secondary unavailable'));
     const trace = (await verify(q03Request as SentinelVerifyRequest)).meta.verifier_trace!;

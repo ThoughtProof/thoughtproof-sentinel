@@ -386,6 +386,24 @@ const spec = {
                                     reasoning: { type: 'string' },
                                     reasoning_source: { type: 'string', enum: ['evaluator', 'surface_normalizer', 'criterion_fallback', 'evidence_bind'] },
                                     evaluator_reasoning_present: { type: 'boolean' },
+                                    quote_diagnostics: {
+                                      type: 'object', description: 'Optional unsigned identity of the post-evaluator quote candidate and allowlisted host provenance results. Rejected quote text is not exposed. Missing historical diagnostics are not inferred; no verdict or score changes.',
+                                      properties: {
+                                        candidate_present: {type: 'boolean'}, candidate_length: {type: 'integer', minimum: 0},
+                                        candidate_sha256: {type: ['string', 'null'], pattern: '^[a-f0-9]{64}$'},
+                                        evaluator_match_path: {type: ['string', 'null'], enum: ['exact', 'whitespace-normalized', 'fuzzy-truncated', 'unicode-normalized', 'structural-unwrapped', 'no-match', null]},
+                                        evaluator_failure_codes: {type: 'array', maxItems: 3, items: {type: 'string', enum: ['PROV_FAIL_01', 'PROV_FAIL_02', 'PROV_FAIL_03']}},
+                                      },
+                                    },
+                                    numeric_binding: {
+                                      type: 'object', description: 'Optional unsigned generic numeric binding status. Available bounds are not a guarantee of correct units or a verified trade-risk calculation.',
+                                      properties: {
+                                        status: {type: 'string', enum: ['non_numeric', 'verified', 'numbers_rewritten', 'objection_evidence_fail', 'unverified_insufficient_bounds']},
+                                        has_amount: {type: 'boolean'}, has_ceiling: {type: 'boolean'},
+                                        relation: {type: ['string', 'null'], enum: ['exceed', 'within', null]},
+                                        verdict_unchanged: {type: 'boolean', enum: [true]},
+                                      },
+                                    },
                                   },
                                 } },
                               },

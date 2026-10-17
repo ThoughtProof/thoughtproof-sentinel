@@ -1,10 +1,34 @@
 /** Additive, unsigned surface of actual evaluator stages. Never changes a verdict. */
+import {createHash} from 'node:crypto';
 import type {CascadeOutput} from './cascade.js';
 import type {ItemResult} from 'pot-cli/plv';
 import type {SentinelVerifierTrace, SentinelVerdict, SentinelVerifyRequest} from '../types.js';
-import {normalizeCascadeSteps, sanitizeReasoning, stripProvenanceDowngradeStamp} from '../step-quote-provenance.js';
+import {coerceQuote, normalizeCascadeSteps, sanitizeReasoning, stripProvenanceDowngradeStamp} from '../step-quote-provenance.js';
 import {receiptConfidence} from '../confidence.js';
 import {bindStepObjections} from '../objection-evidence-bind.js';
+
+const MATCH_PATHS = new Set(['exact', 'whitespace-normalized', 'fuzzy-truncated',
+  'unicode-normalized', 'structural-unwrapped', 'no-match']);
+
+/** Retain host-produced codes, never arbitrary provider text or a rejected quote. */
+function quoteDiagnostics(item: ItemResult, index: number) {
+  const step = item.step_evaluations[index];
+  const quote = coerceQuote(step.quote);
+  const prefix = `${step.step_id}: `;
+  const failures = new Set<string>();
+  let matchPath: string | null = null;
+  for (const value of item.provenance_violations ?? []) {
+    if (typeof value !== 'string' || !value.startsWith(prefix)) continue;
+    const detail = value.slice(prefix.length);
+    const code = /^(PROV_FAIL_0[123]):/.exec(detail)?.[1];
+    if (code) failures.add(code);
+    const path = /^PROV_TRACE: match_path=([a-z-]+)$/.exec(detail)?.[1];
+    if (path && MATCH_PATHS.has(path)) matchPath = path;
+  }
+  return {candidate_present: quote !== null, candidate_length: quote?.length ?? 0,
+    candidate_sha256: quote === null ? null : createHash('sha256').update(quote).digest('hex'),
+    evaluator_match_path: matchPath, evaluator_failure_codes: [...failures]};
+}
 
 /** Same normalization/bind path for the legacy surface and each diagnostic stage. */
 export function surfaceEvaluation(
@@ -40,7 +64,12 @@ export function buildVerifierTrace(
       const source = surface.bind.items[i].surface !== 'pass_through' ? 'evidence_bind' as const
         : surface.normalized[i].reasoning.trim().length === 0 ? 'criterion_fallback' as const
         : surface.normalized[i].reasoning !== original ? 'surface_normalizer' as const : 'evaluator' as const;
-      return {...objection, reasoning_source: source, evaluator_reasoning_present: present};
+      const binding = surface.bind.items[i];
+      return {...objection, reasoning_source: source, evaluator_reasoning_present: present,
+        quote_diagnostics: quoteDiagnostics(item, i),
+        numeric_binding: {status: binding.status, has_amount: binding.bounds.amount !== null,
+          has_ceiling: binding.bounds.ceiling !== null, relation: binding.claim.relation,
+          verdict_unchanged: true as const}};
     });
     const reasoning = sanitizeReasoning(item.verdict_reasoning);
     // Stage summaries must not reintroduce numeric claims rejected on the normal objection surface.

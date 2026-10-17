@@ -75,3 +75,51 @@ https://thoughtproof-sentinel-12za2fjm1-rauls-projects-820227a7.vercel.app
 The Cycle Engine evidence bundle is
 `validation/sentinel_contract_followup_20261017/` in its separate repository.
 Natural-plan quality and overblocking remain unassessed; no trading run was restarted.
+
+## Historical replay: qualification not met
+
+A later preregistered replay selected the earliest and latest locally allowed
+historical backtest plan in each BTC/ETH and long/short cell: eight groups from
+203 logged attempts (190 local allows, 13 local blocks). The blocked attempts
+remained excluded. Recalculation from closed archived candles matched all logged
+features and stops; selected prefixes were recomputed without later candles.
+The historical 0.5 macro fallback was retained and identified as unverified.
+
+Each selected plan was sent once in the original client representation and once
+with additional retrospectively reconstructed evidence. All 16 requests on the
+configured preview above returned HTTP 200 with valid assessment schemas:
+
+| Representation | ALLOW | BLOCK | UNCERTAIN |
+|---|---:|---:|---:|
+| Original | 1 | 4 | 3 |
+| With reconstructed evidence | 0 | 0 | 8 |
+
+The enriched representation missed its predeclared factual-consistency approval
+expectation in every case. Twenty of its 24 public step quotes were null, despite
+string fields in the consumed response shape and generally supportive prose.
+Thirty-six of 48 step quotes across both representations were not published as
+source quotations. Exact rejected strings and host provenance diagnostics were
+not retained by that older response, so the cause must not be guessed. The sole
+original ALLOW mostly cites the plan's own side and rationale; it does not establish
+independent verification of the missing market trace. These selected retrospective
+groups cannot estimate general overblocking or a false-positive rate, and later
+reconstructed explanations cannot replace original contemporaneous reasoning.
+
+The generic numeric binder was independently reproduced offline. For the earlier
+positive/risk controls, it finds no amount and reads an untyped ceiling of 1 from
+the 1% risk limit. It cannot derive currency stop loss from the supplied prose and
+correctly keeps the explanation unverified. That finding must not be “fixed” by
+inserting arbitrary generic amount/budget fields with incompatible units.
+
+This follow-up adds only unsigned per-step quote/binding diagnostics: candidate
+presence, length and hash; allowlisted host provenance failures/match path; and
+numeric binding status. It exposes no rejected quote text, changes no verdict or
+score, and adds no model calls. Offline tests cover missing versus nonmatching
+candidates, exact citations, numeric binding, privacy and unchanged canonical data.
+
+**The PR remains a draft and is not qualified for production by this replay.**
+No trading rules, quote requirements, API timeout or paper-run state were changed.
+The separate Cycle Engine evidence bundle is
+`validation/sentinel_historical_replay_20261017/`, frozen before calls in commit
+`5f256ed`. Any diagnostic follow-up calls belong to a separate phase and must not
+replace or be pooled into these sixteen observations.
