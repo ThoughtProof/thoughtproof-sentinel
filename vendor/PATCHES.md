@@ -1,71 +1,82 @@
-# Vendored pot-cli patches
+# pot-cli release and historical vendored patches
 
-Do not replace this tarball with upstream `pot-cli@0.8.10`. The installed
-`package.json` `version` must remain the ThoughtProof identity below so
-`GET /sentinel/health` `pot_cli` (PR #30) distinguishes binaries.
+## 0.8.12-eval-contract.1 (local compatibility candidate, 2026-10-17)
 
-## 0.8.10-tp.2-eval-contract.4 (local required-field request, 2026-09-29)
+The strict response contract from draft PR #87 is rebuilt on published 0.8.12.
+This avoids reverting its Node >=22 and pinned `@pot-sdk2/bridge@1.2.0` fixes.
+The evaluator source in 0.8.12 is byte-identical to the audited tp.2 source
+(SHA-256 `5302b8fb14d5179eb2b1be6dce3723ca100673d9477aa624eb9b3671198c118e`).
+The builder checks the entire base archive and that source before applying the
+unchanged contract overlay. No provider/model switch or new repair retry is added.
 
-- Strict evaluator requests add a compact system-message contract with every
-  actual host step ID and explicit score, reasoning and quote requirements.
-- The original rubric and complete user message are preserved. This is a
-  prompt intervention, not provider-enforced structured output.
-- No model, provider options, validation, scoring, quote checks or cascade
-  policy changes; incomplete responses still hold without retry or repair.
-- The live diagnostic observation remains negative. Reduced field omissions
-  require a separately bounded live comparison, not synthetic model replies.
-- Prior archive and manifest remain; rebuild offline with the existing script.
-- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.4.tgz`.
-- sha512 (hex): `261a8beffc677c0717955b59992dced805c22207fb165ed50feafc51c22e16a940138506d20a373c0dbfb78f6cf71e2a2fc2392b86d9a5d23dce9b1756a53e57`
+Missing response fields yield technical HOLD/UNCERTAIN with bounded field-shape
+diagnostics. Explicit null quotes still undergo the original provenance rules.
+Valid restrictive judgments stay restrictive; a secondary ALLOW cannot override
+an invalid assessment. Six Cycle Engine regression cases exercise the actual
+router, evaluator and native engine with synthetic HTTP completions.
 
-## 0.8.10-tp.2-eval-contract.3 (local shape diagnostics, 2026-09-29)
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.1.tgz`
+- Integrity: `sha512-Yz0G3SxHp+iANOvwg1XUUaSniBHh3hehTPkSDc6hcnU7uCOfqzXi+qeVfWGoLr7nY65n+XgFrQvvl23PZpNIgg==`
+- SHA-256: `fcfdf5965200fe59e633a849ec468d5350b62918c362368d64a6162485303574`
+- Rebuild: `node scripts/build-evaluator-contract-vendor.mjs`
+- Manifest: `patches/vendor-manifest.json`; prior .4 manifest is retained separately.
 
-- Adds `plv.evaluator-shape.v1` metadata: absent fields, wrong types, empty
-  text, out-of-range scores and known nested assessment containers are distinct.
-- At most eight row samples across the root and fixed container names;
-  no raw values, arbitrary keys or unknown model IDs are exposed.
-- Validation, scores, quote checks, prompts and cascade decisions are unchanged.
-  Sampling diagnostics does not truncate validation or authorize a repair.
-- The prior archive and manifest remain available. The original live Q-03
-  response text is unknown; these diagnostics cannot reconstruct it.
-- Rebuild offline: `node scripts/build-evaluator-contract-vendor.mjs`.
-- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.3.tgz`.
-- sha512 (hex): `e7b55c590e5d31291cfbdbd43bbfedbd4c9ff1f0e054a7a9f3f01607fc4b09f4f4cb0c7e7e9d49379b58192652c21719f9cc268858b44f2df619c7b385c82822`
+This candidate corrects handling and visibility of malformed assessments. It
+does not establish that the live provider will emit complete fields or that
+Sentinel's natural trade decisions are reliable.
 
-## 0.8.10-tp.2-eval-contract.2 (local compatibility correction, 2026-09-29)
+## npm 0.8.12 (2026-10-10)
 
-- Derived `predicate` is no longer a required model field. Any incoming label
-  is discarded; existing provenance checks and score floors compute the output.
-  This preserves usable reasons when only the redundant label is missing or
-  uses another mode's vocabulary.
-- Required step coverage, numeric scores, nonempty reasons and explicit quote
-  fields remain checked. Invalid assessments retain their technical HOLD.
-- Only actual host-created Tier 1 result objects skip provenance; model text
-  starting with `[TIER1` cannot impersonate the internal stage.
-- The earlier archive and manifest are retained; live negative results are not
-  relabeled. This is an offline correction, not a demonstrated model improvement.
-- Rebuild offline: `node scripts/build-evaluator-contract-vendor.mjs`.
-- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.2.tgz`.
-- sha512 (hex): `6228fcd16048e83321f02e8672071c54c8ebc5f17303ec29f5c2d6af63f65e828ba684335e6ca411e5fe8221822db029040faae125f438b5100a0c46c448f7b7`
+Production at the start of this work pins `pot-cli@0.8.12` exactly. It keeps the tp.2
+quote and reasoning fixes from
+[pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52).
+[pot-cli v0.8.12](https://github.com/ThoughtProof/pot-cli/releases/tag/v0.8.12)
+pins `@pot-sdk2/bridge` to the tested `1.2.0`, reads `--version` from the
+installed package, and requires Node.js `>=22`. The `0.8.11` range selected
+`@pot-sdk2/bridge@1.3.0`, which removed `checkAuthorVerifierSeparation` and
+failed CLI module load on a fresh install.
+`GET /sentinel/health` reports the installed package version as `pot_cli`.
+The older tarballs below are retained as historical rollback artifacts.
 
-## 0.8.10-tp.2-eval-contract.1 (local candidate, 2026-09-29)
+- Registry tarball: `https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.12.tgz`
+- Registry sha256: `aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1`
+- npm shasum (sha1): `177d70d541adc5956d2c1fd35a66d1cf9ccefbb5`
+- Lockfile integrity:
+  `sha512-8hM8jsVtZXNW+rFdqQw0vD9UbFvSG6HINB8s5JtY7ZvH3pqH7wjgNDz3W2Y4g3rmsexGlv14J4gcojzOjIvMfA==`
+- Tag `v0.8.12`: `d43840434be73e850c2266ce10f523b56de22567`
+- Engines: Node.js `>=22`
+- Published file count: 599
 
-- Base remains the exact tp.2 archive below; original source and archive retained.
-- `strictOutputContract` opts into validation before scoring: each expected ID
-  exactly once, numeric score in [0,1], nonempty reason, mode-compatible predicate,
-  and explicit string-or-null quote. Unused optional metadata is not required.
-- Invalid output returns technical HOLD, no fabricated steps or semantic BLOCK.
-  One model request per strict evaluator invocation; no hidden format retries.
-- Existing quote provenance, score floors and cascade policy remain unchanged.
-  Sentinel opts in and prevents promotion around any invalid evaluator stage.
-- Rebuild offline: `node scripts/build-evaluator-contract-vendor.mjs`.
-  Runtime JS and sourcemaps are emitted with pinned installed TypeScript; the
-  declaration overlay is explicit in that script. Installed package and archive
-  are tested separately from mocked evaluator tests.
-- Archive: `vendor/pot-cli-0.8.10-tp.2-eval-contract.1.tgz`.
-- sha512 (hex): `4184e1152b4e0a29f22290531cbe00bfd6e6738220638c6e5e457e4ec4ee0f72c6d97871c0dffdb555baae1296b3e5b8b9477a2fec1443b1ccac1c07d893e948`
+`src/pot-cli-quote-patch.test.ts` pins the current overlay, base archive,
+lockfile integrity, installed version, source markers, and behavior.
+Update that pin and this document together when upgrading.
 
-## 0.8.10-tp.2 (2026-09-11)
+## npm 0.8.11 (2026-10-09, superseded)
+
+Published `pot-cli@0.8.11` contains the tp.2 quote and reasoning fixes from
+[pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52).
+`0.8.12` is the release Sentinel installs. The `0.8.11` CLI bridge range
+selects `@pot-sdk2/bridge@1.3.0`, which lacks an export required by the CLI
+entry point.
+
+- Registry tarball: `https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.11.tgz`
+- Registry sha256: `2c58ea07b9edc864609c56bd93578cbb6ec793c4bd79a63a60dc0228b3e890d5`
+- Lockfile integrity:
+  `sha512-XLejury6J6xe8cK/LUcBPMxx8qdMe3eP91NIr8b92yMaO1uJy8evUGD2kAPxDt4P1RylRApoaIBr2Sj+BuJLRw==`
+- Tag `v0.8.11`: `003ad27a2187e4173405d6258be888cb567eb5ed`, with the same
+  tree as the tested head `5555360b346f9f3e4dd724a093ddbba17905af9f`.
+
+[Sentinel PR #90](https://github.com/ThoughtProof/thoughtproof-sentinel/pull/90)
+tested a local pack on localhost against tp.2: both sides passed 27/27
+action-authorization cases. That pack has sha256
+`eb32000c3b3a0f246995ff1ce0c09dc5e38a0a6fb1ed3cc0effa64b35b9f7f16`.
+The compressed packages differ, but their decompressed tar bytes are
+identical (sha256
+`f0373a4f1dbc7897c9b188ad9ee053e803c04f1c1ecfd9dad6275b19c679f9da`).
+All 599 published files also match a fresh build of the release commit.
+The compression implementation responsible for the difference is unconfirmed.
+
+## 0.8.10-tp.2 (2026-09-11, superseded)
 
 - Tarball: `vendor/pot-cli-0.8.10-tp.2.tgz`
 - Upstream base: pot-cli 0.8.10 (continues 0.8.10-tp.1)
@@ -76,8 +87,9 @@ Do not replace this tarball with upstream `pot-cli@0.8.10`. The installed
     provenance can cite suite-format evidence (#66 Track 1b). MCP
     `Principal mandate (verbatim quote):` remains first.
 
-`src/pot-cli-quote-patch.test.ts` pins version, source markers, and
-tarball sha512. Updating the tarball requires updating that pin.
+Do not use unpatched upstream `pot-cli@0.8.10` as a rollback.
+Before the npm switch, `src/pot-cli-quote-patch.test.ts` pinned this
+version, source markers, and tarball sha512.
 
 sha512 (hex):
 `97214d724a7babef496f6360cb5b3e89b95c80b46ae55464a65276d209b3097108f5ad61f5acc9e6f2f2f4038e3d0d44822ef3a5aa4fb1d341f5e81863082804`

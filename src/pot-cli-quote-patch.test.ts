@@ -1,11 +1,11 @@
 /**
- * Lock the vendored pot-cli evaluator-contract overlay and earlier quote fixes.
+ * Lock the evaluator-contract overlay on the published 0.8.12 release.
  *
  * Must fail if someone swaps back an unpatched upstream 0.8.10 tarball
  * that happens to export the same function names.
  */
+import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -17,10 +17,10 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const VENDORED_POT_CLI_VERSION = '0.8.10-tp.2-eval-contract.4';
-export const VENDORED_POT_CLI_TGZ = 'vendor/pot-cli-0.8.10-tp.2-eval-contract.4.tgz';
-export const VENDORED_POT_CLI_SHA512 =
-  '261a8beffc677c0717955b59992dced805c22207fb165ed50feafc51c22e16a940138506d20a373c0dbfb78f6cf71e2a2fc2392b86d9a5d23dce9b1756a53e57';
+export const POT_CLI_VERSION = '0.8.12-eval-contract.1';
+export const POT_CLI_TARBALL = 'file:vendor/pot-cli-0.8.12-eval-contract.1.tgz';
+export const POT_CLI_INTEGRITY =
+  'sha512-Yz0G3SxHp+iANOvwg1XUUaSniBHh3hehTPkSDc6hcnU7uCOfqzXi+qeVfWGoLr7nY65n+XgFrQvvl23PZpNIgg==';
 
 const COERCE_CASES: unknown[] = [
   undefined,
@@ -34,25 +34,39 @@ const COERCE_CASES: unknown[] = [
   'Tell CoS host runs git main',
 ];
 
-describe('vendored pot-cli identity (not upstream 0.8.10)', () => {
-  it('package.json version is the ThoughtProof prerelease, not 0.8.10', () => {
+describe('pinned pot-cli overlay identity with the Sentinel fixes', () => {
+  it('installed package and health version identify the audited overlay', () => {
     const pkg = JSON.parse(
       readFileSync(join(process.cwd(), 'node_modules', 'pot-cli', 'package.json'), 'utf8'),
     ) as { name: string; version: string };
     expect(pkg.name).toBe('pot-cli');
-    expect(pkg.version).toBe(VENDORED_POT_CLI_VERSION);
+    expect(pkg.version).toBe(POT_CLI_VERSION);
     expect(pkg.version).not.toBe('0.8.10');
-    expect(getPotCliVersion()).toBe(VENDORED_POT_CLI_VERSION);
+    expect(getPotCliVersion()).toBe(POT_CLI_VERSION);
   });
 
-  it('vendor tarball sha512 matches the pinned ThoughtProof patch', () => {
-    const tgz = join(process.cwd(), VENDORED_POT_CLI_TGZ);
-    expect(existsSync(tgz)).toBe(true);
-    const hash = createHash('sha512').update(readFileSync(tgz)).digest('hex');
-    expect(hash).toBe(VENDORED_POT_CLI_SHA512);
+  it('manifest, lockfile and actual archive pin the audited overlay', () => {
+    const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
+    const lock = JSON.parse(readFileSync(join(process.cwd(), 'package-lock.json'), 'utf8'));
+    expect(manifest.dependencies['pot-cli']).toBe(POT_CLI_TARBALL);
+    expect(lock.packages[''].dependencies['pot-cli']).toBe(POT_CLI_TARBALL);
+    expect(lock.packages['node_modules/pot-cli']).toMatchObject({
+      version: POT_CLI_VERSION,
+      resolved: POT_CLI_TARBALL,
+      integrity: POT_CLI_INTEGRITY,
+    });
     const patches = readFileSync(join(process.cwd(), 'vendor', 'PATCHES.md'), 'utf8');
-    expect(patches).toContain(VENDORED_POT_CLI_VERSION);
-    expect(patches).toContain(VENDORED_POT_CLI_SHA512);
+    expect(patches).toContain(POT_CLI_VERSION);
+    expect(patches).toContain(POT_CLI_TARBALL);
+    expect(patches).toContain(POT_CLI_INTEGRITY);
+    const archive = readFileSync(join(process.cwd(), POT_CLI_TARBALL.slice('file:'.length)));
+    expect('sha512-' + createHash('sha512').update(archive).digest('base64')).toBe(POT_CLI_INTEGRITY);
+    const base = readFileSync(join(process.cwd(), 'vendor/pot-cli-0.8.12.tgz'));
+    expect(createHash('sha256').update(base).digest('hex')).toBe('aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1');
+    // Keep the published release's Node and bridge corrections when rebasing the overlay.
+    const installed = JSON.parse(readFileSync(join(process.cwd(), 'node_modules/pot-cli/package.json'), 'utf8'));
+    expect(installed.engines.node).toBe('>=22');
+    expect(installed.dependencies['@pot-sdk2/bridge']).toBe('1.2.0');
   });
 
   it('installed evaluator source has the Sentinel patch markers (not stub exports)', () => {
@@ -65,6 +79,8 @@ describe('vendored pot-cli identity (not upstream 0.8.10)', () => {
     expect(src).toContain('USER INSTRUCTION:');
     expect(src).toContain('recoverCiteableQuote(coerceQuote(ev.quote)');
     expect(src).toContain('appendReasoningNote(processed.reasoning');
+    expect(src).toContain('decodeEvaluationOutput');
+    expect(src).toContain('tier1ResolvedEvals.includes(ev)');
     // Unpatched 0.8.10 used reasoning += which produces the undefined prefix.
     expect(src).not.toMatch(
       /processed\.reasoning \+= ['"] \[PROVENANCE DOWNGRADE: quote invalid or missing\]['"]/,
@@ -72,14 +88,14 @@ describe('vendored pot-cli identity (not upstream 0.8.10)', () => {
   });
 });
 
-describe('vendored pot-cli quote patch behavior', () => {
+describe('published pot-cli quote patch behavior', () => {
   it('coerceQuote treats omitted / undefined string as null', () => {
     expect(potCoerceQuote(undefined)).toBeNull();
     expect(potCoerceQuote(null)).toBeNull();
     expect(potCoerceQuote('undefined')).toBeNull();
   });
 
-  it('Sentinel coerceQuote matches vendored pot-cli on shared cases (drift lock)', () => {
+  it('Sentinel coerceQuote matches published pot-cli on shared cases (drift lock)', () => {
     for (const c of COERCE_CASES) {
       expect(sentinelCoerceQuote(c)).toEqual(potCoerceQuote(c));
     }

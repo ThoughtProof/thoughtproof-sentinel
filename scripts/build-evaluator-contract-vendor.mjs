@@ -5,12 +5,15 @@ import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import ts from 'typescript';
-const root=resolve(import.meta.dirname,'..'),base=join(root,'vendor/pot-cli-0.8.10-tp.2.tgz');
+const root=resolve(import.meta.dirname,'..'),base=join(root,'vendor/pot-cli-0.8.12.tgz');
 const hash=(p,algorithm='sha256')=>createHash(algorithm).update(readFileSync(p)).digest('hex');
-if(hash(base)!=='3325e44c36238583d95c90eeec0202a41e8c8e0555190450e362ea126b963b1e')throw Error('BASE_VENDOR_CHANGED');
-const version='0.8.10-tp.2-eval-contract.4',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
+if(hash(base)!=='aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1')throw Error('BASE_VENDOR_CHANGED');
+const version='0.8.12-eval-contract.1',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
 try{
  execFileSync('tar',['-xzf',base,'-C',temp]);
+ // The published 0.8.12 evaluator source is byte-identical to the audited tp.2
+ // source. Guard that assumption before applying the existing overlay.
+ if(hash(join(pkg,'src/plan/graded-support-evaluator.ts'))!=='5302b8fb14d5179eb2b1be6dce3723ca100673d9477aa624eb9b3671198c118e')throw Error('EVALUATOR_SOURCE_CHANGED');
  execFileSync('patch',['-p1','--batch','--forward','-i',join(root,'patches/pot-cli-evaluator-contract.patch')],{cwd:pkg});
  copyFileSync(join(root,'patches/evaluation-output-contract.ts'),join(pkg,'src/plan/evaluation-output-contract.ts'));
  copyFileSync(join(root,'patches/evaluation-request-contract.ts'),join(pkg,'src/plan/evaluation-request-contract.ts'));
