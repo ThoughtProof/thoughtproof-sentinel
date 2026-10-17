@@ -43,3 +43,35 @@ explicitly absent observations. They are illustrative data, not natural plans.
 The next bounded preview check uses each fixture once, irrespective of verdict.
 It observes the current provider's output shape on the new candidate. No production
 promotion or general overblocking claim follows automatically from those calls.
+
+## Observed preview result
+
+The configured preview of `010431d` completed all three fixed requests on
+17 October. The positive fixture returned **ALLOW**; risk contradiction and absent
+facts returned **BLOCK**. All three evaluator responses passed the required-field
+contract, with three recognized steps each. Non-null public quotes were independently
+checked as exact input substrings. This demonstrates a working cited positive path
+on this call, not an estimated field-completion rate or a causal A/B proof that the
+prompt change alone improved the model.
+
+Two explanation limits remain visible. The existing numeric evidence binder marks
+the numeric step's prose `objection_unverified` in both the positive and risk cases,
+even though their quoted arithmetic can be checked directly. In the risk case,
+one directional quote fails provenance and is dropped/capped at 0.25; the final
+BLOCK is retained. A valid response schema does not guarantee a good explanation.
+No score was raised or objection check removed to obtain the positive verdict.
+
+The initial preview inherited generic mock provider credentials and an OpenAI
+endpoint. One request failed with HTTP 500 / upstream 401 before a verdict; the
+remaining requests were stopped. A separate preview of the identical commit used
+deployment-scoped copies of the production SERV endpoint and credential, then ran
+the three preregistered cases once each. Project-wide environment definitions and
+production routing were not modified. No credential value was written into source
+or evidence. The failed attempt remains separate from the three graded controls.
+
+Configured preview:
+https://thoughtproof-sentinel-12za2fjm1-rauls-projects-820227a7.vercel.app
+
+The Cycle Engine evidence bundle is
+`validation/sentinel_contract_followup_20261017/` in its separate repository.
+Natural-plan quality and overblocking remain unassessed; no trading run was restarted.
