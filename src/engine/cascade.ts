@@ -33,6 +33,8 @@ export interface CascadeInput {
   evalInput: EvalInput;
   evalMode: EvalMode;
   tier: SentinelTier;
+  /** Host-addressed citations, enabled initially for trade_execution only. */
+  sourceReferences?: boolean;
   /** Engine budget abort — when aborted, in-flight eval is abandoned. */
   signal?: AbortSignal;
   /** Wall-clock start for elapsed reporting (defaults to now). */
@@ -78,6 +80,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     mode: input.evalMode,
     maxTokens: 4096,
     strictOutputContract: true,
+    sourceReferences: input.sourceReferences === true,
   };
 
   // Partial knowledge for budget exhaustion: only BLOCK is preservable.

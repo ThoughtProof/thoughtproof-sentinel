@@ -1,5 +1,6 @@
 /** Validate consumed assessment fields before scores, IDs or fallback reasons are used. */
 import {createHash} from 'node:crypto';
+import {resolveSourceReferences, type SourceReferenceContext, type SourceReferenceAudit} from './evaluation-source-references.js';
 
 export type AssessmentValueType = 'absent' | 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object';
 export interface AssessmentFieldShape {
@@ -36,7 +37,7 @@ export interface EvaluationOutputShape {
 }
 
 export interface EvaluationOutputIssue {
-  code: 'invalid_json' | 'expected_array' | 'invalid_step' | 'unknown_step_id' | 'duplicate_step_id' | 'missing_step' | 'invalid_score' | 'missing_reason' | 'invalid_quote' | 'invalid_predicate';
+  code: 'invalid_json' | 'expected_array' | 'invalid_step' | 'unknown_step_id' | 'duplicate_step_id' | 'missing_step' | 'invalid_score' | 'missing_reason' | 'invalid_quote' | 'invalid_predicate' | 'invalid_quote_reference';
   /** Only host-provided expected step IDs are exposed. Untrusted identifiers are not echoed. */
   step_id: string | null;
 }
@@ -47,6 +48,8 @@ export interface EvaluationOutputContract {
   issues: EvaluationOutputIssue[];
   /** Additive unsigned shape metadata; never used to authorize, coerce or repair an assessment. */
   shape?: EvaluationOutputShape;
+  /** Host-derived source addresses, never model-supplied diagnostic text. */
+  source_references?: SourceReferenceAudit;
 }
 
 function valueType(value: unknown): AssessmentValueType {
@@ -112,7 +115,7 @@ function describeShape(data: unknown, parsed: boolean, expectedIds: string[]): E
 }
 
 /** A malformed assessment is not evidence against the task being assessed. No retries here. */
-export function decodeEvaluationOutput(text: string, expectedIds: string[], _mode: string): {
+export function decodeEvaluationOutput(text: string, expectedIds: string[], _mode: string, references?: SourceReferenceContext): {
   data: unknown[]; contract: EvaluationOutputContract;
 } {
   const raw=typeof text==='string'?text:'',issues: EvaluationOutputIssue[]=[];
@@ -142,6 +145,12 @@ export function decodeEvaluationOutput(text: string, expectedIds: string[], _mod
       if(!Object.hasOwn(row,'quote')||(row.quote!==null&&(typeof row.quote!=='string'||!row.quote.trim())))issue('invalid_quote',id);
     }
     for(const id of expected)if(!seen.has(id))issue('missing_step',id);
+  }
+  if (!issues.length && references) {
+    const resolved = resolveSourceReferences(data as Record<string, unknown>[], references);
+    contract.source_references = resolved.audit;
+    for (const id of resolved.invalidSteps) issue('invalid_quote_reference', id);
+    data = resolved.data;
   }
   if(issues.length)contract.status='invalid';
   // Predicate is a host-derived output, not an independent model input. The

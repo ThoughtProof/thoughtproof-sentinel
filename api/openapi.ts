@@ -5,6 +5,7 @@ import {
 } from '../src/rate-limit-policy.js';
 import { getPotCliVersion } from '../src/runtime-versions.js';
 import { evaluatorShapeSchema } from '../src/evaluator-shape-schema.js';
+import { evaluatorSourceReferencesSchema } from '../src/evaluator-source-references-schema.js';
 
 const spec = {
   openapi: '3.1.0',
@@ -369,6 +370,7 @@ const spec = {
                                     status: {type: 'string', enum: ['valid', 'invalid']},
                                     response_sha256: {type: 'string', pattern: '^[a-f0-9]{64}$'},
                                     shape: evaluatorShapeSchema,
+                                    source_references: evaluatorSourceReferencesSchema,
                                     issues: {type: 'array', maxItems: 128, items: {type: 'object', properties: {code: {type: 'string'}, step_id: {type: ['string', 'null']}}}},
                                   },
                                 },

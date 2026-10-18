@@ -1,44 +1,102 @@
 --- a/src/plan/graded-support-evaluator.ts
 +++ b/src/plan/graded-support-evaluator.ts
-@@ -16 +16,3 @@
+@@ -13,7 +13,10 @@
+  *   No quote = no credit. Mechanically kills H-family false positives.
+  */
+ 
 -import { callModelStructured, type ChatMessage } from '../utils/model-router.js';
 +import { callModel, callModelStructured, type ChatMessage } from '../utils/model-router.js';
 +import { decodeEvaluationOutput, type EvaluationOutputContract } from './evaluation-output-contract.js';
 +import { withRequiredEvaluationFields } from './evaluation-request-contract.js';
-@@ -187,0 +189,2 @@
++import { createSourceReferences } from './evaluation-source-references.js';
+ import { tier1PreScreen, type Tier1Config, type Tier1Result } from './tier1-prefilter.js';
+ import { detectMode5 } from './probes/mode5-truncation-detection.js';
+ 
+@@ -185,6 +188,8 @@
+ export type EvaluatorVerdict = 'ALLOW' | 'CONDITIONAL_ALLOW' | 'HOLD' | 'BLOCK';
+ 
+ export interface ItemResult {
 +  /** Strict opt-in: validity of the model assessment, not truth of the assessed claim. */
 +  output_contract?: EvaluationOutputContract;
-@@ -1144,0 +1148 @@
+   id: string;
+   step_evaluations: StepEvaluation[];
+   verdict: EvaluatorVerdict;
+@@ -1142,6 +1147,8 @@
+   model: string,
+   maxTokens: number,
+   mode: EvalMode = 'support',
 +  contractState?: {value?: EvaluationOutputContract},
-@@ -1193,0 +1198,8 @@
++  sourceReferences = false,
+ ): Promise<StepEvaluation[]> {
+   // ADR-0009: per-step EVIDENCE_SOURCE routing.
+   // Steps with step_type='answer_consistency' must be evaluated against the
+@@ -1191,6 +1198,18 @@
+     { role: 'system', content: systemPrompt },
+     { role: 'user', content: userPrompt },
+   ];
 +
 +  if (contractState) {
 +    // Exactly one model request: malformed assessment output does not trigger hidden repair retries.
-+    const response = await callModel(model, withRequiredEvaluationFields(messages, stepsToEvaluate.map(s => `step_${s.index}`)), {maxTokens, temperature: 0, seed: DEFAULT_EVAL_SEED});
-+    const decoded = decodeEvaluationOutput(response.content, stepsToEvaluate.map(s => `step_${s.index}`), mode);
++    const references = sourceReferences ? createSourceReferences(
++      {trace: item.trace_steps, answer: item.answer},
++      stepsToEvaluate.map(s => ({id: `step_${s.index}`, source: s.step_type === 'answer_consistency' ? 'answer' : 'trace'})),
++    ) : undefined;
++    const response = await callModel(model, withRequiredEvaluationFields(messages, stepsToEvaluate.map(s => `step_${s.index}`), references), {maxTokens, temperature: 0, seed: DEFAULT_EVAL_SEED});
++    const decoded = decodeEvaluationOutput(response.content, stepsToEvaluate.map(s => `step_${s.index}`), mode, references);
 +    contractState.value = decoded.contract;
 +    return decoded.data as StepEvaluation[];
 +  }
-@@ -1259,0 +1272,2 @@
+ 
+   const { data: rawEvals } = await callModelStructured<StepEvaluation[]>(
+     model,
+@@ -1257,6 +1276,10 @@
+ // ─── Core Evaluation Function (Two-Tier) ──────────────────────────────────────
+ 
+ export interface EvalOptions {
 +  /** Validate complete core step fields; invalid assessment is a technical HOLD, never a semantic BLOCK. */
 +  strictOutputContract?: boolean;
-@@ -1335,0 +1350 @@
++  /** Explicit source-address serialization; requires strictOutputContract. */
++  sourceReferences?: boolean;
+   maxTokens?: number;
+   tier1?: Tier1Config;
+   mode?: EvalMode;
+@@ -1333,11 +1356,18 @@
+ 
+   // ── Tier 2 (LLM graded evaluation) — only for ambiguous steps ──
+   let tier2Evals: StepEvaluation[] = [];
 +  const contractState: {value?: EvaluationOutputContract} | undefined = options.strictOutputContract ? {} : undefined;
-@@ -1339 +1354 @@
+ 
+   if (stepsForTier2.length > 0) {
+     const rawEvals = await evaluateStepsWithLLM(
 -      item, stepsForTier2, model, options.maxTokens ?? 4096, mode
-+      item, stepsForTier2, model, options.maxTokens ?? 4096, mode, contractState
-@@ -1340,0 +1356,6 @@
++      item, stepsForTier2, model, options.maxTokens ?? 4096, mode, contractState, options.sourceReferences === true
+     );
 +    if (contractState?.value?.status === 'invalid') {
 +      // Do not invent failed research steps, numeric scores, missing evidence or model explanations.
 +      return {id: item.id, step_evaluations: [], verdict: 'HOLD',
 +        verdict_reasoning: 'Evaluator output is incomplete or invalid. Correct the evaluator response before deciding; this is not a finding against the assessed task.',
 +        provenance_violations: [], output_contract: contractState.value, tier1_stats: tier1Stats};
 +    }
-@@ -1367,2 +1388,3 @@
+     // Coerce LLM-emitted quote fields before provenance/floors.
+     // Missing `quote` arrives as undefined and historically crashed on .replace.
+     tier2Evals = rawEvals.map((ev) => ({ ...ev, quote: coerceQuote(ev.quote) }));
+@@ -1364,8 +1394,9 @@
+   // ── Apply provenance checks and score floors (Tier 2 results only) ──
+   const allViolations: string[] = [];
+   const processedEvals: StepEvaluation[] = mergedEvals.map(ev => {
 -    // Skip provenance for Tier-1 results (no quotes to check)
 -    if (ev.reasoning?.startsWith('[TIER1')) return ev;
 +    // Only actual host-created Tier-1 results are exempt. Model reasoning is
 +    // untrusted text and cannot impersonate that stage or bypass score floors.
 +    if (tier1ResolvedEvals.includes(ev)) return ev;
-@@ -1413,0 +1436 @@
+ 
+     // ADR-0009: provenance + score-floors must use the same evidence source the
+     // step was evaluated against. For step_type='answer_consistency' that's the
+@@ -1411,6 +1442,7 @@
+     ...(conditions && conditions.length > 0 ? { conditions } : {}),
+     ...(lowConfidence ? { low_confidence: true } : {}),
+     provenance_violations: allViolations,
 +    ...(contractState?.value ? {output_contract: contractState.value} : {}),
+     tier1_stats: tier1Stats,
+   };
+ }

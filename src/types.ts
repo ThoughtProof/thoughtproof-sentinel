@@ -438,6 +438,7 @@ export interface SentinelVerifierTrace {
       response_sha256: string;
       issues: Array<{code: string; step_id: string | null}>;
       shape?: NonNullable<ItemResult['output_contract']>['shape'];
+      source_references?: NonNullable<ItemResult['output_contract']>['source_references'];
     };
     verdict: string | null;
     reasoning: string | null;

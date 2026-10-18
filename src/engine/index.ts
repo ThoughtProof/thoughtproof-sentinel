@@ -152,6 +152,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       evalInput: modeOutput.evalInput,
       evalMode: modeOutput.evalMode,
       tier,
+      sourceReferences: req.mode === 'trade_execution',
       signal: budget.controller.signal,
       budgetStartedAt: budget.startedAt,
       budgetMs: budget.budgetMs,

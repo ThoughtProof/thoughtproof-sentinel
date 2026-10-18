@@ -1,3 +1,22 @@
+## 0.8.12-eval-contract.2 — source references (18 October 2026)
+
+Current dependency: `file:vendor/pot-cli-0.8.12-eval-contract.2.tgz`.
+Integrity: `sha512-gfSRCa7fEDL17o2VxQABwHupLy45vstXKr2i9i+5vgZdxYlMwDWFWs8nm5rk0oyTiKQWo7SVldrVZ6YEg1nF8g==`.
+
+This retains the strict output contract and all existing provenance/score rules.
+The opt-in `sourceReferences` evaluation option creates a request-local catalog
+of unchanged source lines. A model-selected `quote_ref` is resolved only for its
+step's designated source. Unknown/stale/wrong-source references and conflicting
+quote strings produce technical HOLD without repair or retry. No reference is
+selected automatically, and a source match never raises a score. Original trace,
+answer, rubric and chronology remain unchanged. Native Sentinel initially enables
+this only for `trade_execution`.
+
+The audit records host-derived source hashes and offsets; the rejected reference
+text is not exposed. See `docs/source-references.md` for the exact contract.
+Rebuild with `node scripts/build-evaluator-contract-vendor.mjs`; the prior .1
+archive and manifest remain available for comparisons.
+
 # pot-cli release and historical vendored patches
 
 ## 0.8.12-eval-contract.1 (local compatibility candidate, 2026-10-17)
