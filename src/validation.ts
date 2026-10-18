@@ -2,6 +2,7 @@ import type { AgentContext, SentinelVerifyRequest, SentinelMode, SentinelTier, S
 import type { AuthorizationMandate, GateMode } from './engine/authorization-gate.js';
 import { ACTION_KINDS, type ActionKind } from './engine/action-auth-kind.js';
 import { TIER_CONFIGS } from './tiers.js';
+import {tradeRiskInputErrors, type TradeRiskInput} from './engine/trade-risk-gate.js';
 
 export interface ValidationError {
   field: string;
@@ -38,7 +39,7 @@ const ALLOWED_BODY_FIELDS = new Set([
   'id', 'claim', 'evidence', 'mode', 'tier', 'mandate', 'gateMode',
   'agent_context', 'signed_evidence', 'key_manifest',
   // ADR-0020 shadow measurement (does not affect verdict)
-  'required_conditions', 'action_hash',
+  'required_conditions', 'action_hash', 'trade_risk',
 ]);
 const VALID_PROOF_REQUIREMENTS = new Set(['machine', 'any', 'none']);
 const VALID_FRESHNESS = new Set(['fresh', 'current', 'stale', 'expired', 'unknown']);
@@ -460,6 +461,10 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
   }
 
   const mandate = normalizeMandate(b.mandate, errors);
+  if (b.trade_risk !== undefined) {
+    if (b.mode !== 'trade_execution') errors.push({field: 'trade_risk', message: 'Only supported for trade_execution'});
+    for (const code of tradeRiskInputErrors(b.trade_risk)) errors.push({field: 'trade_risk', message: code});
+  }
 
   if (errors.length > 0) {
     return { valid: false, errors };
@@ -475,6 +480,7 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       tier: (b.tier as SentinelTier | undefined) ?? 'standard',
       mandate,
       gateMode: b.gateMode as GateMode | undefined,
+      ...(b.trade_risk !== undefined ? {trade_risk: {...b.trade_risk as TradeRiskInput}} : {}),
       agent_context,
       signed_evidence: signedEvidence,
       key_manifest: keyManifest,

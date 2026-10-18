@@ -46,6 +46,7 @@ import {
 } from './budget.js';
 import { randomUUID } from 'crypto';
 import { finiteScore, receiptConfidence } from '../confidence.js';
+import {runTradeRiskGate} from './trade-risk-gate.js';
 
 /**
  * Run a single Sentinel verification.
@@ -57,6 +58,22 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const startMs = Date.now();
   const id = req.id ?? `sent_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const tier: SentinelTier = req.tier ?? 'standard';
+  const tradeRisk = req.mode === 'trade_execution' && req.trade_risk !== undefined
+    ? runTradeRiskGate(req.trade_risk, req.evidence) : undefined;
+  if (tradeRisk && tradeRisk.status !== 'pass') {
+    return {
+      id, verdict: tradeRisk.status === 'block' ? 'BLOCK' : 'UNCERTAIN',
+      confidence: receiptConfidence(tradeRisk.status === 'block' ? 1 : 0),
+      reasoning: 'Deterministic trade risk check: ' + tradeRisk.codes.join(', '),
+      objections: tradeRisk.codes.map(code => ({step_id: `trade_risk_${code}`,
+        criterion: 'Actual order must satisfy the cycle-risk-v1 limits', score: 0,
+        predicate: tradeRisk.status === 'block' ? 'violated' : 'unproven',
+        quote: null, quote_source: null, objection_source: 'deterministic_gate', reasoning: code})),
+      mode: req.mode, tier,
+      meta: {duration_ms: Date.now() - startMs, models_used: [], verified_at: new Date().toISOString(),
+        trade_risk: tradeRisk, ...(req.agent_context ? {agent_context: req.agent_context} : {})},
+    };
+  }
 
   // 0. Deterministic authorization gate (ADR-0019 follow-up). Only runs for
   //    action_authorization with a machine-readable mandate. It hard-checks the
@@ -139,6 +156,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     evidence: req.evidence,
     mode: req.mode,
     mandate: req.mandate,
+    tradeRisk: tradeRisk?.checked_input ?? undefined,
   });
 
   // 2. Run through cascade (or solo for checkpoint) under engine budget.
@@ -196,6 +214,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
           models_used: err.modelsUsed,
           verified_at: new Date().toISOString(),
           engine_budget: trace,
+          ...(tradeRisk ? {trade_risk: tradeRisk} : {}),
           ...(req.mode === 'action_authorization'
             ? {
                 promotion: {
@@ -426,6 +445,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     gate: gateField,
     meta: {
       duration_ms: durationMs,
+      ...(tradeRisk ? {trade_risk: tradeRisk} : {}),
       models_used: cascadeOutput.modelsUsed,
       verified_at: new Date().toISOString(),
       ...(verifierTrace ? {verifier_trace: verifierTrace} : {}),

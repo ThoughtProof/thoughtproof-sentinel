@@ -23,3 +23,6 @@ outcomes, no fallback on failure, and unchanged other modes and tier cascades.
 Live comparison must use frozen inputs and separate controls from historical
 cases. A larger model name or more ALLOW verdicts alone is not qualification.
 Configure a preview first; no production default is changed by this patch.
+
+The subsequent [trade risk gate and task profile](trade-risk-gate.md) are separate
+changes: the model override itself still changes only the selected alias.

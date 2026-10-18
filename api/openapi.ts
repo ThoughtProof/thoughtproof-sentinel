@@ -111,6 +111,19 @@ const spec = {
                     description:
                       'Verification tier. checkpoint: nano solo ($0.005). standard: 2-model cascade ($0.008, default).',
                   },
+                  trade_risk: {
+                    type: 'object', additionalProperties: false,
+                    description: 'Optional enforced Cycle risk profile for trade_execution only. Actual order facts from the execution host. Fixed server ceilings: risk 1%, leverage 2. No shadow mode. A pass is not an ALLOW. Callers requiring this protection must reject ALLOW without a matching meta.trade_risk receipt. Omission retains the legacy prose-only interface without deterministic risk protection.',
+                    required: ['policy', 'side', 'entry', 'stop', 'size_pct', 'risk_pct', 'leverage', 'macro_size_mult'],
+                    properties: {
+                      policy: {type: 'string', enum: ['cycle-risk-v1']},
+                      side: {type: 'string', enum: ['long', 'short']},
+                      entry: {type: 'number'}, stop: {type: 'number'},
+                      size_pct: {type: 'number', description: 'Actual order notional divided by account equity; not margin fraction'},
+                      risk_pct: {type: 'number', description: 'Requested fraction of equity at the initial stop before macro adjustment'},
+                      leverage: {type: 'number'}, macro_size_mult: {type: 'number'},
+                    },
+                  },
                   mandate: {
                     type: 'object',
                     description:
@@ -334,6 +347,19 @@ const spec = {
                     meta: {
                       type: 'object',
                       properties: {
+                        trade_risk: {
+                          type: 'object',
+                          description: 'Unsigned diagnostic receipt for the enforced risk profile. Does not attest market facts or authorization. Bind checked_input to the submitted actual order and evidence_sha256 to the validated evidence. Final verdict remains authoritative.',
+                          properties: {
+                            schema_version: {type: 'string', enum: ['sentinel.trade-risk-result.v1']},
+                            status: {type: 'string', enum: ['pass', 'block', 'invalid']},
+                            checked_input: {type: 'object', nullable: true},
+                            evidence_sha256: {type: 'string'},
+                            actual_risk_pct: {type: 'number', nullable: true},
+                            allowed_risk_pct: {type: 'number', nullable: true},
+                            codes: {type: 'array', items: {type: 'string'}},
+                          },
+                        },
                         duration_ms: { type: 'integer', example: 1200 },
                         models_used: {
                           type: 'array',

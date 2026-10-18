@@ -82,6 +82,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     maxTokens: 4096,
     strictOutputContract: true,
     sourceReferences: input.sourceReferences === true,
+    evaluationTask: input.mode === 'trade_execution' ? 'trade_decision' : undefined,
   };
 
   // Partial knowledge for budget exhaustion: only BLOCK is preservable.

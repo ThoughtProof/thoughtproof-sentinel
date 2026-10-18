@@ -19,7 +19,7 @@ export const tradeExecution: ModeHandler = (input): ModeOutput => {
   return {
     evalInput: {
       id: input.id,
-      question: `Verify that this trade execution decision is internally consistent: all claimed thresholds are actually met, all directional claims match the evidence, and no justification is fabricated.`,
+      question: `Determine whether the supplied evidence justifies the PROPOSED TRADE under every stated condition. Evaluate the proposed action, not the quality or completeness of a discussion about it. A correctly described violation is still a violation and must receive score 0. Distinguish upper limits from lower limits and descriptive measurements from requirements. Do not invent missing requirements.${input.tradeRisk ? '\nAuthoritative order facts supplied by the calling execution host (not independently attested market data): ' + JSON.stringify(input.tradeRisk) + '\nThe deterministic risk check passed; this does not establish the semantic criteria. A conflicting claim or justification must still fail.' : ''}`,
       answer: input.claim,
       trace_steps: input.evidence,
       gold_plan_steps: [
@@ -28,21 +28,21 @@ export const tradeExecution: ModeHandler = (input): ModeOutput => {
           description: 'Claimed thresholds are actually met by the numbers in evidence',
           criticality: 'critical',
           acceptance_criterion:
-            'Every numerical threshold cited in the decision (e.g. "requires 70%") must be met by the actual number in the evidence. If the evidence shows the value is below the threshold, this step FAILS.',
+            'Every numerical threshold governing the proposed action must be satisfied by the supplied facts. Apply the stated operator: upper bounds require value <= limit; lower bounds require value >= limit; strict bounds retain strictness. A descriptive indicator value does not create a new threshold. Contradicted requirements FAIL with score 0 even when the evidence accurately explains the violation. Missing required facts remain unproven.',
         },
         {
           index: 1,
           description: 'Directional claims match the evidence',
           criticality: 'critical',
           acceptance_criterion:
-            'If the decision claims an uptrend, the price data in the evidence must show an uptrend. If the evidence shows the opposite direction, this step FAILS.',
+            'Each directional claim must match its named series and the supplied strategy definition. A kernel turn is evaluated on the kernel, not by requiring monotonic raw prices. A defined current >= previous predicate permits equality; do not replace it with strict increase. Opposite direction or a false claimed turn FAILS with score 0; missing observations remain unproven.',
         },
         {
           index: 2,
           description: 'No fabricated justifications',
           criticality: 'critical',
           acceptance_criterion:
-            'Every justification given for the trade must reference data actually present in the evidence. Justifications citing data not in the evidence are fabricated.',
+            'Every material justification for the proposed trade must be supported by the supplied pre-decision evidence. Inspect the entire evidence, including explicitly identified calculations and rule definitions. A citation proves text identity, not truth or relevance. Fabricated or contradicted justifications FAIL with score 0; missing support remains unproven. Never reward a correct explanation of why the proposed action is invalid.',
         },
       ],
     },

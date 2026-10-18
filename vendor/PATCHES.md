@@ -1,3 +1,18 @@
+## 0.8.12-eval-contract.4 — decision task profile (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.4.tgz`
+- Integrity: `sha512-4PYnHvf/bDkM+8qz9gsFv0F4B40wRjSdYoNDVJHsAg0lFfHqYjflcBxJYZkT0JsvSTKrR5s92U9EseAk0aWUCw==`
+- SHA256: `6e1e571e5be7f72dd6cc41992918c2c058683d81190e1909f7778db37b7882ac`
+- Adds host-selected `evaluationTask: trade_decision` for Sentinel trade execution.
+  The dedicated prompt assesses the proposed action against facts and criteria,
+  removing the research-completion and reasoning-only task framing.
+- Other evaluator tasks retain their messages. Decoder, provenance, score floors,
+  numeric thresholds, model selection and retry policy are unchanged.
+- The old `.3` archive and its manifest remain preserved. Reproduce with
+  `node scripts/build-evaluator-contract-vendor.mjs --install-local`.
+- Native Sentinel also adds an opt-in, enforced `cycle-risk-v1` numeric gate;
+  this arithmetic is host code, not part of the model prompt or vendor overlay.
+
 ## 0.8.12-eval-contract.3 — complete response format after the catalog
 
 Current dependency: `file:vendor/pot-cli-0.8.12-eval-contract.3.tgz`.

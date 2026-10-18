@@ -1,6 +1,7 @@
 import type { AuthorizationMandate, GateMode, GateViolation } from './engine/authorization-gate.js';
 import type { RateLimitBackend } from './upstash-env.js';
 import type { ItemResult } from 'pot-cli/plv';
+import type { TradeRiskInput, TradeRiskResult } from './engine/trade-risk-gate.js';
 
 export type { RateLimitBackend };
 
@@ -71,6 +72,10 @@ export interface AgentContext {
 }
 
 export interface SentinelVerifyRequest {
+  /** Opt-in, enforced Cycle risk profile for trade_execution. No shadow bypass.
+   * Host must supply actual order facts and require the matching result receipt.
+   * Omission preserves the legacy prose-only interface, without this guarantee. */
+  trade_risk?: TradeRiskInput;
   /** Unique identifier (optional, auto-generated) */
   id?: string;
   /** The claim to verify */
@@ -305,6 +310,9 @@ export interface SentinelVerifyResponse {
     violations: GateViolation[];
   };
   meta: {
+    /** Unsigned diagnostic receipt, not independently attested exchange data.
+     * The final verdict remains authoritative; a risk pass cannot authorize entry. */
+    trade_risk?: TradeRiskResult;
     duration_ms: number;
     models_used: string[];
     verified_at: string;

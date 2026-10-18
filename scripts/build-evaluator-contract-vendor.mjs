@@ -8,7 +8,7 @@ import ts from 'typescript';
 const root=resolve(import.meta.dirname,'..'),base=join(root,'vendor/pot-cli-0.8.12.tgz');
 const hash=(p,algorithm='sha256')=>createHash(algorithm).update(readFileSync(p)).digest('hex');
 if(hash(base)!=='aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1')throw Error('BASE_VENDOR_CHANGED');
-const version='0.8.12-eval-contract.3',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
+const version='0.8.12-eval-contract.4',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
 try{
  execFileSync('tar',['-xzf',base,'-C',temp]);
  // The published 0.8.12 evaluator source is byte-identical to the audited tp.2
@@ -18,8 +18,9 @@ try{
  copyFileSync(join(root,'patches/evaluation-output-contract.ts'),join(pkg,'src/plan/evaluation-output-contract.ts'));
  copyFileSync(join(root,'patches/evaluation-request-contract.ts'),join(pkg,'src/plan/evaluation-request-contract.ts'));
  copyFileSync(join(root,'patches/evaluation-source-references.ts'),join(pkg,'src/plan/evaluation-source-references.ts'));
+ copyFileSync(join(root,'patches/trade-decision-prompt.ts'),join(pkg,'src/plan/trade-decision-prompt.ts'));
  const cfg={...ts.convertCompilerOptionsFromJson(JSON.parse(readFileSync(join(pkg,'tsconfig.json'),'utf8')).compilerOptions,pkg).options,rootDir:undefined,outDir:undefined};
- for(const name of ['graded-support-evaluator','evaluation-output-contract','evaluation-request-contract','evaluation-source-references']){
+ for(const name of ['graded-support-evaluator','evaluation-output-contract','evaluation-request-contract','evaluation-source-references','trade-decision-prompt']){
   const path=join(pkg,'src/plan',name+'.ts');
   const compiled=ts.transpileModule(readFileSync(path,'utf8'),{compilerOptions:{...cfg,declaration:false,declarationMap:false},fileName:'src/plan/'+name+'.ts',reportDiagnostics:true});
   if(compiled.diagnostics?.some(d=>d.category===ts.DiagnosticCategory.Error))throw Error('TRANSPILE_FAILED: '+compiled.diagnostics.map(d=>ts.flattenDiagnosticMessageText(d.messageText,' ')).join('; '));
@@ -32,7 +33,7 @@ try{
  for(const needle of ['export interface ItemResult {','export interface EvalOptions {'])if(!declaration.includes(needle))throw Error('DECLARATION_BASE_DRIFT');
  declaration="import type { EvaluationOutputContract } from './evaluation-output-contract.js';\n"+declaration
   .replace('export interface ItemResult {','export interface ItemResult {\n    output_contract?: EvaluationOutputContract;')
-  .replace('export interface EvalOptions {','export interface EvalOptions {\n    strictOutputContract?: boolean;\n    sourceReferences?: boolean;');
+  .replace('export interface EvalOptions {','export interface EvalOptions {\n    strictOutputContract?: boolean;\n    sourceReferences?: boolean;\n    evaluationTask?: \'trade_decision\';');
  writeFileSync(declarationPath,declaration);
  // This declaration map belongs to the original declaration, not the overlay.
  if(existsSync(declarationPath+'.map'))rmSync(declarationPath+'.map');
@@ -52,7 +53,7 @@ try{
  execFileSync('python3',['-c',
   'import pathlib,tarfile,gzip,sys\np=pathlib.Path(sys.argv[1]);o=pathlib.Path(sys.argv[2])\nwith o.open("wb") as f:\n with gzip.GzipFile(filename="",mode="wb",fileobj=f,mtime=0) as z:\n  with tarfile.open(fileobj=z,mode="w",format=tarfile.PAX_FORMAT) as t:\n   for x in sorted(p.rglob("*")):\n    i=t.gettarinfo(str(x),"package/"+str(x.relative_to(p)));i.uid=i.gid=0;i.uname=i.gname="";i.mtime=0;i.pax_headers={}\n    if x.is_file():\n     with x.open("rb") as b:t.addfile(i,b)\n    else:t.addfile(i)\n',pkg,target]);
  const manifest={base_sha256:hash(base),version,archive:filename,sha256:hash(target),typescript_version:ts.version,
-  patch_sha256:hash(join(root,'patches/pot-cli-evaluator-contract.patch')),decoder_sha256:hash(join(root,'patches/evaluation-output-contract.ts')),request_contract_sha256:hash(join(root,'patches/evaluation-request-contract.ts')),source_references_sha256:hash(join(root,'patches/evaluation-source-references.ts')),network_requests:0};
+  patch_sha256:hash(join(root,'patches/pot-cli-evaluator-contract.patch')),decoder_sha256:hash(join(root,'patches/evaluation-output-contract.ts')),request_contract_sha256:hash(join(root,'patches/evaluation-request-contract.ts')),source_references_sha256:hash(join(root,'patches/evaluation-source-references.ts')),trade_decision_prompt_sha256:hash(join(root,'patches/trade-decision-prompt.ts')),network_requests:0};
  const manifestPath=join(root,'patches/vendor-manifest.json');
  if(existsSync(manifestPath)&&JSON.stringify(JSON.parse(readFileSync(manifestPath,'utf8')))!==JSON.stringify(manifest))throw Error('NON_REPRODUCIBLE_VENDOR_BUILD');
  writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');

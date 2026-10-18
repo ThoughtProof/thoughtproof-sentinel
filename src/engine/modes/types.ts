@@ -11,6 +11,7 @@
 import type { EvalInput, GoldStep } from 'pot-cli/plv';
 import type { SentinelMode } from '../../types.js';
 import type { AuthorizationMandate } from '../authorization-gate.js';
+import type {TradeRiskInput} from '../trade-risk-gate.js';
 
 export interface ModeInput {
   id: string;
@@ -19,6 +20,7 @@ export interface ModeInput {
   mode: SentinelMode;
   /** Optional machine-readable mandate (action_authorization only). */
   mandate?: AuthorizationMandate;
+  tradeRisk?: TradeRiskInput;
 }
 
 export interface ModeOutput {
