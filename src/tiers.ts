@@ -78,6 +78,10 @@ export function getTierConfig(tier?: SentinelTier): TierConfig {
   return TIER_CONFIGS[tier ?? 'standard'];
 }
 
+// Exact IDs observed in the authenticated OpenServ catalog. These are routes,
+// not qualified production defaults. A missing/unpriced ID must not alias to Sol.
+const NAMED_OPENSERV_TRADE_MODELS = ['openserv/gpt-6-sol', 'openserv/gpt-6-astra'];
+
 /** Deployment-only selection for a single trade checkpoint evaluator.
  * Public tier defaults and all other modes remain unchanged. Never silently
  * fall back to Nano when a configured model is invalid or unavailable.
@@ -85,12 +89,27 @@ export function getTierConfig(tier?: SentinelTier): TierConfig {
 export function getCascadeModels(tier: SentinelTier, mode?: SentinelMode): string[] {
   const selected = process.env.SENTINEL_TRADE_CHECKPOINT_MODEL;
   if (mode === 'trade_execution' && tier === 'checkpoint' && selected !== undefined) {
-    if (!['serv-nano', 'serv-swift', 'serv-pro'].includes(selected)) {
+    if (!['serv-nano', 'serv-swift', 'serv-pro', ...NAMED_OPENSERV_TRADE_MODELS].includes(selected)) {
       throw new Error('INVALID_TRADE_CHECKPOINT_MODEL');
     }
     return [selected];
   }
   return [...TIER_CONFIGS[tier].cascade];
+}
+
+/** Only the new named routes accept an explicit reasoning budget. */
+export function getTradeCheckpointReasoningEffort(
+  tier: SentinelTier, mode?: SentinelMode,
+): 'low' | 'medium' | 'high' | undefined {
+  if (mode !== 'trade_execution' || tier !== 'checkpoint') return undefined;
+  const configured = process.env.SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT;
+  const named = NAMED_OPENSERV_TRADE_MODELS.includes(process.env.SENTINEL_TRADE_CHECKPOINT_MODEL ?? '');
+  if (!named && configured === undefined) return undefined;
+  const effort = configured ?? 'low';
+  if (!named || !['low', 'medium', 'high'].includes(effort)) {
+    throw new Error('INVALID_TRADE_CHECKPOINT_REASONING_EFFORT');
+  }
+  return effort as 'low' | 'medium' | 'high';
 }
 
 /** Public tier listing — excludes hidden tiers (swift, pro). */

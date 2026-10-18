@@ -1,3 +1,19 @@
+## 0.8.12-eval-contract.5 — named OpenServ routes (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.5.tgz`
+- Integrity: `sha512-Eseic2pRhiG0swtkFPBJvgDWcPRynpk/Ab3LVEqqr6i3akeIbUd3Ylwlj0AyCKqagb28xBCLVt6iJXRQNAR5Mw==`
+- SHA256: `e1579eb7630799504d3379c8e7dc01a9e45424b1f9845f6e6a95bfd43d9679b7`
+- Adds exact `openserv/gpt-6-sol` and `openserv/gpt-6-astra` routes using
+  SERV credentials and default BRAID processing; never the direct OpenAI route.
+- Named reasoning routes use `reasoning_effort` (low by default), provider
+  sampling defaults, and `max_completion_tokens`. They require the exact
+  response model ID and a complete final answer. No repair/fallback is added.
+- Legacy routes retain their outgoing settings. The trade prompt, strict
+  decoder, source references, rubric, scores and risk checks are unchanged.
+- Prior `.4` archive/manifest are retained. The build compiles the router and
+  its declarations from the patched source and pins the extra patch digest.
+- Availability does not qualify a model for trading. See the named-model docs.
+
 ## 0.8.12-eval-contract.4 — decision task profile (2026-10-18)
 
 - Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.4.tgz`

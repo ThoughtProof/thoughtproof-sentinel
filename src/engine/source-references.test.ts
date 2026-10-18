@@ -23,14 +23,16 @@ let calls: any[];
 beforeEach(() => {
   calls = [];
   vi.stubEnv('CONFIRM_BLOCKS', '0');
+  vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT', undefined);
   reply = () => { throw Error('UNPLANNED_SYNTHETIC_COMPLETION'); };
   vi.stubGlobal('fetch', vi.fn(async (url, options) => {
     expect(String(url)).toBe('https://offline.invalid/v1/chat/completions');
     const body = JSON.parse(String(options?.body));
+    expect(new Headers(options?.headers).has('x-openserv-disable-braid')).toBe(false);
     calls.push(body);
     const user = body.messages.find((m: any) => m.role === 'user').content;
     const catalog = user.includes(marker) ? JSON.parse(user.slice(user.lastIndexOf(marker) + marker.length).split(schemaMarker)[0]) : null;
-    return new Response(JSON.stringify({choices: [{message: {content: JSON.stringify(reply(catalog, body, calls.length))}}]}));
+    return new Response(JSON.stringify({model: body.model, choices: [{finish_reason: 'stop', message: {content: JSON.stringify(reply(catalog, body, calls.length))}}]}));
   }));
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
@@ -151,10 +153,79 @@ describe('deployment-selected trade checkpoint model', () => {
     expect(result.verdict).toBe('ALLOW');
   });
 
-  it.each(['', 'unknown', 'serv-pro ', 'openai/arbitrary-model'])('fails before any provider call for invalid configured model %j', async model => {
+  it.each(['', 'unknown', 'serv-pro ', 'openai/arbitrary-model', 'openserv/gpt-6.1-sol', 'openserv/gpt-6-sol/other'])('fails before any provider call for invalid configured model %j', async model => {
     vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', model);
     await expect(verify(positive)).rejects.toThrow('INVALID_TRADE_CHECKPOINT_MODEL');
     expect(calls).toHaveLength(0);
+  });
+
+  it.each(['gpt-6-sol', 'gpt-6-astra'])('routes the exact %s catalog ID through SERV with BRAID defaults', async model => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', undefined);
+    reply = catalog => rows(catalog!);
+    await verify(positive);
+    const baseline = calls[0];
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'openserv/' + model);
+    const result = await verify(positive);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual({model, messages: baseline.messages,
+      max_completion_tokens: 4096, reasoning_effort: 'low'});
+    expect(result.meta.models_used).toEqual(['openserv/' + model]);
+    expect(result.meta.verifier_trace!.stages.map(s => [s.stage, s.model])).toEqual([['solo', 'openserv/' + model]]);
+    expect(result.verdict).toBe('ALLOW');
+  });
+
+  it.each(['low', 'medium', 'high'])('forwards the explicit named-route reasoning effort %s', async effort => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'openserv/gpt-6-sol');
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT', effort);
+    reply = catalog => rows(catalog!);
+    await verify(positive);
+    expect(calls[0].reasoning_effort).toBe(effort);
+    expect(calls).toHaveLength(1);
+  });
+
+  it.each(['', 'medium ', 'arbitrary', 'max'])('rejects invalid reasoning effort %j before inference', async effort => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'openserv/gpt-6-sol');
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT', effort);
+    await expect(verify(positive)).rejects.toThrow('INVALID_TRADE_CHECKPOINT_REASONING_EFFORT');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does not silently apply the new reasoning setting to a legacy route', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'serv-pro');
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT', 'low');
+    await expect(verify(positive)).rejects.toThrow('INVALID_TRADE_CHECKPOINT_REASONING_EFFORT');
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['serv-pro', 'stop', 'OPENSERV_MODEL_MISMATCH'],
+    [undefined, 'stop', 'OPENSERV_MODEL_MISMATCH'],
+    ['gpt-6-sol', 'length', 'OPENSERV_INCOMPLETE_COMPLETION'],
+    ['gpt-6-sol', 'content_filter', 'OPENSERV_INCOMPLETE_COMPLETION'],
+  ])('fails closed without fallback for response model=%s, finish=%s', async (model, finish, error) => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'openserv/gpt-6-sol');
+    const fetch = vi.fn(async () => new Response(JSON.stringify({model,
+      choices: [{finish_reason: finish, message: {content: '[]'}}]})));
+    vi.stubGlobal('fetch', fetch);
+    await expect(verify(positive)).rejects.toThrow(error);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps malformed named-model assessments restrictive without a repair retry', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'openserv/gpt-6-sol');
+    reply = () => [];
+    const result = await verify(positive);
+    expect(result.verdict).toBe('UNCERTAIN');
+    expect(contract(result).status).toBe('invalid');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('keeps a valid restrictive named-model assessment restrictive', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'openserv/gpt-6-sol');
+    reply = catalog => rows(catalog!, sourceLines, 0);
+    const result = await verify(positive);
+    expect(result.verdict).toBe('BLOCK');
+    expect(calls).toHaveLength(1);
   });
 
   it('does not use Nano as a fallback when the selected provider fails', async () => {
@@ -190,6 +261,7 @@ describe('deployment-selected trade checkpoint model', () => {
     const request = {...positive, mode: 'trade_reasoning' as const};
     const baseline = await verify(request);
     vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'invalid');
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT', 'invalid');
     const candidate = await verify(request);
     expect(calls).toHaveLength(2);
     expect(calls[1]).toEqual(calls[0]);
@@ -199,6 +271,7 @@ describe('deployment-selected trade checkpoint model', () => {
 
   it('leaves the configured standard cascade unchanged', async () => {
     vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'serv-pro');
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT', 'invalid');
     reply = catalog => rows(catalog!);
     await verify({...positive, tier: 'standard'});
     expect(calls[0].model).toBe('serv-nano');

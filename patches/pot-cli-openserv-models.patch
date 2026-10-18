@@ -1,0 +1,46 @@
+--- a/src/utils/model-router.ts
++++ b/src/utils/model-router.ts
+@@ -28,0 +29,2 @@
++  /** Explicit catalog model through SERV, with default BRAID processing. */
++  namedOpenServ?: boolean;
+@@ -78,0 +81,7 @@
++      case 'openserv':
++        // Never route this namespace to api.openserv.com or OPENAI_API_KEY.
++        if (!['gpt-6-sol', 'gpt-6-astra'].includes(model) || nameOrAlias !== `openserv/${model}`) {
++          throw new Error('INVALID_NAMED_OPENSERV_MODEL');
++        }
++        return { baseUrl: process.env.SERV_BASE_URL ?? 'https://inference-api.openserv.ai/v1',
++          apiKeyEnv: 'SERV_API_KEY', model, type: 'openai', namedOpenServ: true };
+@@ -156,0 +166 @@
++  reasoningEffort?: 'low' | 'medium' | 'high',
+@@ -170 +180 @@
+-      ...(config.baseUrl.includes('openai.com') || config.baseUrl.includes('openserv.ai')
++      ...(config.namedOpenServ || config.baseUrl.includes('openai.com') || config.baseUrl.includes('openserv.ai')
+@@ -172,0 +183,2 @@
++      ...(config.namedOpenServ ? { reasoning_effort: reasoningEffort ?? 'low' } : {}),
++      // Named reasoning models use provider sampling defaults (temperature: 0 is rejected).
+@@ -174 +186 @@
+-      ...(temperature !== undefined && !config.baseUrl.includes('moonshot') ? { temperature } : {}),
++      ...(temperature !== undefined && !config.namedOpenServ && !config.baseUrl.includes('moonshot') ? { temperature } : {}),
+@@ -177 +189 @@
+-      ...(seed !== undefined && !config.model.startsWith('gemini') ? { seed } : {}),
++      ...(seed !== undefined && !config.namedOpenServ && !config.model.startsWith('gemini') ? { seed } : {}),
+@@ -194 +206 @@
+-    choices?: Array<{ message?: { content?: string } }>;
++    choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+@@ -197,0 +210,5 @@
++
++  // Require the provider's explicit route acknowledgement and a complete final answer.
++  // This is not independent attestation of the underlying weights. No hidden fallback.
++  if (config.namedOpenServ && data.model !== config.model) throw new Error('OPENSERV_MODEL_MISMATCH');
++  if (config.namedOpenServ && data.choices?.[0]?.finish_reason !== 'stop') throw new Error('OPENSERV_INCOMPLETE_COMPLETION');
+@@ -211 +228 @@
+-  options: { maxTokens?: number; temperature?: number; seed?: number } = {},
++  options: { maxTokens?: number; temperature?: number; seed?: number; reasoningEffort?: 'low' | 'medium' | 'high' } = {},
+@@ -214,0 +232,3 @@
++  if (options.reasoningEffort !== undefined && (!config.namedOpenServ || !['low', 'medium', 'high'].includes(options.reasoningEffort))) {
++    throw new Error('INVALID_OPENSERV_REASONING_EFFORT');
++  }
+@@ -219 +239 @@
+-  return callOpenAICompat(config, messages, maxTokens, options.temperature, options.seed);
++  return callOpenAICompat(config, messages, maxTokens, options.temperature, options.seed, options.reasoningEffort);

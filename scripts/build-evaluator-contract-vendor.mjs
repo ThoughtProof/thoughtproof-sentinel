@@ -8,13 +8,14 @@ import ts from 'typescript';
 const root=resolve(import.meta.dirname,'..'),base=join(root,'vendor/pot-cli-0.8.12.tgz');
 const hash=(p,algorithm='sha256')=>createHash(algorithm).update(readFileSync(p)).digest('hex');
 if(hash(base)!=='aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1')throw Error('BASE_VENDOR_CHANGED');
-const version='0.8.12-eval-contract.4',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
+const version='0.8.12-eval-contract.5',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
 try{
  execFileSync('tar',['-xzf',base,'-C',temp]);
  // The published 0.8.12 evaluator source is byte-identical to the audited tp.2
  // source. Guard that assumption before applying the existing overlay.
  if(hash(join(pkg,'src/plan/graded-support-evaluator.ts'))!=='5302b8fb14d5179eb2b1be6dce3723ca100673d9477aa624eb9b3671198c118e')throw Error('EVALUATOR_SOURCE_CHANGED');
  execFileSync('patch',['-p1','--batch','--forward','-i',join(root,'patches/pot-cli-evaluator-contract.patch')],{cwd:pkg});
+ execFileSync('patch',['-p1','--batch','--forward','-i',join(root,'patches/pot-cli-openserv-models.patch')],{cwd:pkg});
  copyFileSync(join(root,'patches/evaluation-output-contract.ts'),join(pkg,'src/plan/evaluation-output-contract.ts'));
  copyFileSync(join(root,'patches/evaluation-request-contract.ts'),join(pkg,'src/plan/evaluation-request-contract.ts'));
  copyFileSync(join(root,'patches/evaluation-source-references.ts'),join(pkg,'src/plan/evaluation-source-references.ts'));
@@ -27,13 +28,22 @@ try{
   writeFileSync(join(pkg,'dist/plan',name+'.js'),compiled.outputText);
   if(compiled.sourceMapText)writeFileSync(join(pkg,'dist/plan',name+'.js.map'),compiled.sourceMapText);
  }
+ // Compile the router overlay and its declaration from the same source.
+ const routerSource=readFileSync(join(pkg,'src/utils/model-router.ts'),'utf8');
+ const routerJs=ts.transpileModule(routerSource,{compilerOptions:{...cfg,declaration:false,declarationMap:false},fileName:'src/utils/model-router.ts',reportDiagnostics:true});
+ const routerDts=ts.transpileDeclaration(routerSource,{compilerOptions:{...cfg,declarationMap:false},fileName:'src/utils/model-router.ts'});
+ if([...routerJs.diagnostics??[],...routerDts.diagnostics??[]].some(d=>d.category===ts.DiagnosticCategory.Error))throw Error('ROUTER_EMIT_FAILED');
+ writeFileSync(join(pkg,'dist/utils/model-router.js'),routerJs.outputText);
+ if(routerJs.sourceMapText)writeFileSync(join(pkg,'dist/utils/model-router.js.map'),routerJs.sourceMapText);
+ writeFileSync(join(pkg,'dist/utils/model-router.d.ts'),routerDts.outputText);
+ if(existsSync(join(pkg,'dist/utils/model-router.d.ts.map')))rmSync(join(pkg,'dist/utils/model-router.d.ts.map'));
  // Preserve existing declaration surface; add the two source-matched opt-in fields.
  const declarationPath=join(pkg,'dist/plan/graded-support-evaluator.d.ts');
  let declaration=readFileSync(declarationPath,'utf8');
  for(const needle of ['export interface ItemResult {','export interface EvalOptions {'])if(!declaration.includes(needle))throw Error('DECLARATION_BASE_DRIFT');
  declaration="import type { EvaluationOutputContract } from './evaluation-output-contract.js';\n"+declaration
   .replace('export interface ItemResult {','export interface ItemResult {\n    output_contract?: EvaluationOutputContract;')
-  .replace('export interface EvalOptions {','export interface EvalOptions {\n    strictOutputContract?: boolean;\n    sourceReferences?: boolean;\n    evaluationTask?: \'trade_decision\';');
+  .replace('export interface EvalOptions {','export interface EvalOptions {\n    strictOutputContract?: boolean;\n    sourceReferences?: boolean;\n    evaluationTask?: \'trade_decision\';\n    reasoningEffort?: \'low\' | \'medium\' | \'high\';');
  writeFileSync(declarationPath,declaration);
  // This declaration map belongs to the original declaration, not the overlay.
  if(existsSync(declarationPath+'.map'))rmSync(declarationPath+'.map');
@@ -53,7 +63,7 @@ try{
  execFileSync('python3',['-c',
   'import pathlib,tarfile,gzip,sys\np=pathlib.Path(sys.argv[1]);o=pathlib.Path(sys.argv[2])\nwith o.open("wb") as f:\n with gzip.GzipFile(filename="",mode="wb",fileobj=f,mtime=0) as z:\n  with tarfile.open(fileobj=z,mode="w",format=tarfile.PAX_FORMAT) as t:\n   for x in sorted(p.rglob("*")):\n    i=t.gettarinfo(str(x),"package/"+str(x.relative_to(p)));i.uid=i.gid=0;i.uname=i.gname="";i.mtime=0;i.pax_headers={}\n    if x.is_file():\n     with x.open("rb") as b:t.addfile(i,b)\n    else:t.addfile(i)\n',pkg,target]);
  const manifest={base_sha256:hash(base),version,archive:filename,sha256:hash(target),typescript_version:ts.version,
-  patch_sha256:hash(join(root,'patches/pot-cli-evaluator-contract.patch')),decoder_sha256:hash(join(root,'patches/evaluation-output-contract.ts')),request_contract_sha256:hash(join(root,'patches/evaluation-request-contract.ts')),source_references_sha256:hash(join(root,'patches/evaluation-source-references.ts')),trade_decision_prompt_sha256:hash(join(root,'patches/trade-decision-prompt.ts')),network_requests:0};
+  patch_sha256:hash(join(root,'patches/pot-cli-evaluator-contract.patch')),openserv_router_patch_sha256:hash(join(root,'patches/pot-cli-openserv-models.patch')),decoder_sha256:hash(join(root,'patches/evaluation-output-contract.ts')),request_contract_sha256:hash(join(root,'patches/evaluation-request-contract.ts')),source_references_sha256:hash(join(root,'patches/evaluation-source-references.ts')),trade_decision_prompt_sha256:hash(join(root,'patches/trade-decision-prompt.ts')),network_requests:0};
  const manifestPath=join(root,'patches/vendor-manifest.json');
  if(existsSync(manifestPath)&&JSON.stringify(JSON.parse(readFileSync(manifestPath,'utf8')))!==JSON.stringify(manifest))throw Error('NON_REPRODUCIBLE_VENDOR_BUILD');
  writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');

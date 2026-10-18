@@ -22,7 +22,7 @@ import {
 
 import { runCascade, type CascadeConfig } from 'pot-cli/cascade';
 import type { SentinelMode, SentinelTier } from '../types.js';
-import { getCascadeModels } from '../tiers.js';
+import { getCascadeModels, getTradeCheckpointReasoningEffort } from '../tiers.js';
 import {
   EngineBudgetExhaustedError,
   raceAgainstBudget,
@@ -83,6 +83,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     strictOutputContract: true,
     sourceReferences: input.sourceReferences === true,
     evaluationTask: input.mode === 'trade_execution' ? 'trade_decision' : undefined,
+    reasoningEffort: getTradeCheckpointReasoningEffort(input.tier, input.mode),
   };
 
   // Partial knowledge for budget exhaustion: only BLOCK is preservable.
