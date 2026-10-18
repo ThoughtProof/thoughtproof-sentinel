@@ -1,4 +1,4 @@
-import type { SentinelTier } from './types.js';
+import type { SentinelMode, SentinelTier } from './types.js';
 
 export interface TierConfig {
   tier: SentinelTier;
@@ -76,6 +76,21 @@ export const TIER_CONFIGS: Record<SentinelTier, TierConfig> = {
 
 export function getTierConfig(tier?: SentinelTier): TierConfig {
   return TIER_CONFIGS[tier ?? 'standard'];
+}
+
+/** Deployment-only selection for a single trade checkpoint evaluator.
+ * Public tier defaults and all other modes remain unchanged. Never silently
+ * fall back to Nano when a configured model is invalid or unavailable.
+ */
+export function getCascadeModels(tier: SentinelTier, mode?: SentinelMode): string[] {
+  const selected = process.env.SENTINEL_TRADE_CHECKPOINT_MODEL;
+  if (mode === 'trade_execution' && tier === 'checkpoint' && selected !== undefined) {
+    if (!['serv-nano', 'serv-swift', 'serv-pro'].includes(selected)) {
+      throw new Error('INVALID_TRADE_CHECKPOINT_MODEL');
+    }
+    return [selected];
+  }
+  return [...TIER_CONFIGS[tier].cascade];
 }
 
 /** Public tier listing — excludes hidden tiers (swift, pro). */

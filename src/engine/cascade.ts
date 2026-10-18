@@ -21,8 +21,8 @@ import {
 } from 'pot-cli/plv';
 
 import { runCascade, type CascadeConfig } from 'pot-cli/cascade';
-import type { SentinelTier } from '../types.js';
-import { TIER_CONFIGS } from '../tiers.js';
+import type { SentinelMode, SentinelTier } from '../types.js';
+import { getCascadeModels } from '../tiers.js';
 import {
   EngineBudgetExhaustedError,
   raceAgainstBudget,
@@ -33,6 +33,8 @@ export interface CascadeInput {
   evalInput: EvalInput;
   evalMode: EvalMode;
   tier: SentinelTier;
+  /** Host-provided mode; model selection is never accepted from request data. */
+  mode?: SentinelMode;
   /** Host-addressed citations, enabled initially for trade_execution only. */
   sourceReferences?: boolean;
   /** Engine budget abort — when aborted, in-flight eval is abandoned. */
@@ -70,8 +72,7 @@ export interface CascadeEvaluation {
  * - standard: Nano→Pro cascade (runCascade with early-exit)
  */
 export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOutput> {
-  const tierConfig = TIER_CONFIGS[input.tier];
-  const stages = tierConfig.cascade;
+  const stages = getCascadeModels(input.tier, input.mode);
   const startedAt = input.budgetStartedAt ?? Date.now();
   const budgetMs = input.budgetMs;
   const signal = input.signal;

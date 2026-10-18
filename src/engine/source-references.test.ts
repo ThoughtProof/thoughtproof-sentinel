@@ -135,6 +135,77 @@ describe('host-addressed citations through the installed router, parser and engi
   });
 });
 
+describe('deployment-selected trade checkpoint model', () => {
+  it.each(['serv-pro', 'serv-swift'])('uses %s alone with byte-identical evaluator messages and settings', async model => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', undefined);
+    reply = catalog => rows(catalog!);
+    await verify(positive);
+    const baseline = calls[0];
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', model);
+    const result = await verify(positive);
+    expect(calls).toHaveLength(2);
+    expect(baseline.model).toBe('serv-nano');
+    expect(calls[1]).toEqual({...baseline, model});
+    expect(result.meta.models_used).toEqual([model]);
+    expect(result.meta.verifier_trace!.stages.map(s => [s.stage, s.model])).toEqual([['solo', model]]);
+    expect(result.verdict).toBe('ALLOW');
+  });
+
+  it.each(['', 'unknown', 'serv-pro ', 'openai/arbitrary-model'])('fails before any provider call for invalid configured model %j', async model => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', model);
+    await expect(verify(positive)).rejects.toThrow('INVALID_TRADE_CHECKPOINT_MODEL');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('does not use Nano as a fallback when the selected provider fails', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'serv-pro');
+    reply = () => { throw Error('OFFLINE_PROVIDER_FAILURE'); };
+    await expect(verify(positive)).rejects.toThrow('OFFLINE_PROVIDER_FAILURE');
+    expect(calls.map(c => c.model)).toEqual(['serv-pro']);
+  });
+
+  it('keeps invalid output restrictive with no second attempt', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'serv-pro');
+    reply = catalog => rows(catalog!).map(({reasoning: _reasoning, ...row}) => row);
+    const result = await verify(positive);
+    expect(result.verdict).toBe('UNCERTAIN');
+    expect(contract(result).status).toBe('invalid');
+    expect(calls.map(c => c.model)).toEqual(['serv-pro']);
+  });
+
+  it('preserves an explicit cited contradiction on Pro', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'serv-pro');
+    const risk: SentinelVerifyRequest = JSON.parse(readFileSync(new URL('./fixtures/cycle-quotes-20261017/risk_contradiction_request.json', import.meta.url), 'utf8'));
+    const contradiction = risk.evidence.split('\n').find(line => line.includes('The proposal claim incorrectly says stop 1900 and loss 50.'))!;
+    reply = catalog => rows(catalog!, [contradiction, contradiction, contradiction], 0);
+    const result = await verify(risk);
+    expect(result.verdict).toBe('BLOCK');
+    expect(result.objections.every(o => o.quote === contradiction && o.score === 0)).toBe(true);
+    expect(calls.map(c => c.model)).toEqual(['serv-pro']);
+  });
+
+  it('leaves other modes unchanged even if the trade override is invalid', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', undefined);
+    reply = () => sourceLines.map((quote, i) => ({step_id: `step_${i}`, score: 1, quote, reasoning: 'Synthetic source-backed evaluation.'}));
+    const request = {...positive, mode: 'trade_reasoning' as const};
+    const baseline = await verify(request);
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'invalid');
+    const candidate = await verify(request);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(calls[0]);
+    expect(candidate.verdict).toBe(baseline.verdict);
+    expect(candidate.meta.models_used).toEqual(['serv-nano']);
+  });
+
+  it('leaves the configured standard cascade unchanged', async () => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', 'serv-pro');
+    reply = catalog => rows(catalog!);
+    await verify({...positive, tier: 'standard'});
+    expect(calls[0].model).toBe('serv-nano');
+    expect(calls.every(c => ['serv-nano', 'serv-swift'].includes(c.model))).toBe(true);
+  });
+});
+
 describe('source scope, limits and unchanged caller behavior', () => {
   const mixed = (): EvalInput => ({id: 'mixed-sources', question: 'Preserve source routing.',
     answer: 'The final answer retains the two observed errors.',
