@@ -16,10 +16,11 @@ const hash = (value: string | Buffer) => createHash('sha256').update(value).dige
 const head = execFileSync('git', ['rev-parse', 'HEAD'], {encoding: 'utf8'}).trim();
 if (head !== protocol.server_commit || execFileSync('git', ['status', '--porcelain'], {encoding: 'utf8'}).trim()) throw Error('SOURCE_NOT_FROZEN');
 if (process.env.SERV_BASE_URL !== 'https://inference-api.openserv.ai/v1' || !process.env.SERV_API_KEY?.trim()) throw Error('PROVIDER_CONFIGURATION_MISSING');
-if (process.env.SENTINEL_TRADE_CHECKPOINT_MODEL !== 'openserv/gpt-6-sol' || process.env.SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT !== 'low') throw Error('MODEL_CONFIGURATION_MISMATCH');
+if (!['openserv/gpt-6-sol', 'openserv/gpt-6-luna'].includes(protocol.model) || process.env.SENTINEL_TRADE_CHECKPOINT_MODEL !== protocol.model || protocol.reasoning_effort !== 'low' || process.env.SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT !== protocol.reasoning_effort) throw Error('MODEL_CONFIGURATION_MISMATCH');
+const wireModel = protocol.model.slice('openserv/'.length);
 const attemptPath = join(directory, 'engine_attempts.jsonl');
 if (existsSync(attemptPath)) throw Error('ATTEMPT_ALREADY_STARTED');
-if (protocol.calls.length !== 9) throw Error('UNEXPECTED_CALL_COUNT');
+if (protocol.calls.length !== 9 || protocol.max_model_invocations !== 8 || protocol.retries !== 0) throw Error('UNEXPECTED_CALL_COUNT');
 for (const call of protocol.calls) {
   if (hash(readFileSync(join(directory, call.request_file))) !== call.request_sha256) throw Error('INPUT_CHANGED');
 }
@@ -31,13 +32,15 @@ const dump = (name: string, value: unknown) => {
 };
 const originalFetch = globalThis.fetch;
 let providerCalls: unknown[] = [];
+let totalProviderCalls = 0;
 globalThis.fetch = async (url, options) => {
   if (String(url) !== 'https://inference-api.openserv.ai/v1/chat/completions') throw Error('UNEXPECTED_NETWORK_TARGET');
-  if (providerCalls.length) throw Error('UNEXPECTED_RETRY');
+  if (providerCalls.length || totalProviderCalls >= protocol.max_model_invocations) throw Error('UNEXPECTED_RETRY');
   const body = JSON.parse(String(options?.body));
-  if (body.model !== 'gpt-6-sol' || body.reasoning_effort !== 'low' || body.max_completion_tokens !== 4096 || 'temperature' in body || 'seed' in body || new Headers(options?.headers).has('x-openserv-disable-braid')) throw Error('WIRE_CONFIGURATION_CHANGED');
+  if (body.model !== wireModel || body.reasoning_effort !== protocol.reasoning_effort || body.max_completion_tokens !== 4096 || 'temperature' in body || 'seed' in body || new Headers(options?.headers).has('x-openserv-disable-braid')) throw Error('WIRE_CONFIGURATION_CHANGED');
   const record: Record<string, unknown> = {request: body, started_at_utc: new Date().toISOString()};
   providerCalls.push(record);
+  totalProviderCalls++;
   const started = performance.now();
   try {
     const response = await originalFetch(url, {...options, signal: AbortSignal.timeout(45_000)});

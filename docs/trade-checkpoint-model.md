@@ -2,7 +2,8 @@
 
 `SENTINEL_TRADE_CHECKPOINT_MODEL=serv-pro` selects Pro alone for requests with
 `mode: trade_execution` and `tier: checkpoint`. Supported values are `serv-nano`,
-`serv-swift`, `serv-pro`, `openserv/gpt-6-sol` and `openserv/gpt-6-astra`;
+`serv-swift`, `serv-pro`, `openserv/gpt-6-sol`, `openserv/gpt-6-astra` and
+`openserv/gpt-6-luna`;
 absence retains the default Nano checkpoint.
 This is deployment configuration, not a caller-provided request field.
 
@@ -33,7 +34,7 @@ changes. The three legacy SERV aliases still change only the selected alias.
 The `openserv/` namespace routes an exact catalog ID through
 `https://inference-api.openserv.ai/v1` (or the configured `SERV_BASE_URL`) and
 `SERV_API_KEY`. It does not use a direct OpenAI endpoint or its credentials.
-Only the two enumerated IDs above are accepted, including in the vendor router.
+Only the three enumerated IDs above are accepted, including in the vendor router.
 Astra is catalog-listed and covered by offline routing tests, not live-qualified.
 
 For these routes, `SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT` accepts `low`,
@@ -63,3 +64,12 @@ Sources: [model catalog](https://docs.openserv.ai/serv-reasoning/models),
 [reasoning effort](https://docs.openserv.ai/serv-reasoning/tutorials/reasoning-effort).
 These named routes require separate latency and decision-quality qualification;
 the small compatibility check is not that qualification.
+
+### Cheaper-model comparison
+
+The authenticated 2026-10-18 catalog lists GPT-6 Luna with reasoning support.
+Published input/output prices are $0.13/$0.65 per million tokens versus
+$2.60/$13.00 for Sol, including SERV Reasoning. Those are token rates, not a
+measured bill. Luna is available for the same frozen nine-case native-engine
+diagnostic as Sol, with low effort, default BRAID and one attempt per case.
+There is no production model switch or new trading qualification implied.

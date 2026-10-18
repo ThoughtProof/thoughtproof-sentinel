@@ -6,7 +6,7 @@
 @@ -78,0 +81,7 @@
 +      case 'openserv':
 +        // Never route this namespace to api.openserv.com or OPENAI_API_KEY.
-+        if (!['gpt-6-sol', 'gpt-6-astra'].includes(model) || nameOrAlias !== `openserv/${model}`) {
++        if (!['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna'].includes(model) || nameOrAlias !== `openserv/${model}`) {
 +          throw new Error('INVALID_NAMED_OPENSERV_MODEL');
 +        }
 +        return { baseUrl: process.env.SERV_BASE_URL ?? 'https://inference-api.openserv.ai/v1',

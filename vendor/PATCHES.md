@@ -1,3 +1,15 @@
+## 0.8.12-eval-contract.6 — cheaper named-model diagnostic (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.6.tgz`
+- Integrity: `sha512-YbJ1tyqp7pjMWO/k3TYwhqje8Lo1SkKfDB+C/GdCOzE+/VXK3vSjOdZUd1Jq5fX0i3eTcaqa9XKeHdmvCPX+kw==`
+- SHA256: `f2879cc46a2f6592cf9109cc785acc27fcbdd2d1b1c5018a5d44264660fb29c1`
+- Adds the catalog-listed `openserv/gpt-6-luna` to the same exact-ID allowlist.
+  Host selection remains opt-in; the default checkpoint remains Nano.
+- The only router change from `.5` is this additional permitted ID. Prompt,
+  output contract, source checks, risk checks, reasoning settings and fallback
+  policy are unchanged. Prior `.5` archive and manifest remain preserved.
+- Availability and offline routing tests do not establish decision quality.
+
 ## 0.8.12-eval-contract.5 — named OpenServ routes (2026-10-18)
 
 - Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.5.tgz`

@@ -8,7 +8,7 @@ import ts from 'typescript';
 const root=resolve(import.meta.dirname,'..'),base=join(root,'vendor/pot-cli-0.8.12.tgz');
 const hash=(p,algorithm='sha256')=>createHash(algorithm).update(readFileSync(p)).digest('hex');
 if(hash(base)!=='aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1')throw Error('BASE_VENDOR_CHANGED');
-const version='0.8.12-eval-contract.5',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
+const version='0.8.12-eval-contract.6',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
 try{
  execFileSync('tar',['-xzf',base,'-C',temp]);
  // The published 0.8.12 evaluator source is byte-identical to the audited tp.2

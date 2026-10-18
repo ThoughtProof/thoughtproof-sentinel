@@ -159,7 +159,7 @@ describe('deployment-selected trade checkpoint model', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it.each(['gpt-6-sol', 'gpt-6-astra'])('routes the exact %s catalog ID through SERV with BRAID defaults', async model => {
+  it.each(['gpt-6-sol', 'gpt-6-astra', 'gpt-6-luna'])('routes the exact %s catalog ID through SERV with BRAID defaults', async model => {
     vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', undefined);
     reply = catalog => rows(catalog!);
     await verify(positive);

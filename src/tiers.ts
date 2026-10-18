@@ -80,7 +80,7 @@ export function getTierConfig(tier?: SentinelTier): TierConfig {
 
 // Exact IDs observed in the authenticated OpenServ catalog. These are routes,
 // not qualified production defaults. A missing/unpriced ID must not alias to Sol.
-const NAMED_OPENSERV_TRADE_MODELS = ['openserv/gpt-6-sol', 'openserv/gpt-6-astra'];
+const NAMED_OPENSERV_TRADE_MODELS = ['openserv/gpt-6-sol', 'openserv/gpt-6-astra', 'openserv/gpt-6-luna'];
 
 /** Deployment-only selection for a single trade checkpoint evaluator.
  * Public tier defaults and all other modes remain unchanged. Never silently
