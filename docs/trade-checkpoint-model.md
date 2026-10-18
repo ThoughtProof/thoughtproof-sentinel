@@ -3,7 +3,7 @@
 `SENTINEL_TRADE_CHECKPOINT_MODEL=serv-pro` selects Pro alone for requests with
 `mode: trade_execution` and `tier: checkpoint`. Supported values are `serv-nano`,
 `serv-swift`, `serv-pro`, `openserv/gpt-6-sol`, `openserv/gpt-6-astra` and
-`openserv/gpt-6-luna`;
+`openserv/gpt-6-luna`, `deepseek/deepseek-flash` and `xai/grok-4.7`;
 absence retains the default Nano checkpoint.
 This is deployment configuration, not a caller-provided request field.
 
@@ -73,3 +73,21 @@ $2.60/$13.00 for Sol, including SERV Reasoning. Those are token rates, not a
 measured bill. Luna is available for the same frozen nine-case native-engine
 diagnostic as Sol, with low effort, default BRAID and one attempt per case.
 There is no production model switch or new trading qualification implied.
+
+### Direct-provider diagnostic routes
+
+The exact DeepSeek and xAI IDs above are opt-in trade/checkpoint routes. They use
+`DEEPSEEK_API_KEY` at `https://api.deepseek.com/chat/completions` and `XAI_API_KEY`
+at `https://api.x.ai/v1/chat/completions`. These requests do not use SERV or BRAID.
+They forward explicit reasoning effort (default low), `max_tokens`, unchanged
+messages and provider sampling defaults. Exact response model ID and complete
+final output are required; reasoning text is never substituted for final content.
+All legacy routes and the default model are unchanged.
+
+The authenticated 2026-10-18 catalog and one tiny synthetic request per provider
+confirm `deepseek-flash` and `grok-4.7` with low effort and max_tokens=4096.
+DeepSeek documents the Flash alias as V4.1 Flash 1017; the old V4 Flash was retired.
+An acknowledged alias is not a pinned or independently attested model snapshot.
+Cross-provider comparisons also change provider infrastructure and omit BRAID;
+they cannot isolate the model alone. These routes require independent trade and
+end-to-end latency qualification before adoption.

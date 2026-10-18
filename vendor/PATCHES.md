@@ -1,3 +1,16 @@
+## 0.8.12-eval-contract.7 — exact direct-provider routes (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.7.tgz`
+- Integrity: `sha512-PrwM2RuCULO/Nn3wm9rajDZxkB7jGTte1mYfVbWQiYlTYvQq3mFQ82L/Jk3ZNFht8JW9BAB/c0aQXeMPkDYiRw==`
+- SHA256: `24be787c295de01fb00171e4ca0c761016d3dcda06b8f613da328fdb1a1e2d72`
+- Adds exact `deepseek/deepseek-flash` and `xai/grok-4.7` routes with each
+  provider's own credentials and endpoint, explicit reasoning effort and
+  `max_tokens`. No OpenServ/BRAID is involved in these direct requests.
+- Named direct routes omit sampling overrides and fail closed on a mismatched
+  model ID or incomplete output. Final content alone enters the existing decoder.
+- The `.6` archive/manifest and OpenServ router patch remain unchanged. This
+  separate overlay changes no prompt, rule, score or fallback policy.
+
 ## 0.8.12-eval-contract.6 — cheaper named-model diagnostic (2026-10-18)
 
 - Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.6.tgz`

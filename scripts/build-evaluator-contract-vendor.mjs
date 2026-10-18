@@ -8,7 +8,7 @@ import ts from 'typescript';
 const root=resolve(import.meta.dirname,'..'),base=join(root,'vendor/pot-cli-0.8.12.tgz');
 const hash=(p,algorithm='sha256')=>createHash(algorithm).update(readFileSync(p)).digest('hex');
 if(hash(base)!=='aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1')throw Error('BASE_VENDOR_CHANGED');
-const version='0.8.12-eval-contract.6',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
+const version='0.8.12-eval-contract.7',filename='pot-cli-'+version+'.tgz',temp=mkdtempSync(join(tmpdir(),'pot-contract-build-')),pkg=join(temp,'package');
 try{
  execFileSync('tar',['-xzf',base,'-C',temp]);
  // The published 0.8.12 evaluator source is byte-identical to the audited tp.2
@@ -16,6 +16,7 @@ try{
  if(hash(join(pkg,'src/plan/graded-support-evaluator.ts'))!=='5302b8fb14d5179eb2b1be6dce3723ca100673d9477aa624eb9b3671198c118e')throw Error('EVALUATOR_SOURCE_CHANGED');
  execFileSync('patch',['-p1','--batch','--forward','-i',join(root,'patches/pot-cli-evaluator-contract.patch')],{cwd:pkg});
  execFileSync('patch',['-p1','--batch','--forward','-i',join(root,'patches/pot-cli-openserv-models.patch')],{cwd:pkg});
+ execFileSync('patch',['-p1','--batch','--forward','-i',join(root,'patches/pot-cli-direct-models.patch')],{cwd:pkg});
  copyFileSync(join(root,'patches/evaluation-output-contract.ts'),join(pkg,'src/plan/evaluation-output-contract.ts'));
  copyFileSync(join(root,'patches/evaluation-request-contract.ts'),join(pkg,'src/plan/evaluation-request-contract.ts'));
  copyFileSync(join(root,'patches/evaluation-source-references.ts'),join(pkg,'src/plan/evaluation-source-references.ts'));
@@ -63,7 +64,7 @@ try{
  execFileSync('python3',['-c',
   'import pathlib,tarfile,gzip,sys\np=pathlib.Path(sys.argv[1]);o=pathlib.Path(sys.argv[2])\nwith o.open("wb") as f:\n with gzip.GzipFile(filename="",mode="wb",fileobj=f,mtime=0) as z:\n  with tarfile.open(fileobj=z,mode="w",format=tarfile.PAX_FORMAT) as t:\n   for x in sorted(p.rglob("*")):\n    i=t.gettarinfo(str(x),"package/"+str(x.relative_to(p)));i.uid=i.gid=0;i.uname=i.gname="";i.mtime=0;i.pax_headers={}\n    if x.is_file():\n     with x.open("rb") as b:t.addfile(i,b)\n    else:t.addfile(i)\n',pkg,target]);
  const manifest={base_sha256:hash(base),version,archive:filename,sha256:hash(target),typescript_version:ts.version,
-  patch_sha256:hash(join(root,'patches/pot-cli-evaluator-contract.patch')),openserv_router_patch_sha256:hash(join(root,'patches/pot-cli-openserv-models.patch')),decoder_sha256:hash(join(root,'patches/evaluation-output-contract.ts')),request_contract_sha256:hash(join(root,'patches/evaluation-request-contract.ts')),source_references_sha256:hash(join(root,'patches/evaluation-source-references.ts')),trade_decision_prompt_sha256:hash(join(root,'patches/trade-decision-prompt.ts')),network_requests:0};
+  patch_sha256:hash(join(root,'patches/pot-cli-evaluator-contract.patch')),openserv_router_patch_sha256:hash(join(root,'patches/pot-cli-openserv-models.patch')),direct_router_patch_sha256:hash(join(root,'patches/pot-cli-direct-models.patch')),decoder_sha256:hash(join(root,'patches/evaluation-output-contract.ts')),request_contract_sha256:hash(join(root,'patches/evaluation-request-contract.ts')),source_references_sha256:hash(join(root,'patches/evaluation-source-references.ts')),trade_decision_prompt_sha256:hash(join(root,'patches/trade-decision-prompt.ts')),network_requests:0};
  const manifestPath=join(root,'patches/vendor-manifest.json');
  if(existsSync(manifestPath)&&JSON.stringify(JSON.parse(readFileSync(manifestPath,'utf8')))!==JSON.stringify(manifest))throw Error('NON_REPRODUCIBLE_VENDOR_BUILD');
  writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');

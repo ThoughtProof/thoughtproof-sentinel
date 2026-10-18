@@ -1,0 +1,30 @@
+--- a/src/utils/model-router.ts
++++ b/src/utils/model-router.ts
+@@ -30,0 +31,2 @@
++  /** Exact, opt-in direct-provider diagnostic routes. No OpenServ/BRAID. */
++  namedDirect?: boolean;
+@@ -72,0 +75,8 @@
++  if (nameOrAlias === 'deepseek/deepseek-flash') {
++    return {baseUrl: 'https://api.deepseek.com', apiKeyEnv: 'DEEPSEEK_API_KEY',
++      model: 'deepseek-flash', type: 'openai', namedDirect: true};
++  }
++  if (nameOrAlias === 'xai/grok-4.7') {
++    return {baseUrl: 'https://api.x.ai/v1', apiKeyEnv: 'XAI_API_KEY',
++      model: 'grok-4.7', type: 'openai', namedDirect: true};
++  }
+@@ -183 +193 @@
+-      ...(config.namedOpenServ ? { reasoning_effort: reasoningEffort ?? 'low' } : {}),
++      ...((config.namedOpenServ || config.namedDirect) ? { reasoning_effort: reasoningEffort ?? 'low' } : {}),
+@@ -186 +196 @@
+-      ...(temperature !== undefined && !config.namedOpenServ && !config.baseUrl.includes('moonshot') ? { temperature } : {}),
++      ...(temperature !== undefined && !config.namedOpenServ && !config.namedDirect && !config.baseUrl.includes('moonshot') ? { temperature } : {}),
+@@ -189 +199 @@
+-      ...(seed !== undefined && !config.namedOpenServ && !config.model.startsWith('gemini') ? { seed } : {}),
++      ...(seed !== undefined && !config.namedOpenServ && !config.namedDirect && !config.model.startsWith('gemini') ? { seed } : {}),
+@@ -215,0 +226,3 @@
++  if (config.namedDirect && data.model !== config.model) throw new Error('DIRECT_MODEL_MISMATCH');
++  if (config.namedDirect && data.choices?.[0]?.finish_reason !== 'stop') throw new Error('DIRECT_INCOMPLETE_COMPLETION');
++
+@@ -232 +245 @@
+-  if (options.reasoningEffort !== undefined && (!config.namedOpenServ || !['low', 'medium', 'high'].includes(options.reasoningEffort))) {
++  if (options.reasoningEffort !== undefined && (!(config.namedOpenServ || config.namedDirect) || !['low', 'medium', 'high'].includes(options.reasoningEffort))) {

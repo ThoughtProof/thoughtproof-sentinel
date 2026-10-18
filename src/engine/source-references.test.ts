@@ -23,11 +23,16 @@ let calls: any[];
 beforeEach(() => {
   calls = [];
   vi.stubEnv('CONFIRM_BLOCKS', '0');
+  vi.stubEnv('DEEPSEEK_API_KEY', 'offline-deepseek-only');
+  vi.stubEnv('XAI_API_KEY', 'offline-xai-only');
   vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_REASONING_EFFORT', undefined);
   reply = () => { throw Error('UNPLANNED_SYNTHETIC_COMPLETION'); };
   vi.stubGlobal('fetch', vi.fn(async (url, options) => {
-    expect(String(url)).toBe('https://offline.invalid/v1/chat/completions');
     const body = JSON.parse(String(options?.body));
+    const direct = body.model === 'deepseek-flash' ? ['https://api.deepseek.com/chat/completions', 'offline-deepseek-only']
+      : body.model === 'grok-4.7' ? ['https://api.x.ai/v1/chat/completions', 'offline-xai-only'] : null;
+    expect(String(url)).toBe(direct?.[0] ?? 'https://offline.invalid/v1/chat/completions');
+    if (direct) expect(new Headers(options?.headers).get('Authorization')).toBe('Bearer ' + direct[1]);
     expect(new Headers(options?.headers).has('x-openserv-disable-braid')).toBe(false);
     calls.push(body);
     const user = body.messages.find((m: any) => m.role === 'user').content;
@@ -153,7 +158,7 @@ describe('deployment-selected trade checkpoint model', () => {
     expect(result.verdict).toBe('ALLOW');
   });
 
-  it.each(['', 'unknown', 'serv-pro ', 'openai/arbitrary-model', 'openserv/gpt-6.1-sol', 'openserv/gpt-6-sol/other'])('fails before any provider call for invalid configured model %j', async model => {
+  it.each(['', 'unknown', 'serv-pro ', 'openai/arbitrary-model', 'openserv/gpt-6.1-sol', 'openserv/gpt-6-sol/other', 'deepseek/deepseek-v4-flash', 'xai/grok-4.7/other'])('fails before any provider call for invalid configured model %j', async model => {
     vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', model);
     await expect(verify(positive)).rejects.toThrow('INVALID_TRADE_CHECKPOINT_MODEL');
     expect(calls).toHaveLength(0);
@@ -181,6 +186,44 @@ describe('deployment-selected trade checkpoint model', () => {
     await verify(positive);
     expect(calls[0].reasoning_effort).toBe(effort);
     expect(calls).toHaveLength(1);
+  });
+
+  it.each(['deepseek/deepseek-flash', 'xai/grok-4.7'])('routes %s directly with identical messages and scoped credentials', async model => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', undefined);
+    reply = catalog => rows(catalog!);
+    await verify(positive);
+    const baseline = calls[0];
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', model);
+    const result = await verify(positive);
+    expect(calls[1]).toEqual({model: model.split('/')[1], messages: baseline.messages,
+      max_tokens: 4096, reasoning_effort: 'low'});
+    expect(result.meta.models_used).toEqual([model]);
+    expect(result.verdict).toBe('ALLOW');
+  });
+
+  it.each(['deepseek/deepseek-flash', 'xai/grok-4.7'])('does not retry or repair a restrictive or invalid %s assessment', async model => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', model);
+    reply = catalog => rows(catalog!, sourceLines, 0);
+    expect((await verify(positive)).verdict).toBe('BLOCK');
+    reply = () => [];
+    const invalid = await verify(positive);
+    expect(invalid.verdict).toBe('UNCERTAIN');
+    expect(contract(invalid).status).toBe('invalid');
+    expect(calls).toHaveLength(2);
+  });
+
+  it.each(['deepseek/deepseek-flash', 'xai/grok-4.7'])('fails closed on wrong identity or incomplete output from %s', async model => {
+    vi.stubEnv('SENTINEL_TRADE_CHECKPOINT_MODEL', model);
+    for (const [returnedModel, finish, error] of [
+      ['other-model', 'stop', 'DIRECT_MODEL_MISMATCH'],
+      [model.split('/')[1], 'length', 'DIRECT_INCOMPLETE_COMPLETION'],
+    ]) {
+      const fetch = vi.fn(async () => new Response(JSON.stringify({model: returnedModel,
+        choices: [{finish_reason: finish, message: {content: '[]'}}]})));
+      vi.stubGlobal('fetch', fetch);
+      await expect(verify(positive)).rejects.toThrow(error);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
   });
 
   it.each(['', 'medium ', 'arbitrary', 'max'])('rejects invalid reasoning effort %j before inference', async effort => {
