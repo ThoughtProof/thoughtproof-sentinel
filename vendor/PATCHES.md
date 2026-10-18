@@ -1,3 +1,14 @@
+## 0.8.12-eval-contract.3 — complete response format after the catalog
+
+Current dependency: `file:vendor/pot-cli-0.8.12-eval-contract.3.tgz`.
+Integrity: `sha512-mb+9WRcKGi6rUphXztGu49ZlwOo/YbqhbvCMpHZ9/76RDibY+bP+JzncVqGBV26NaXcD9zuPIQ63QE57XgZioA==`.
+
+The .2 matched preview produced invalid output in all eleven candidate calls.
+This revision adds the full required JSON response schema after the source catalog
+and explicitly rejects the observed `assessment` alias in the model instructions.
+It changes no parser acceptance rules, score, source resolver or retry behavior.
+The failed .2 experiment remains preserved; .3 requires separate qualification.
+
 ## 0.8.12-eval-contract.2 — source references (18 October 2026)
 
 Current dependency: `file:vendor/pot-cli-0.8.12-eval-contract.2.tgz`.

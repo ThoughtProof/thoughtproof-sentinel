@@ -15,6 +15,7 @@ const positive: SentinelVerifyRequest = JSON.parse(readFileSync(
   new URL('./fixtures/cycle-quotes-20261017/supported_control_request.json', import.meta.url), 'utf8'));
 const sourceLines = positive.evidence.split('\n').filter(line => /^Pre-decision reasoning [123]:/.test(line));
 const marker = '\n\nHOST_SOURCE_REFERENCE_CATALOG_JSON\n';
+const schemaMarker = '\n\nHOST_ASSESSMENT_OUTPUT_SCHEMA_JSON\n';
 type Catalog = {allowed_sources: Record<string, 'trace' | 'answer'>; truncated: boolean;
   passages: Array<{ref: string; source: 'trace' | 'answer'; text: string}>};
 let reply: (catalog: Catalog | null, body: any, call: number) => unknown;
@@ -28,7 +29,7 @@ beforeEach(() => {
     const body = JSON.parse(String(options?.body));
     calls.push(body);
     const user = body.messages.find((m: any) => m.role === 'user').content;
-    const catalog = user.includes(marker) ? JSON.parse(user.slice(user.lastIndexOf(marker) + marker.length)) : null;
+    const catalog = user.includes(marker) ? JSON.parse(user.slice(user.lastIndexOf(marker) + marker.length).split(schemaMarker)[0]) : null;
     return new Response(JSON.stringify({choices: [{message: {content: JSON.stringify(reply(catalog, body, calls.length))}}]}));
   }));
 });
@@ -58,6 +59,12 @@ describe('host-addressed citations through the installed router, parser and engi
     expect(calls).toHaveLength(1);
     expect(calls[0].messages[0].content).toContain('not an exemption from the scoring rubric');
     expect(calls[0].messages[1].content).toContain(positive.evidence);
+    const schema = JSON.parse(calls[0].messages[1].content.split(schemaMarker)[1].split('\n\n')[0]);
+    expect(schema.items.required).toEqual(['step_id', 'score', 'reasoning', 'quote', 'quote_ref']);
+    expect(schema.items.properties.step_id.enum).toEqual(['step_0', 'step_1', 'step_2']);
+    expect(schema.minItems).toBe(3);
+    expect(calls[0].messages[1].content).toContain('Use reasoning, never assessment');
+    expect(calls[0].messages[1].content.endsWith('output only JSON.')).toBe(true);
   });
 
   it.each(['unknown', 'stale_source', 'object', 'number', 'conflicting_text', 'omitted_quote'])('rejects %s without repairing or retrying the assessment', async variant => {

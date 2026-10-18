@@ -61,3 +61,12 @@ missing required fields, low scores, explicit negative evidence, primary/seconda
 handling, Unicode/CRLF offsets, bounded catalogs and legacy/non-trade callers.
 These local tests are distinct from the preregistered matched preview comparison;
 neither is a natural-trade overblocking estimate or a profitability result.
+
+## Format follow-up
+
+The matched .2 preview failed all eleven candidate response contracts; ten lacked
+`reasoning` and `quote`, and one was not valid JSON. No reference resolution was
+observed. Version .3 retains those failed results and adds the complete response
+schema after the input catalog. The parser remains strict, with no field aliasing
+or repair retry. A separate preregistered three-control gate is required before
+any further historical calls.

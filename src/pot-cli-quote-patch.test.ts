@@ -17,10 +17,10 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const POT_CLI_VERSION = '0.8.12-eval-contract.2';
-export const POT_CLI_TARBALL = 'file:vendor/pot-cli-0.8.12-eval-contract.2.tgz';
+export const POT_CLI_VERSION = '0.8.12-eval-contract.3';
+export const POT_CLI_TARBALL = 'file:vendor/pot-cli-0.8.12-eval-contract.3.tgz';
 export const POT_CLI_INTEGRITY =
-  'sha512-gfSRCa7fEDL17o2VxQABwHupLy45vstXKr2i9i+5vgZdxYlMwDWFWs8nm5rk0oyTiKQWo7SVldrVZ6YEg1nF8g==';
+  'sha512-mb+9WRcKGi6rUphXztGu49ZlwOo/YbqhbvCMpHZ9/76RDibY+bP+JzncVqGBV26NaXcD9zuPIQ63QE57XgZioA==';
 
 const COERCE_CASES: unknown[] = [
   undefined,

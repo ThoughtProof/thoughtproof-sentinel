@@ -24,9 +24,19 @@ Choose only a passage from the step's designated evidence source. A reference es
 If no qualifying passage supports your assessment, return "quote_ref": null and "quote": null with the appropriate restrictive score and explanation. Direct verbatim quote strings remain supported when a relevant passage has no catalog entry. Unknown addresses, wrong-source addresses, and a quote string conflicting with its selected passage are invalid assessments. Do not invent addresses or join passages. Return the same required step_id, score and reasoning fields.`;
   const userIndex = messages.map(message => message.role).lastIndexOf('user');
   if (references && userIndex < 0) throw Error('EVALUATOR_USER_MESSAGE_REQUIRED');
+  const outputSchema = JSON.stringify({type: 'array', minItems: expectedIds.length, maxItems: expectedIds.length,
+    items: {type: 'object', additionalProperties: false,
+      required: ['step_id', 'score', 'reasoning', 'quote', 'quote_ref'],
+      properties: {step_id: {type: 'string', enum: expectedIds}, score: {type: 'number', minimum: 0, maximum: 1},
+        reasoning: {type: 'string', minLength: 1}, quote: {type: ['string', 'null']}, quote_ref: {type: ['string', 'null']}}}});
+  const finalFormat = '\n\nHOST_ASSESSMENT_OUTPUT_SCHEMA_JSON\n' + outputSchema
+    + '\n\nThe source catalog above is input data, not an output template. Return only the evaluation array described by this schema.'
+    + ' Each step must include the exact keys step_id, score, reasoning, quote, quote_ref. Use reasoning, never assessment, as the explanation key.'
+    + ' A source reference is encoded as quote_ref plus an explicit null quote; a direct passage is encoded as quote plus a null quote_ref.'
+    + ' Do not omit null fields. Do not return the catalog or the schema. Assess each step once under the unchanged rubric; output only JSON.';
   return messages.map((message, index) => message.role === 'system'
     ? {...message, content: message.content + '\n\n' + contract}
     : references && index === userIndex
-      ? {...message, content: message.content + '\n\nHOST_SOURCE_REFERENCE_CATALOG_JSON\n' + sourceReferenceCatalog(references)}
+      ? {...message, content: message.content + '\n\nHOST_SOURCE_REFERENCE_CATALOG_JSON\n' + sourceReferenceCatalog(references) + finalFormat}
       : {...message});
 }
