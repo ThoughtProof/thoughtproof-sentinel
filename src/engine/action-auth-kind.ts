@@ -65,11 +65,13 @@
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
  * `inform`, `info`, `status ping`) plus a small DE informational set
  * (Informiere, Info an, Bescheid geben, Rückmeldung, Status an).
- * Agenda/meeting terms (`agenda`, `meeting`, `briefing`, `summary`,
- * Tagesordnung, Termin/Termine, Übersicht, Zusammenfassung) are a
- * separate list and do not take the FYI info-wins-over-ship exception.
- * A ship, destructive, or payment signal wins over them, and that mix
- * fail-closes.
+ * Agenda/meeting terms are not FYI markers. They classify as
+ * informational only for a pure share request (`share` / `send` /
+ * `sende` / `schick` / `schicke` / `teile`, optionally "with the team"
+ * / "an das Team") with no other action verb. Anything else stays
+ * `unknown` (text-only UNCERTAIN; declared informational still
+ * fail-closes). Known ship, destructive, and payment signals still
+ * beat that list and BLOCK.
  *
  * Caller-declared kinds (issue #51): `mandate.kind` / `mandate.action.kind`
  * (MCP `action.kind` maps onto the latter — an LLM claim in schema form,
@@ -268,7 +270,23 @@ const AGENDA_ANY_RE = new RegExp(
 );
 
 /**
- * Operative signals that win over agenda words only (not over FYI).
+ * Share-request allowlist. An agenda word is informational only when
+ * the text is one of these verbs plus agenda nouns and closed-class
+ * fillers (including "with the team" / "an das Team"). Any other token
+ * — an action verb, an imperative, an unknown word — stays unknown.
+ */
+const AGENDA_SHARE_VERB = '(?:share|send|sende|schick|schicke|teile)';
+const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
+const AGENDA_SHARE_FILLER = new Set([
+  'the', 'a', 'an', 'for', 'to', 'of', 'and', 'with', 'on', 'our', 'my',
+  'this', 'that', 'tomorrow', 'tomorrows', 'tuesday', 'please', 'only',
+  'die', 'der', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'und', 'an',
+  'für', 'fuer', 'mit', 'bitte', 'team',
+]);
+
+/**
+ * Known operative signals that BLOCK an agenda sentence (not an
+ * allowlist). They do not make every other verb informational.
  * merge / delete / rm -rf, and wire / payment when VALUE_RE does not
  * already match. DE: löschen, zusammenführen, überweisen, Zahlung.
  */
@@ -439,12 +457,32 @@ function textHasAgendaOperativeSignal(text: string): boolean {
   );
 }
 
-/** Kind of the signal that beats an agenda word. Null when the text is agenda-only. */
+/** Kind of a known operative signal that beats an agenda word. Null otherwise. */
 function agendaOperativeKind(text: string): ActionKind | null {
   if (!textHasAgendaOperativeSignal(text)) return null;
   if (hasPermissionGrant(text)) return 'permission';
   if (hasValueTransfer(text) || hasAgendaPaymentSignal(text)) return 'value_transfer';
   return 'deploy_ship';
+}
+
+/**
+ * True only for a pure agenda share. Closed filler list: when in doubt,
+ * unknown. Does not treat "schick" as covering "schicken".
+ */
+function isAgendaShareRequest(text: string): boolean {
+  if (!text || !AGENDA_ANY_RE.test(text) || !AGENDA_SHARE_VERB_RE.test(text)) return false;
+  if (textHasAgendaOperativeSignal(text)) return false;
+  const agendaWord = new RegExp(
+    `(?:^|${AGENDA_EDGE})(?:${EN_AGENDA_ANY}|${DE_AGENDA_ANY})(?=$|${AGENDA_EDGE})`,
+    'gi',
+  );
+  const residual = text
+    .replace(agendaWord, ' ')
+    .replace(new RegExp(AGENDA_SHARE_VERB_RE.source, 'gi'), ' ')
+    .replace(/['’]/g, '')
+    .toLowerCase();
+  const tokens = residual.split(/[^a-z0-9äöü]+/).filter(Boolean);
+  return tokens.every((token) => AGENDA_SHARE_FILLER.has(token));
 }
 
 function classifyBlob(text: string): ActionKind {
@@ -461,7 +499,9 @@ function classifyBlob(text: string): ActionKind {
   if (hasPositiveShipInstruction(text)) return 'deploy_ship';
   const agendaKind = agendaOperativeKind(text);
   if (agendaKind) return agendaKind;
-  if (AGENDA_ANY_RE.test(text)) return 'informational';
+  // Allowlist, not "agenda word minus a denylist". Any other agenda
+  // sentence stays unknown.
+  if (isAgendaShareRequest(text)) return 'informational';
   return 'unknown';
 }
 

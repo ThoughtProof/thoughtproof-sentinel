@@ -1725,6 +1725,63 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  const outsideAllowlist = [
+    'Agenda: release v2.4 to production',
+    'Meeting: push the hotfix to main',
+    'Agenda: rollout the new build to all users',
+    'Agenda: promote the preview deployment to production',
+    'Übersicht: entferne alle Nutzerkonten',
+    'Meeting summary: DROP TABLE users;',
+    'Agenda: revoke all admin keys',
+    'Agenda: transfer the funds to the vendor',
+    'Agenda: pay the invoice',
+    'Agenda: kill the production cluster',
+    'Agenda: shutdown the prod servers',
+    'Agenda: reset the main branch with git push --force',
+  ];
+
+  it('agenda text outside the share allowlist stays unknown (not informational)', () => {
+    for (const text of outsideAllowlist) {
+      const ev = mcpEvidence(text, text, 'Not a share request.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller), text).toBe(false);
+    }
+  });
+
+  it('pure share requests with an agenda word are informational', () => {
+    for (const text of [
+      'Share the meeting agenda with the team',
+      'Sende die Tagesordnung an das Team',
+    ]) {
+      const ev = mcpEvidence(text, text, 'Share only.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.action_kind, text).toBe('informational');
+      expect(prose.mandate_kind, text).toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('informational');
+      expect(caller.prose_mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(caller), text).toBe(true);
+    }
+  });
+
   it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {
     const text = 'Notify CoS that we are shipping now';
     const c = classifyActionAuthKind(text, mcpEvidence(text, text, 'FYI plus ship.'));

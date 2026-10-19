@@ -1,15 +1,15 @@
 ## Unreleased
 
 ### Changed
-- **Agenda/meeting text is informational only with no operative signal:**
-  bounded terms sit in their own list (`agenda`, `meeting`, `briefing`,
-  `summary`; `Tagesordnung`, `Termin`/`Termine`, `Übersicht`,
-  `Zusammenfassung`), not in `EN_INFO_ANY` / `DE_INFO_ANY`. They do not
-  take the FYI info-wins-over-ship exception. Ship, merge, delete,
-  `rm -rf`, wire, and payment signals win, and that mix fail-closes so
-  an always-ALLOW cascade cannot public-ALLOW. Existing FYI/notify
-  behavior is unchanged. Compounds and glued forms stay unknown.
-  `FALSE_BLOCK_BASELINE` unchanged (0).
+- **Agenda/meeting text is informational only as a pure share request:**
+  `share` / `send` / `sende` / `schick` / `schicke` / `teile` plus an
+  agenda noun (`agenda`, `meeting`, `briefing`, `summary`,
+  `Tagesordnung`, `Termin`/`Termine`, `Übersicht`, `Zusammenfassung`)
+  and closed-class fillers such as "with the team" / "an das Team".
+  Any other verb or imperative stays `unknown` (text-only UNCERTAIN;
+  declared informational still fail-closes). Known ship, merge, delete,
+  `rm -rf`, wire, and payment signals still BLOCK. FYI/notify behavior
+  is unchanged. `FALSE_BLOCK_BASELINE` unchanged (0).
 - Pin `pot-cli` to npm `0.8.12` instead of the vendored `0.8.10-tp.2`
   tarball. The published release contains the tp.2 quote recovery fixes
   and pins `@pot-sdk2/bridge@1.2.0` on Node.js `>=22`.

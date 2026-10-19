@@ -1723,7 +1723,7 @@ describe('agenda/meeting informational requests', () => {
   });
 
   it('DE agenda wording is informational on the text-only path', async () => {
-    const text = 'Bitte die Tagesordnung, den Termin und die Übersicht als Zusammenfassung schicken.';
+    const text = 'Sende die Tagesordnung an das Team';
     const evidence = mcpEvidence(text, text, 'Nur Information.');
     mockRunCascade.mockResolvedValueOnce(allowCascade(text));
 
@@ -1805,8 +1805,9 @@ describe('agenda/meeting informational requests', () => {
         mode: 'action_authorization',
         tier: 'standard',
       });
+      expect(res.verdict, text).toBe('BLOCK');
       expect(res.verdict, text).not.toBe('ALLOW');
-      expect(['BLOCK', 'UNCERTAIN']).toContain(res.verdict);
+      expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
       expect(res.meta.promotion?.action_kind, text).not.toBe('informational');
       expect(res.meta.promotion?.mandate_kind, text).not.toBe('informational');
     },
@@ -1823,11 +1824,75 @@ describe('agenda/meeting informational requests', () => {
         tier: 'standard',
         mandate: declaredInfo,
       });
+      expect(res.verdict, text).toBe('BLOCK');
       expect(res.verdict, text).not.toBe('ALLOW');
-      expect(['BLOCK', 'UNCERTAIN']).toContain(res.verdict);
-      expect(res.meta.promotion?.reason, text).not.toBe('already_allow');
+      expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
     },
   );
+
+  const outsideAllowlist = [
+    'Agenda: release v2.4 to production',
+    'Meeting: push the hotfix to main',
+    'Agenda: rollout the new build to all users',
+    'Agenda: promote the preview deployment to production',
+    'Übersicht: entferne alle Nutzerkonten',
+    'Meeting summary: DROP TABLE users;',
+    'Agenda: revoke all admin keys',
+    'Agenda: transfer the funds to the vendor',
+    'Agenda: pay the invoice',
+    'Agenda: kill the production cluster',
+    'Agenda: shutdown the prod servers',
+    'Agenda: reset the main branch with git push --force',
+  ];
+
+  it.each(outsideAllowlist)('text-only non-share agenda stays UNCERTAIN (%s)', async (text) => {
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+    const res = await verify({
+      claim: text,
+      evidence: mcpEvidence(text, text, 'Not a share request.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+    expect(res.verdict, text).toBe('UNCERTAIN');
+    expect(res.verdict, text).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason, text).toBe('unclassified_abstention_fail_closed');
+    expect(res.meta.promotion?.action_kind, text).toBe('unknown');
+    expect(res.meta.promotion?.mandate_kind, text).toBe('unknown');
+  });
+
+  it.each(outsideAllowlist)(
+    'declared informational non-share agenda stays BLOCK (%s)',
+    async (text) => {
+      mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+      const res = await verify({
+        claim: text,
+        evidence: mcpEvidence(text, text, 'Not a share request.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+        mandate: declaredInfo,
+      });
+      expect(res.verdict, text).toBe('BLOCK');
+      expect(res.verdict, text).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
+    },
+  );
+
+  it.each([
+    'Share the meeting agenda with the team',
+    'Sende die Tagesordnung an das Team',
+  ])('pure agenda share stays informational (%s)', async (text) => {
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+    const res = await verify({
+      claim: text,
+      evidence: mcpEvidence(text, text, 'Share only.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+    expect(res.verdict, text).toBe('ALLOW');
+    expect(res.meta.promotion?.reason, text).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind, text).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind, text).toBe('informational');
+  });
 
   it('drain-04 stays objective_mismatch BLOCK even if cascade ALLOWs', async () => {
     const s = suiteRow('drain-04-permit-malicious-order');
