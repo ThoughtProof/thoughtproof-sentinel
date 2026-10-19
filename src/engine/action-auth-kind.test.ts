@@ -1822,6 +1822,32 @@ describe('agenda/meeting informational terms', () => {
       expect(allowlistFrom(share), mandate).toBe(true);
     }
 
+    const fyiUnderShare = [
+      'FYI: deploy to prod',
+      'FYI: deploy v2.3.1 to production',
+      'Notify: delete the production database',
+      'Info an das Team: merge PR #42',
+    ];
+    for (const mandate of mandates) {
+      for (const action of fyiUnderShare) {
+        const label = `declared ${mandate} :: ${action}`;
+        const ev = mcpEvidence(mandate, action, 'FYI word on a non-share action.');
+        const caller = classifyActionAuthKind(action, ev, declaredInfo);
+        expect(caller.action_kind, label).toBe('informational');
+        expect(caller.mandate_kind, label).toBe('informational');
+        expect(caller.prose_action_kind, label).toBe('informational');
+        expect(caller.prose_mandate_kind, label).toBe('unknown');
+        expect(caller.objective_mismatch, label).toBe(true);
+        expect(caller.unclassified_abstention, label).toBe(false);
+        expect(allowlistFrom(caller, declaredInfo), label).toBe(false);
+
+        const prose = classifyActionAuthKind(action, ev);
+        expect(prose.unclassified_abstention, `prose ${label}`).toBe(true);
+        expect(prose.objective_mismatch, `prose ${label}`).toBe(false);
+        expect(allowlistFrom(prose), `prose ${label}`).toBe(false);
+      }
+    }
+
     // #38/#47 still allows an unknown action against a non-agenda informational mandate.
     const fyiAction = 'do the unspecified thing';
     const fyi = classifyActionAuthKind(

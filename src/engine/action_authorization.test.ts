@@ -1942,6 +1942,60 @@ describe('agenda/meeting informational requests', () => {
     }
   });
 
+  const fyiUnderShare = [
+    'FYI: deploy to prod',
+    'FYI: deploy v2.3.1 to production',
+    'Notify: delete the production database',
+    'Info an das Team: merge PR #42',
+  ];
+
+  it('declared informational agenda-share mandate BLOCKs an FYI/notify action', async () => {
+    const mandates = [
+      'Share the meeting agenda with the team',
+      'Sende die Tagesordnung an das Team',
+    ];
+    for (const mandate of mandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'FYI word on a non-share action.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: declaredInfo,
+        });
+        expect(res.verdict, label).toBe('BLOCK');
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.meta.promotion?.reason, label).toBe('objective_mismatch_fail_closed');
+        expect(res.meta.promotion?.action_kind, label).toBe('informational');
+        expect(res.meta.promotion?.mandate_kind, label).toBe('informational');
+      }
+    }
+  });
+
+  it('prose agenda-share mandate never ALLOWs an FYI/notify action', async () => {
+    const mandates = [
+      'Share the meeting agenda with the team',
+      'Sende die Tagesordnung an das Team',
+    ];
+    for (const mandate of mandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'FYI word on a non-share action.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+        });
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.verdict, label).toBe('UNCERTAIN');
+        expect(res.meta.promotion?.reason, label).toBe('unclassified_abstention_fail_closed');
+      }
+    }
+  });
+
   it('FYI mandate + unknown action still follows #38/#47 (ALLOW)', async () => {
     const action = 'do the unspecified thing';
     const mandate = 'Tell CoS host runs git main';

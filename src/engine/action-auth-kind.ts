@@ -72,10 +72,14 @@
  * `unknown` (text-only UNCERTAIN; declared informational still
  * fail-closes). A pure agenda-share *mandate* does not unlock the
  * #38/#47 informational allow path for a different action: the action
- * must also be a pure agenda share, otherwise the undeclared pair
- * abstains (unknown/unknown → UNCERTAIN). Other informational
- * mandates (FYI/notify) are unchanged. Known ship, destructive, and
- * payment signals still beat that list and BLOCK.
+ * must also be a pure agenda share. Otherwise an undeclared pair
+ * abstains (unknown/unknown → UNCERTAIN). Caller-declared kinds keep
+ * main's outcome: that mandate was unknown, so a declared
+ * informational pair does not agree and fail-closes
+ * (`objective_mismatch`), including when the action is FYI/notify/info.
+ * Other informational mandates (FYI/notify mandates) are unchanged.
+ * Known ship, destructive, and payment signals still beat that list
+ * and BLOCK.
  *
  * Caller-declared kinds (issue #51): `mandate.kind` / `mandate.action.kind`
  * (MCP `action.kind` maps onto the latter — an LLM claim in schema form,
@@ -1118,24 +1122,28 @@ export function classifyActionAuthKind(
   // A pure agenda share is informational, but that must not open the
   // #38/#47 path (informational mandate + unknown or other informational
   // action may ALLOW). Only another pure agenda share may take it.
-  // Otherwise collapse the undeclared pair to unknown/unknown so
-  // promotion abstains UNCERTAIN — the same outcome main had before
-  // the share classified as informational. Caller-declared kinds keep
-  // the existing widen behavior. FYI/notify mandates are not in this
-  // set, so their #38/#47 allow path is unchanged. Operative kinds
-  // (ship / pay / permission) are left alone and still mismatch-BLOCK.
-  if (
-    action_kind_source === 'prose' &&
-    mandate_kind_source === 'prose' &&
-    isAgendaShareRequest(mandateText) &&
-    !isAgendaShareRequest(actionText) &&
-    mandate_kind === 'informational' &&
-    (action_kind === 'unknown' || action_kind === 'informational')
-  ) {
-    action_kind = 'unknown';
-    mandate_kind = 'unknown';
-    prose_action_kind = 'unknown';
-    prose_mandate_kind = 'unknown';
+  // Undeclared: collapse to unknown/unknown so promotion abstains
+  // UNCERTAIN. Caller-declared: on main this mandate was unknown, so
+  // drop the share's informational prose kind. A declared informational
+  // pair then disagrees — including FYI/Notify/Info actions, which
+  // classify informational and would otherwise agree — and fail-closes
+  // objective_mismatch. FYI/notify *mandates* are not in this set.
+  // Operative kinds (ship / pay / permission) are left alone and still
+  // mismatch-BLOCK.
+  if (isAgendaShareRequest(mandateText) && !isAgendaShareRequest(actionText)) {
+    const undeclared =
+      action_kind_source === 'prose' && mandate_kind_source === 'prose';
+    if (
+      undeclared &&
+      (action_kind === 'unknown' || action_kind === 'informational')
+    ) {
+      action_kind = 'unknown';
+      mandate_kind = 'unknown';
+      prose_action_kind = 'unknown';
+      prose_mandate_kind = 'unknown';
+    } else if (!undeclared && prose_mandate_kind === 'informational') {
+      prose_mandate_kind = 'unknown';
+    }
   }
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
