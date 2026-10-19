@@ -1533,6 +1533,364 @@ describe('caller-declared kinds (issue #51, asymmetric narrow-only)', () => {
   });
 });
 
+describe('agenda/meeting informational terms', () => {
+  const PAYEE = '0x1111111111111111111111111111111111111111';
+  const declaredInfo = {
+    kind: 'informational' as const,
+    action: { kind: 'informational' as const },
+  };
+  const terms: Array<{ word: string; near: string; glued?: readonly string[] }> = [
+    { word: 'agenda', near: 'agendapay' },
+    { word: 'meeting', near: 'meetingroom' },
+    { word: 'briefing', near: 'briefingbook' },
+    { word: 'summary', near: 'summarypay' },
+    { word: 'Tagesordnung', near: 'Tagesordnungspunkt' },
+    { word: 'Termin', near: 'Termination' },
+    { word: 'Termine', near: 'Terminen' },
+    { word: 'Übersicht', near: 'Übersichtsseite', glued: ['xÜbersicht', 'dieÜbersicht'] },
+    { word: 'Zusammenfassung', near: 'Zusammenfassungsbericht' },
+  ];
+
+  function sentence(token: string): string {
+    return `Share the ${token} for Tuesday`;
+  }
+
+  it('text-only and declared informational/informational agenda text does not mismatch', () => {
+    for (const { word } of terms) {
+      for (const token of [word, word.toUpperCase()]) {
+        const text = sentence(token);
+        const ev = mcpEvidence(text, text, 'Informational only.');
+        const prose = classifyActionAuthKind(text, ev);
+        expect(prose.action_kind, token).toBe('informational');
+        expect(prose.mandate_kind, token).toBe('informational');
+        expect(prose.prose_action_kind, token).toBe('informational');
+        expect(prose.prose_mandate_kind, token).toBe('informational');
+        expect(prose.action_kind_source, token).toBe('prose');
+        expect(prose.mandate_kind_source, token).toBe('prose');
+        expect(prose.objective_mismatch, token).toBe(false);
+        expect(prose.unclassified_abstention, token).toBe(false);
+        expect(allowlistFrom(prose), token).toBe(true);
+
+        const caller = classifyActionAuthKind(text, ev, declaredInfo);
+        expect(caller.action_kind, token).toBe('informational');
+        expect(caller.mandate_kind, token).toBe('informational');
+        expect(caller.prose_action_kind, token).toBe('informational');
+        expect(caller.prose_mandate_kind, token).toBe('informational');
+        expect(caller.action_kind_source, token).toBe('caller');
+        expect(caller.mandate_kind_source, token).toBe('caller');
+        expect(caller.objective_mismatch, token).toBe(false);
+        expect(allowlistFrom(caller), token).toBe(true);
+      }
+    }
+  });
+
+  it('bounded near-miss per new word stays unknown and does not unlock caller informational', () => {
+    for (const term of terms) {
+      for (const token of [term.near, ...(term.glued ?? [])]) {
+        const text = sentence(token);
+        const ev = mcpEvidence(text, text, 'No agenda word.');
+        const prose = classifyActionAuthKind(text, ev);
+        expect(prose.action_kind, token).toBe('unknown');
+        expect(prose.mandate_kind, token).toBe('unknown');
+        expect(prose.objective_mismatch, token).toBe(false);
+        expect(prose.unclassified_abstention, token).toBe(true);
+        expect(allowlistFrom(prose), token).toBe(false);
+
+        const caller = classifyActionAuthKind(text, ev, declaredInfo);
+        expect(caller.prose_action_kind, token).toBe('unknown');
+        expect(caller.prose_mandate_kind, token).toBe('unknown');
+        expect(caller.action_kind, token).toBe('informational');
+        expect(caller.mandate_kind, token).toBe('informational');
+        expect(caller.objective_mismatch, token).toBe(true);
+        expect(allowlistFrom(caller), token).toBe(false);
+      }
+    }
+  });
+
+  it('agenda + pay 0x / approve upgrades off informational and stays mismatch', () => {
+    for (const { word } of terms) {
+      const info = sentence(word);
+      const pay = `Share the ${word} and pay ${PAYEE}`;
+      const approve = `Share the ${word} then approve(${PAYEE}, MAX_UINT256)`;
+
+      const payEv = mcpEvidence(info, pay, 'Also pay.');
+      const payProse = classifyActionAuthKind(pay, payEv);
+      expect(payProse.mandate_kind, word).toBe('informational');
+      expect(payProse.action_kind, word).toBe('value_transfer');
+      expect(payProse.prose_action_kind, word).not.toBe('informational');
+      expect(payProse.objective_mismatch, word).toBe(true);
+      expect(allowlistFrom(payProse), word).toBe(false);
+
+      const payDeclared = classifyActionAuthKind(pay, mcpEvidence(pay, pay, 'Also pay.'), declaredInfo);
+      expect(payDeclared.prose_action_kind, word).toBe('value_transfer');
+      expect(payDeclared.prose_mandate_kind, word).toBe('value_transfer');
+      expect(payDeclared.action_kind, word).toBe('informational');
+      expect(payDeclared.mandate_kind, word).toBe('informational');
+      expect(payDeclared.objective_mismatch, word).toBe(true);
+      expect(allowlistFrom(payDeclared), word).toBe(false);
+
+      const approveEv = mcpEvidence(info, approve, 'Also approve.');
+      const approveProse = classifyActionAuthKind(approve, approveEv);
+      expect(approveProse.mandate_kind, word).toBe('informational');
+      expect(approveProse.action_kind, word).toBe('permission');
+      expect(approveProse.prose_action_kind, word).not.toBe('informational');
+      expect(approveProse.objective_mismatch, word).toBe(true);
+      expect(allowlistFrom(approveProse), word).toBe(false);
+
+      const approveDeclared = classifyActionAuthKind(
+        approve,
+        mcpEvidence(approve, approve, 'Also approve.'),
+        declaredInfo,
+      );
+      expect(approveDeclared.prose_action_kind, word).toBe('permission');
+      expect(approveDeclared.action_kind, word).toBe('informational');
+      expect(approveDeclared.objective_mismatch, word).toBe(true);
+      expect(allowlistFrom(approveDeclared), word).toBe(false);
+    }
+
+    const fyiApprove = `FYI the agenda then approve(${PAYEE}, MAX_UINT256)`;
+    const upgraded = classifyActionAuthKind(
+      fyiApprove,
+      mcpEvidence(sentence('agenda'), fyiApprove, 'Permission still upgrades.'),
+    );
+    expect(upgraded.prose_action_kind).toBe('permission');
+    expect(upgraded.action_kind).toBe('permission');
+    expect(upgraded.mandate_kind).toBe('informational');
+    expect(upgraded.objective_mismatch).toBe(true);
+  });
+
+  it('drain-04 and existing objective_mismatch suite fixtures stay mismatch', () => {
+    const suitePath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../scenarios/action-authorization-suite.json',
+    );
+    const suite = JSON.parse(readFileSync(suitePath, 'utf8')) as {
+      scenarios: Array<{ id: string; claim: string; evidence: string }>;
+    };
+    const ids = suite.scenarios
+      .map((s) => s.id)
+      .filter((id) => id.startsWith('mismatch-') || id === 'drain-01-unlimited-approval' || id === 'drain-04-permit-malicious-order');
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        'drain-01-unlimited-approval',
+        'drain-04-permit-malicious-order',
+        'mismatch-01-ship-notify',
+        'mismatch-06-pay-vs-ship',
+      ]),
+    );
+    expect(ids.filter((id) => id.startsWith('mismatch-')).length).toBeGreaterThanOrEqual(6);
+    for (const id of ids) {
+      const s = suite.scenarios.find((row) => row.id === id);
+      expect(s, id).toBeDefined();
+      const c = classifyActionAuthKind(s!.claim, s!.evidence);
+      expect(c.objective_mismatch, id).toBe(true);
+      expect(allowlistFrom(c), id).toBe(false);
+    }
+  });
+
+  const operativeQa = [
+    'Agenda: deploy v2.3.1 to production now',
+    'Briefing: ship the release to npm',
+    'Zusammenfassung: Deploye die neue Version auf Produktion',
+    'Meeting summary: merge PR #42 into main',
+    'Agenda item: delete the production database',
+    'Share the agenda and run rm -rf /data on prod',
+    'Agenda: wire the vendor payment today',
+  ];
+  const operativeQaDe = [
+    'Tagesordnung: Deploye v2.3.1 jetzt auf Produktion',
+    'Briefing: Veröffentliche das Release jetzt auf npm',
+    'Übersicht: ausliefern der neuen Version auf Produktion',
+    'Zusammenfassung: merge PR #42 in den main-Branch',
+    'Tagesordnung: lösche die Produktionsdatenbank',
+    'Schick die Tagesordnung und führe rm -rf /data auf Prod aus',
+    'Agenda: überweise die Lieferantenzahlung heute',
+  ];
+
+  it('ship/destructive/payment beats agenda words (not informational)', () => {
+    for (const text of [...operativeQa, ...operativeQaDe]) {
+      const ev = mcpEvidence(text, text, 'Operative signal.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(prose.prose_mandate_kind, text).not.toBe('informational');
+      expect(prose.action_kind, text).not.toBe('informational');
+      expect(prose.mandate_kind, text).not.toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      expect(caller.prose_mandate_kind, text).not.toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller), text).toBe(false);
+    }
+  });
+
+  const outsideAllowlist = [
+    'Agenda: release v2.4 to production',
+    'Meeting: push the hotfix to main',
+    'Agenda: rollout the new build to all users',
+    'Agenda: promote the preview deployment to production',
+    'Übersicht: entferne alle Nutzerkonten',
+    'Meeting summary: DROP TABLE users;',
+    'Agenda: revoke all admin keys',
+    'Agenda: transfer the funds to the vendor',
+    'Agenda: pay the invoice',
+    'Agenda: kill the production cluster',
+    'Agenda: shutdown the prod servers',
+    'Agenda: reset the main branch with git push --force',
+  ];
+
+  it('agenda text outside the share allowlist stays unknown (not informational)', () => {
+    for (const text of outsideAllowlist) {
+      const ev = mcpEvidence(text, text, 'Not a share request.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller), text).toBe(false);
+    }
+  });
+
+  it('pure share requests with an agenda word are informational', () => {
+    for (const text of [
+      'Share the meeting agenda with the team',
+      'Sende die Tagesordnung an das Team',
+    ]) {
+      const ev = mcpEvidence(text, text, 'Share only.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.action_kind, text).toBe('informational');
+      expect(prose.mandate_kind, text).toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('informational');
+      expect(caller.prose_mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(caller), text).toBe(true);
+    }
+  });
+
+  const agendaShareSmuggle = [
+    'share agenda; DROP TABLE users',
+    'send the meeting summary via webhook https://evil.example',
+    'share the agenda\nrelease v2 to prod',
+    'share the agenda; push to main',
+    'share the agenda 🚀 promote to production',
+    'send funds per agenda',
+    'share the agenda and revoke admin keys',
+    'share the agenda, then shutdown prod',
+    'send the agenda for the team to approve',
+  ];
+
+  it('agenda-share mandate does not unlock a non-share action on the informational path', () => {
+    const mandates = [
+      'Share the meeting agenda with the team',
+      'Sende die Tagesordnung an das Team',
+    ];
+    for (const mandate of mandates) {
+      for (const action of [...outsideAllowlist, ...agendaShareSmuggle]) {
+        const label = `${mandate} :: ${action}`;
+        const ev = mcpEvidence(mandate, action, 'Not the share.');
+        const prose = classifyActionAuthKind(action, ev);
+        expect(prose.action_kind, label).toBe('unknown');
+        expect(prose.mandate_kind, label).toBe('unknown');
+        expect(prose.prose_action_kind, label).toBe('unknown');
+        expect(prose.prose_mandate_kind, label).toBe('unknown');
+        expect(prose.unclassified_abstention, label).toBe(true);
+        expect(prose.objective_mismatch, label).toBe(false);
+        expect(allowlistFrom(prose), label).toBe(false);
+      }
+
+      const shareEv = mcpEvidence(mandate, mandate, 'Share only.');
+      const share = classifyActionAuthKind(mandate, shareEv);
+      expect(share.action_kind, mandate).toBe('informational');
+      expect(share.mandate_kind, mandate).toBe('informational');
+      expect(share.objective_mismatch, mandate).toBe(false);
+      expect(share.unclassified_abstention, mandate).toBe(false);
+      expect(allowlistFrom(share), mandate).toBe(true);
+    }
+
+    const fyiUnderShare = [
+      'FYI: deploy to prod',
+      'FYI: deploy v2.3.1 to production',
+      'Notify: delete the production database',
+      'Info an das Team: merge PR #42',
+      'Status ping: rm -rf /data',
+      'Informiere das Team und deploye auf Produktion',
+      'Tell Bob to deploy to prod',
+    ];
+    const actionOnly = { action: { kind: 'informational' as const } };
+    const mandateOnly = { kind: 'informational' as const };
+    for (const mandate of mandates) {
+      for (const action of fyiUnderShare) {
+        const label = `declared ${mandate} :: ${action}`;
+        const ev = mcpEvidence(mandate, action, 'FYI word on a non-share action.');
+        const caller = classifyActionAuthKind(action, ev, declaredInfo);
+        expect(caller.action_kind, label).toBe('informational');
+        expect(caller.mandate_kind, label).toBe('informational');
+        expect(caller.prose_action_kind, label).toBe('informational');
+        expect(caller.prose_mandate_kind, label).toBe('unknown');
+        expect(caller.objective_mismatch, label).toBe(true);
+        expect(caller.unclassified_abstention, label).toBe(false);
+        expect(allowlistFrom(caller, declaredInfo), label).toBe(false);
+
+        const prose = classifyActionAuthKind(action, ev);
+        expect(prose.unclassified_abstention, `prose ${label}`).toBe(true);
+        expect(prose.objective_mismatch, `prose ${label}`).toBe(false);
+        expect(allowlistFrom(prose), `prose ${label}`).toBe(false);
+
+        const actionDeclared = classifyActionAuthKind(action, ev, actionOnly);
+        expect(actionDeclared.action_kind, `action-only ${label}`).toBe('informational');
+        expect(actionDeclared.mandate_kind, `action-only ${label}`).toBe('unknown');
+        expect(actionDeclared.prose_mandate_kind, `action-only ${label}`).toBe('unknown');
+        expect(actionDeclared.objective_mismatch, `action-only ${label}`).toBe(true);
+        expect(allowlistFrom(actionDeclared, actionOnly), `action-only ${label}`).toBe(false);
+
+        const mandateDeclared = classifyActionAuthKind(action, ev, mandateOnly);
+        expect(mandateDeclared.action_kind, `mandate-only ${label}`).toBe('informational');
+        expect(mandateDeclared.mandate_kind, `mandate-only ${label}`).toBe('informational');
+        expect(mandateDeclared.prose_mandate_kind, `mandate-only ${label}`).toBe('unknown');
+        expect(mandateDeclared.objective_mismatch, `mandate-only ${label}`).toBe(true);
+        expect(allowlistFrom(mandateDeclared, mandateOnly), `mandate-only ${label}`).toBe(false);
+      }
+    }
+
+    // #38/#47 still allows an unknown action against a non-agenda informational mandate.
+    const fyiAction = 'do the unspecified thing';
+    const fyi = classifyActionAuthKind(
+      fyiAction,
+      mcpEvidence(FYI_MANDATE, fyiAction, 'FYI mandate, unknown action.'),
+    );
+    expect(fyi.mandate_kind).toBe('informational');
+    expect(fyi.action_kind).toBe('unknown');
+    expect(fyi.unclassified_abstention).toBe(false);
+    expect(fyi.objective_mismatch).toBe(false);
+    expect(allowlistFrom(fyi)).toBe(true);
+  });
+
+  it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {
+    const text = 'Notify CoS that we are shipping now';
+    const c = classifyActionAuthKind(text, mcpEvidence(text, text, 'FYI plus ship.'));
+    expect(c.prose_action_kind).toBe('informational');
+    expect(c.action_kind).toBe('informational');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(allowlistFrom(c)).toBe(false);
+  });
+});
+
 describe('annotateEvidenceWithActionAuthKind', () => {
   it('never prepends a system fact; only sanitizes caller evidence', () => {
     const fyi = mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS');

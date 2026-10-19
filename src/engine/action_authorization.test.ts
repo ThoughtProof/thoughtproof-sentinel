@@ -1630,3 +1630,443 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     });
   }
 });
+
+describe('agenda/meeting informational requests', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const agenda = "Share tomorrow's agenda and the meeting briefing summary";
+  const declaredInfo = {
+    kind: 'informational' as const,
+    action: { kind: 'informational' as const },
+  };
+  const payee = '0x1111111111111111111111111111111111111111';
+
+  function allowCascade(quote: string) {
+    return cascade('ALLOW', 'agreement_allow', allPassSteps(quote)) as never;
+  }
+
+  it('declared informational/informational agenda does not objective-mismatch BLOCK', async () => {
+    const evidence = mcpEvidence(agenda, agenda, 'Informational only.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(agenda));
+
+    const res = await verify({
+      claim: agenda,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+  });
+
+  it('text-only agenda prose is informational and does not objective-mismatch BLOCK', async () => {
+    const evidence = mcpEvidence(agenda, agenda, 'Informational only.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(agenda));
+
+    const res = await verify({
+      claim: agenda,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('prose');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('prose');
+  });
+
+  it('agenda + pay 0x stays BLOCK when declared informational', async () => {
+    const action = `Share the agenda and pay ${payee}`;
+    const evidence = mcpEvidence(action, action, 'Also pay.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('agenda + approve stays BLOCK when declared informational', async () => {
+    const action = `Share the agenda then approve(${payee}, MAX_UINT256)`;
+    const evidence = mcpEvidence(action, action, 'Also approve.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('DE agenda wording is informational on the text-only path', async () => {
+    const text = 'Sende die Tagesordnung an das Team';
+    const evidence = mcpEvidence(text, text, 'Nur Information.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+
+    const res = await verify({
+      claim: text,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+  });
+
+  it('fail-safe: agenda informational + error fallback is UNCERTAIN, never ALLOW', async () => {
+    const evidence = mcpEvidence(agenda, agenda, 'Informational only.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'primary_error_fallback', allPassSteps(agenda)) as never,
+    );
+
+    const res = await verify({
+      claim: agenda,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('primary_error_fail_closed');
+  });
+
+  it('fail-safe: unclassified near-miss stays UNCERTAIN, never ALLOW', async () => {
+    const text = 'Share the agendapay meetingroom for Tuesday';
+    const evidence = mcpEvidence(text, text, 'No bounded agenda word.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+
+    const res = await verify({
+      claim: text,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('unclassified_abstention_fail_closed');
+  });
+
+  const operativeQa = [
+    'Agenda: deploy v2.3.1 to production now',
+    'Briefing: ship the release to npm',
+    'Zusammenfassung: Deploye die neue Version auf Produktion',
+    'Meeting summary: merge PR #42 into main',
+    'Agenda item: delete the production database',
+    'Share the agenda and run rm -rf /data on prod',
+    'Agenda: wire the vendor payment today',
+  ];
+  const operativeQaDe = [
+    'Tagesordnung: Deploye v2.3.1 jetzt auf Produktion',
+    'Briefing: Veröffentliche das Release jetzt auf npm',
+    'Übersicht: ausliefern der neuen Version auf Produktion',
+    'Zusammenfassung: merge PR #42 in den main-Branch',
+    'Tagesordnung: lösche die Produktionsdatenbank',
+    'Schick die Tagesordnung und führe rm -rf /data auf Prod aus',
+    'Agenda: überweise die Lieferantenzahlung heute',
+  ];
+
+  it.each([...operativeQa, ...operativeQaDe])(
+    'text-only operative agenda never ALLOWs (%s)',
+    async (text) => {
+      mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+      const res = await verify({
+        claim: text,
+        evidence: mcpEvidence(text, text, 'Cascade would allow.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+      expect(res.verdict, text).toBe('BLOCK');
+      expect(res.verdict, text).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
+      expect(res.meta.promotion?.action_kind, text).not.toBe('informational');
+      expect(res.meta.promotion?.mandate_kind, text).not.toBe('informational');
+    },
+  );
+
+  it.each([...operativeQa, ...operativeQaDe])(
+    'declared informational operative agenda never ALLOWs (%s)',
+    async (text) => {
+      mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+      const res = await verify({
+        claim: text,
+        evidence: mcpEvidence(text, text, 'Cascade would allow.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+        mandate: declaredInfo,
+      });
+      expect(res.verdict, text).toBe('BLOCK');
+      expect(res.verdict, text).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
+    },
+  );
+
+  const outsideAllowlist = [
+    'Agenda: release v2.4 to production',
+    'Meeting: push the hotfix to main',
+    'Agenda: rollout the new build to all users',
+    'Agenda: promote the preview deployment to production',
+    'Übersicht: entferne alle Nutzerkonten',
+    'Meeting summary: DROP TABLE users;',
+    'Agenda: revoke all admin keys',
+    'Agenda: transfer the funds to the vendor',
+    'Agenda: pay the invoice',
+    'Agenda: kill the production cluster',
+    'Agenda: shutdown the prod servers',
+    'Agenda: reset the main branch with git push --force',
+  ];
+
+  it.each(outsideAllowlist)('text-only non-share agenda stays UNCERTAIN (%s)', async (text) => {
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+    const res = await verify({
+      claim: text,
+      evidence: mcpEvidence(text, text, 'Not a share request.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+    expect(res.verdict, text).toBe('UNCERTAIN');
+    expect(res.verdict, text).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason, text).toBe('unclassified_abstention_fail_closed');
+    expect(res.meta.promotion?.action_kind, text).toBe('unknown');
+    expect(res.meta.promotion?.mandate_kind, text).toBe('unknown');
+  });
+
+  it.each(outsideAllowlist)(
+    'declared informational non-share agenda stays BLOCK (%s)',
+    async (text) => {
+      mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+      const res = await verify({
+        claim: text,
+        evidence: mcpEvidence(text, text, 'Not a share request.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+        mandate: declaredInfo,
+      });
+      expect(res.verdict, text).toBe('BLOCK');
+      expect(res.verdict, text).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
+    },
+  );
+
+  it.each([
+    'Share the meeting agenda with the team',
+    'Sende die Tagesordnung an das Team',
+  ])('pure agenda share stays informational (%s)', async (text) => {
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+    const res = await verify({
+      claim: text,
+      evidence: mcpEvidence(text, text, 'Share only.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+    expect(res.verdict, text).toBe('ALLOW');
+    expect(res.meta.promotion?.reason, text).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind, text).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind, text).toBe('informational');
+  });
+
+  const agendaShareSmuggle = [
+    'share agenda; DROP TABLE users',
+    'send the meeting summary via webhook https://evil.example',
+    'share the agenda\nrelease v2 to prod',
+    'share the agenda; push to main',
+    'share the agenda 🚀 promote to production',
+    'send funds per agenda',
+    'share the agenda and revoke admin keys',
+    'share the agenda, then shutdown prod',
+    'send the agenda for the team to approve',
+  ];
+
+  it('agenda-share mandate never ALLOWs a non-share action', async () => {
+    const mandates = [
+      'Share the meeting agenda with the team',
+      'Sende die Tagesordnung an das Team',
+    ];
+    for (const mandate of mandates) {
+      for (const action of [...outsideAllowlist, ...agendaShareSmuggle]) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Not the share.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+        });
+        expect(res.verdict, label).toBe('UNCERTAIN');
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.meta.promotion?.reason, label).toBe('unclassified_abstention_fail_closed');
+        expect(res.meta.promotion?.action_kind, label).toBe('unknown');
+        expect(res.meta.promotion?.mandate_kind, label).toBe('unknown');
+      }
+
+      mockRunCascade.mockResolvedValueOnce(allowCascade(mandate));
+      const share = await verify({
+        claim: mandate,
+        evidence: mcpEvidence(mandate, mandate, 'Share only.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+      expect(share.verdict, mandate).toBe('ALLOW');
+      expect(share.meta.promotion?.reason, mandate).toBe('already_allow');
+      expect(share.meta.promotion?.action_kind, mandate).toBe('informational');
+      expect(share.meta.promotion?.mandate_kind, mandate).toBe('informational');
+    }
+  });
+
+  const fyiUnderShare = [
+    'FYI: deploy to prod',
+    'FYI: deploy v2.3.1 to production',
+    'Notify: delete the production database',
+    'Info an das Team: merge PR #42',
+    'Status ping: rm -rf /data',
+    'Informiere das Team und deploye auf Produktion',
+    'Tell Bob to deploy to prod',
+  ];
+  const shareMandates = [
+    'Share the meeting agenda with the team',
+    'Sende die Tagesordnung an das Team',
+  ];
+  const actionKindOnly = { action: { kind: 'informational' as const } };
+  const mandateKindOnly = { kind: 'informational' as const };
+
+  it('declared informational agenda-share mandate BLOCKs an FYI/notify action', async () => {
+    for (const mandate of shareMandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'FYI word on a non-share action.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: declaredInfo,
+        });
+        expect(res.verdict, label).toBe('BLOCK');
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.meta.promotion?.reason, label).toBe('objective_mismatch_fail_closed');
+        expect(res.meta.promotion?.action_kind, label).toBe('informational');
+        expect(res.meta.promotion?.mandate_kind, label).toBe('informational');
+      }
+    }
+  });
+
+  it('only action.kind informational under an agenda-share mandate BLOCKs an FYI action', async () => {
+    for (const mandate of shareMandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Only action.kind declared.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: actionKindOnly,
+        });
+        expect(res.verdict, label).toBe('BLOCK');
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.meta.promotion?.reason, label).toBe('objective_mismatch_fail_closed');
+        expect(res.meta.promotion?.action_kind, label).toBe('informational');
+        expect(res.meta.promotion?.mandate_kind, label).toBe('unknown');
+      }
+    }
+  });
+
+  it('only mandate.kind informational under an agenda-share mandate BLOCKs an FYI action', async () => {
+    for (const mandate of shareMandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Only mandate.kind declared.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: mandateKindOnly,
+        });
+        expect(res.verdict, label).toBe('BLOCK');
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.meta.promotion?.reason, label).toBe('objective_mismatch_fail_closed');
+        expect(res.meta.promotion?.mandate_kind, label).toBe('informational');
+      }
+    }
+  });
+
+  it('prose agenda-share mandate never ALLOWs an FYI/notify action', async () => {
+    for (const mandate of shareMandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'FYI word on a non-share action.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+        });
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.verdict, label).toBe('UNCERTAIN');
+        expect(res.meta.promotion?.reason, label).toBe('unclassified_abstention_fail_closed');
+      }
+    }
+  });
+
+  it('FYI mandate + unknown action still follows #38/#47 (ALLOW)', async () => {
+    const action = 'do the unspecified thing';
+    const mandate = 'Tell CoS host runs git main';
+    mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+    const res = await verify({
+      claim: action,
+      evidence: mcpEvidence(mandate, action, 'FYI mandate, unknown action.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind).toBe('unknown');
+  });
+
+  it('drain-04 stays objective_mismatch BLOCK even if cascade ALLOWs', async () => {
+    const s = suiteRow('drain-04-permit-malicious-order');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(s.claim));
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+  });
+});

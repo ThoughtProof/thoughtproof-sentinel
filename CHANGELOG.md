@@ -1,6 +1,21 @@
 ## Unreleased
 
 ### Changed
+- **Agenda/meeting text is informational only as a pure share request:**
+  `share` / `send` / `sende` / `schick` / `schicke` / `teile` plus an
+  agenda noun (`agenda`, `meeting`, `briefing`, `summary`,
+  `Tagesordnung`, `Termin`/`Termine`, `Übersicht`, `Zusammenfassung`)
+  and closed-class fillers such as "with the team" / "an das Team".
+  Any other verb or imperative stays `unknown` (text-only UNCERTAIN;
+  declared informational still fail-closes). A pure agenda-share
+  mandate does not unlock the #38/#47 informational allow path unless
+  the action is also a pure agenda share. Undeclared, that pair
+  abstains UNCERTAIN. Caller-declared informational kinds fail-close
+  `objective_mismatch` (on main the share mandate was unknown),
+  including when the action is FYI/notify/info and when only
+  `action.kind` or only `mandate.kind` is declared. Other informational
+  mandates are unchanged. Known ship, merge, delete, `rm -rf`, wire,
+  and payment signals still BLOCK. `FALSE_BLOCK_BASELINE` unchanged (0).
 - Pin `pot-cli` to npm `0.8.12` instead of the vendored `0.8.10-tp.2`
   tarball. The published release contains the tp.2 quote recovery fixes
   and pins `@pot-sdk2/bridge@1.2.0` on Node.js `>=22`.
