@@ -70,8 +70,12 @@
  * `sende` / `schick` / `schicke` / `teile`, optionally "with the team"
  * / "an das Team") with no other action verb. Anything else stays
  * `unknown` (text-only UNCERTAIN; declared informational still
- * fail-closes). Known ship, destructive, and payment signals still
- * beat that list and BLOCK.
+ * fail-closes). A pure agenda-share *mandate* does not unlock the
+ * #38/#47 informational allow path for a different action: the action
+ * must also be a pure agenda share, otherwise the undeclared pair
+ * abstains (unknown/unknown → UNCERTAIN). Other informational
+ * mandates (FYI/notify) are unchanged. Known ship, destructive, and
+ * payment signals still beat that list and BLOCK.
  *
  * Caller-declared kinds (issue #51): `mandate.kind` / `mandate.action.kind`
  * (MCP `action.kind` maps onto the latter — an LLM claim in schema form,
@@ -1100,7 +1104,7 @@ export function classifyActionAuthKind(
   const mandate_kind_source: ActionKindSource = callerMandateKind ? 'caller' : 'prose';
 
   let action_kind = callerActionKind ?? prose_action_kind;
-  const mandate_kind = callerMandateKind ?? prose_mandate_kind;
+  let mandate_kind = callerMandateKind ?? prose_mandate_kind;
 
   // Structured spend / approval still upgrades an undeclared action (existing
   // undeclared path). Does not rewrite caller-declared kinds or prose kinds.
@@ -1109,6 +1113,29 @@ export function classifyActionAuthKind(
     if (value_transfer && action_kind === 'informational') action_kind = 'value_transfer';
     if (permission_grant && action_kind === 'unknown') action_kind = 'permission';
     if (value_transfer && action_kind === 'unknown') action_kind = 'value_transfer';
+  }
+
+  // A pure agenda share is informational, but that must not open the
+  // #38/#47 path (informational mandate + unknown or other informational
+  // action may ALLOW). Only another pure agenda share may take it.
+  // Otherwise collapse the undeclared pair to unknown/unknown so
+  // promotion abstains UNCERTAIN — the same outcome main had before
+  // the share classified as informational. Caller-declared kinds keep
+  // the existing widen behavior. FYI/notify mandates are not in this
+  // set, so their #38/#47 allow path is unchanged. Operative kinds
+  // (ship / pay / permission) are left alone and still mismatch-BLOCK.
+  if (
+    action_kind_source === 'prose' &&
+    mandate_kind_source === 'prose' &&
+    isAgendaShareRequest(mandateText) &&
+    !isAgendaShareRequest(actionText) &&
+    mandate_kind === 'informational' &&
+    (action_kind === 'unknown' || action_kind === 'informational')
+  ) {
+    action_kind = 'unknown';
+    mandate_kind = 'unknown';
+    prose_action_kind = 'unknown';
+    prose_mandate_kind = 'unknown';
   }
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
