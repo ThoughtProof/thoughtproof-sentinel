@@ -1947,14 +1947,19 @@ describe('agenda/meeting informational requests', () => {
     'FYI: deploy v2.3.1 to production',
     'Notify: delete the production database',
     'Info an das Team: merge PR #42',
+    'Status ping: rm -rf /data',
+    'Informiere das Team und deploye auf Produktion',
+    'Tell Bob to deploy to prod',
   ];
+  const shareMandates = [
+    'Share the meeting agenda with the team',
+    'Sende die Tagesordnung an das Team',
+  ];
+  const actionKindOnly = { action: { kind: 'informational' as const } };
+  const mandateKindOnly = { kind: 'informational' as const };
 
   it('declared informational agenda-share mandate BLOCKs an FYI/notify action', async () => {
-    const mandates = [
-      'Share the meeting agenda with the team',
-      'Sende die Tagesordnung an das Team',
-    ];
-    for (const mandate of mandates) {
+    for (const mandate of shareMandates) {
       for (const action of fyiUnderShare) {
         const label = `${mandate} :: ${action}`;
         mockRunCascade.mockResolvedValueOnce(allowCascade(action));
@@ -1974,12 +1979,49 @@ describe('agenda/meeting informational requests', () => {
     }
   });
 
+  it('only action.kind informational under an agenda-share mandate BLOCKs an FYI action', async () => {
+    for (const mandate of shareMandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Only action.kind declared.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: actionKindOnly,
+        });
+        expect(res.verdict, label).toBe('BLOCK');
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.meta.promotion?.reason, label).toBe('objective_mismatch_fail_closed');
+        expect(res.meta.promotion?.action_kind, label).toBe('informational');
+        expect(res.meta.promotion?.mandate_kind, label).toBe('unknown');
+      }
+    }
+  });
+
+  it('only mandate.kind informational under an agenda-share mandate BLOCKs an FYI action', async () => {
+    for (const mandate of shareMandates) {
+      for (const action of fyiUnderShare) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const res = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Only mandate.kind declared.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: mandateKindOnly,
+        });
+        expect(res.verdict, label).toBe('BLOCK');
+        expect(res.verdict, label).not.toBe('ALLOW');
+        expect(res.meta.promotion?.reason, label).toBe('objective_mismatch_fail_closed');
+        expect(res.meta.promotion?.mandate_kind, label).toBe('informational');
+      }
+    }
+  });
+
   it('prose agenda-share mandate never ALLOWs an FYI/notify action', async () => {
-    const mandates = [
-      'Share the meeting agenda with the team',
-      'Sende die Tagesordnung an das Team',
-    ];
-    for (const mandate of mandates) {
+    for (const mandate of shareMandates) {
       for (const action of fyiUnderShare) {
         const label = `${mandate} :: ${action}`;
         mockRunCascade.mockResolvedValueOnce(allowCascade(action));

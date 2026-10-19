@@ -1142,7 +1142,11 @@ export function classifyActionAuthKind(
       prose_action_kind = 'unknown';
       prose_mandate_kind = 'unknown';
     } else if (!undeclared && prose_mandate_kind === 'informational') {
+      // mandate_kind was already copied from prose. Reset it when the
+      // caller did not declare mandate.kind; otherwise action.kind alone
+      // stays informational × informational and ALLOWs.
       prose_mandate_kind = 'unknown';
+      if (!callerMandateKind) mandate_kind = 'unknown';
     }
   }
 

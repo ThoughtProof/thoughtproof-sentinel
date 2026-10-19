@@ -1827,7 +1827,12 @@ describe('agenda/meeting informational terms', () => {
       'FYI: deploy v2.3.1 to production',
       'Notify: delete the production database',
       'Info an das Team: merge PR #42',
+      'Status ping: rm -rf /data',
+      'Informiere das Team und deploye auf Produktion',
+      'Tell Bob to deploy to prod',
     ];
+    const actionOnly = { action: { kind: 'informational' as const } };
+    const mandateOnly = { kind: 'informational' as const };
     for (const mandate of mandates) {
       for (const action of fyiUnderShare) {
         const label = `declared ${mandate} :: ${action}`;
@@ -1845,6 +1850,20 @@ describe('agenda/meeting informational terms', () => {
         expect(prose.unclassified_abstention, `prose ${label}`).toBe(true);
         expect(prose.objective_mismatch, `prose ${label}`).toBe(false);
         expect(allowlistFrom(prose), `prose ${label}`).toBe(false);
+
+        const actionDeclared = classifyActionAuthKind(action, ev, actionOnly);
+        expect(actionDeclared.action_kind, `action-only ${label}`).toBe('informational');
+        expect(actionDeclared.mandate_kind, `action-only ${label}`).toBe('unknown');
+        expect(actionDeclared.prose_mandate_kind, `action-only ${label}`).toBe('unknown');
+        expect(actionDeclared.objective_mismatch, `action-only ${label}`).toBe(true);
+        expect(allowlistFrom(actionDeclared, actionOnly), `action-only ${label}`).toBe(false);
+
+        const mandateDeclared = classifyActionAuthKind(action, ev, mandateOnly);
+        expect(mandateDeclared.action_kind, `mandate-only ${label}`).toBe('informational');
+        expect(mandateDeclared.mandate_kind, `mandate-only ${label}`).toBe('informational');
+        expect(mandateDeclared.prose_mandate_kind, `mandate-only ${label}`).toBe('unknown');
+        expect(mandateDeclared.objective_mismatch, `mandate-only ${label}`).toBe(true);
+        expect(allowlistFrom(mandateDeclared, mandateOnly), `mandate-only ${label}`).toBe(false);
       }
     }
 
