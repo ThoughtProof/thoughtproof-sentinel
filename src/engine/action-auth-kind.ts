@@ -63,10 +63,13 @@
  * structured `req.mandate`, so the financial gate never runs.
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
- * `inform`, `info`, `status ping`, `agenda`, `meeting`, `briefing`,
- * `summary`) plus a small DE informational set (Informiere, Info an,
- * Bescheid geben, Rückmeldung, Status an, Tagesordnung, Termin/Termine,
- * Übersicht, Zusammenfassung).
+ * `inform`, `info`, `status ping`) plus a small DE informational set
+ * (Informiere, Info an, Bescheid geben, Rückmeldung, Status an).
+ * Agenda/meeting terms (`agenda`, `meeting`, `briefing`, `summary`,
+ * Tagesordnung, Termin/Termine, Übersicht, Zusammenfassung) are a
+ * separate list and do not take the FYI info-wins-over-ship exception.
+ * A ship, destructive, or payment signal wins over them, and that mix
+ * fail-closes.
  *
  * Caller-declared kinds (issue #51): `mandate.kind` / `mandate.action.kind`
  * (MCP `action.kind` maps onto the latter — an LLM claim in schema form,
@@ -243,24 +246,43 @@ const INFO_HEAD_RE = new RegExp(
 );
 
 const EN_INFO_ANY =
-  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info|release\\s+notes|agenda|meeting|briefing|summary)';
+  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info|release\\s+notes)';
 
-/**
- * Bounded agenda/meeting terms sit with the existing DE informational
- * set. Termin/Termine only — not Terminen/Termination. Not full i18n.
- */
 const DE_INFO_ANY =
-  '(?:informier(?:e|en|t)|info\\s+an|status\\s+an|r[uü]ckmeldung|bescheid(?:\\s+(?:geben|sagen))?|gib(?:st|t)?\\s+(?:\\w+\\s+){0,4}bescheid|tagesordnung|termine?|zusammenfassung|übersicht)';
+  '(?:informier(?:e|en|t)|info\\s+an|status\\s+an|r[uü]ckmeldung|bescheid(?:\\s+(?:geben|sagen))?|gib(?:st|t)?\\s+(?:\\w+\\s+){0,4}bescheid)';
+
+const INFO_ANY_RE = new RegExp(`\\b(?:${EN_INFO_ANY}|${DE_INFO_ANY})\\b`, 'i');
 
 /**
- * ASCII `\b` treats Ü/ü as non-word, so `\bübersicht\b` misses
- * "Übersicht" and matches the glued form "xÜbersicht". Umlauts count
- * as word characters; compounds stay out.
+ * Agenda/meeting terms. Separate from INFO_ANY so they do not take the
+ * FYI info-wins-over-ship exception. Termin/Termine only — not
+ * Terminen/Termination. Not full i18n.
+ * ASCII `\b` treats Ü/ü as non-word, so Übersicht uses a letter edge.
  */
-const INFO_ANY_EDGE = '[^A-Za-z0-9_ÄÖÜäöü]';
-const INFO_ANY_RE = new RegExp(
-  `(?:^|${INFO_ANY_EDGE})(?:${EN_INFO_ANY}|${DE_INFO_ANY})(?=$|${INFO_ANY_EDGE})`,
+const EN_AGENDA_ANY = '(?:agenda|meeting|briefing|summary)';
+const DE_AGENDA_ANY = '(?:tagesordnung|termine?|zusammenfassung|übersicht)';
+const AGENDA_EDGE = '[^A-Za-z0-9_ÄÖÜäöü]';
+const AGENDA_ANY_RE = new RegExp(
+  `(?:^|${AGENDA_EDGE})(?:${EN_AGENDA_ANY}|${DE_AGENDA_ANY})(?=$|${AGENDA_EDGE})`,
   'i',
+);
+
+/**
+ * Operative signals that win over agenda words only (not over FYI).
+ * merge / delete / rm -rf, and wire / payment when VALUE_RE does not
+ * already match. DE: löschen, zusammenführen, überweisen, Zahlung.
+ */
+const AGENDA_DESTRUCTIVE_BODY =
+  '(?:merge|delete|rm\\s+-rf|l(?:ö|oe)sch(?:e|en|t)?|zusammenf(?:ü|ue)hren)';
+const AGENDA_PAYMENT_BODY =
+  '(?:wire(?:ing)?|payment|zahlung|(?:ü|ue)berweis(?:e|en|t)?)';
+const AGENDA_DESTRUCTIVE_RE = new RegExp(
+  `(?:^|${AGENDA_EDGE})(${AGENDA_DESTRUCTIVE_BODY})(?=$|${AGENDA_EDGE})`,
+  'gi',
+);
+const AGENDA_PAYMENT_RE = new RegExp(
+  `(?:^|${AGENDA_EDGE})(${AGENDA_PAYMENT_BODY})(?=$|${AGENDA_EDGE})`,
+  'gi',
 );
 
 const VALUE_HEAD_RE =
@@ -384,17 +406,62 @@ function leadingKind(text: string): ActionKind {
   return 'unknown';
 }
 
+function hasAgendaLexeme(re: RegExp, text: string): boolean {
+  const scan = new RegExp(re.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = scan.exec(text)) !== null) {
+    const word = m[1] ?? '';
+    const wordIndex = m.index + m[0].length - word.length;
+    const before = text.slice(Math.max(0, wordIndex - 48), wordIndex);
+    if (SHIP_NEGATION_BEFORE_RE.test(before)) continue;
+    return true;
+  }
+  return false;
+}
+
+function hasAgendaDestructiveSignal(text: string): boolean {
+  return hasAgendaLexeme(AGENDA_DESTRUCTIVE_RE, text);
+}
+
+function hasAgendaPaymentSignal(text: string): boolean {
+  return hasAgendaLexeme(AGENDA_PAYMENT_RE, text);
+}
+
+/** Agenda wording plus a ship, destructive, or payment signal. FYI text is not in this set. */
+function textHasAgendaOperativeSignal(text: string): boolean {
+  if (!text || !AGENDA_ANY_RE.test(text)) return false;
+  return (
+    hasPermissionGrant(text) ||
+    hasValueTransfer(text) ||
+    hasPositiveShipInstruction(text) ||
+    hasAgendaDestructiveSignal(text) ||
+    hasAgendaPaymentSignal(text)
+  );
+}
+
+/** Kind of the signal that beats an agenda word. Null when the text is agenda-only. */
+function agendaOperativeKind(text: string): ActionKind | null {
+  if (!textHasAgendaOperativeSignal(text)) return null;
+  if (hasPermissionGrant(text)) return 'permission';
+  if (hasValueTransfer(text) || hasAgendaPaymentSignal(text)) return 'value_transfer';
+  return 'deploy_ship';
+}
+
 function classifyBlob(text: string): ActionKind {
   const lead = leadingKind(text);
   if (lead !== 'unknown') return lead;
   if (hasPermissionGrant(text)) return 'permission';
   if (hasValueTransfer(text)) return 'value_transfer';
   // Positive ship only — "kein Deploy" / "no deploy" must not win over FYI.
+  // Agenda/meeting words are not in INFO_ANY_RE, so they do not suppress ship.
   if (hasPositiveShipInstruction(text) && !INFO_ANY_RE.test(text)) return 'deploy_ship';
   if (INFO_ANY_RE.test(text) && !hasValueTransfer(text) && !hasPermissionGrant(text)) {
     return 'informational';
   }
   if (hasPositiveShipInstruction(text)) return 'deploy_ship';
+  const agendaKind = agendaOperativeKind(text);
+  if (agendaKind) return agendaKind;
+  if (AGENDA_ANY_RE.test(text)) return 'informational';
   return 'unknown';
 }
 
@@ -1079,7 +1146,13 @@ export function classifyActionAuthKind(
     !isUnclassifiedAbstention(action_kind, mandate_kind) &&
     !informationalActionMayPublicAllow(action_kind, mandate_kind, allowlistContext);
 
-  const objective_mismatch = namedKindMismatch || callerWidenBlocked;
+  // Agenda words do not inherit the FYI exception. A ship, destructive,
+  // or payment signal in the same text wins, and the mix fail-closes
+  // even when both sides share that operative kind.
+  const agendaOperativeConflict =
+    textHasAgendaOperativeSignal(actionText) || textHasAgendaOperativeSignal(mandateText);
+
+  const objective_mismatch = namedKindMismatch || callerWidenBlocked || agendaOperativeConflict;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&

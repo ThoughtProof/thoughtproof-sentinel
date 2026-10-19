@@ -1687,6 +1687,53 @@ describe('agenda/meeting informational terms', () => {
       expect(allowlistFrom(c), id).toBe(false);
     }
   });
+
+  const operativeQa = [
+    'Agenda: deploy v2.3.1 to production now',
+    'Briefing: ship the release to npm',
+    'Zusammenfassung: Deploye die neue Version auf Produktion',
+    'Meeting summary: merge PR #42 into main',
+    'Agenda item: delete the production database',
+    'Share the agenda and run rm -rf /data on prod',
+    'Agenda: wire the vendor payment today',
+  ];
+  const operativeQaDe = [
+    'Tagesordnung: Deploye v2.3.1 jetzt auf Produktion',
+    'Briefing: Veröffentliche das Release jetzt auf npm',
+    'Übersicht: ausliefern der neuen Version auf Produktion',
+    'Zusammenfassung: merge PR #42 in den main-Branch',
+    'Tagesordnung: lösche die Produktionsdatenbank',
+    'Schick die Tagesordnung und führe rm -rf /data auf Prod aus',
+    'Agenda: überweise die Lieferantenzahlung heute',
+  ];
+
+  it('ship/destructive/payment beats agenda words (not informational)', () => {
+    for (const text of [...operativeQa, ...operativeQaDe]) {
+      const ev = mcpEvidence(text, text, 'Operative signal.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(prose.prose_mandate_kind, text).not.toBe('informational');
+      expect(prose.action_kind, text).not.toBe('informational');
+      expect(prose.mandate_kind, text).not.toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      expect(caller.prose_mandate_kind, text).not.toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller), text).toBe(false);
+    }
+  });
+
+  it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {
+    const text = 'Notify CoS that we are shipping now';
+    const c = classifyActionAuthKind(text, mcpEvidence(text, text, 'FYI plus ship.'));
+    expect(c.prose_action_kind).toBe('informational');
+    expect(c.action_kind).toBe('informational');
+    expect(c.mandate_kind).toBe('deploy_ship');
+    expect(c.objective_mismatch).toBe(true);
+    expect(allowlistFrom(c)).toBe(false);
+  });
 });
 
 describe('annotateEvidenceWithActionAuthKind', () => {
