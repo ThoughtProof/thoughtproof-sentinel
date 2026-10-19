@@ -63,8 +63,10 @@
  * structured `req.mandate`, so the financial gate never runs.
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
- * `inform`, `info`, `status ping`) plus a small DE informational set
- * (Informiere, Info an, Bescheid geben, Rückmeldung, Status an).
+ * `inform`, `info`, `status ping`, `agenda`, `meeting`, `briefing`,
+ * `summary`) plus a small DE informational set (Informiere, Info an,
+ * Bescheid geben, Rückmeldung, Status an, Tagesordnung, Termin/Termine,
+ * Übersicht, Zusammenfassung).
  *
  * Caller-declared kinds (issue #51): `mandate.kind` / `mandate.action.kind`
  * (MCP `action.kind` maps onto the latter — an LLM claim in schema form,
@@ -241,12 +243,25 @@ const INFO_HEAD_RE = new RegExp(
 );
 
 const EN_INFO_ANY =
-  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info|release\\s+notes)';
+  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info|release\\s+notes|agenda|meeting|briefing|summary)';
 
+/**
+ * Bounded agenda/meeting terms sit with the existing DE informational
+ * set. Termin/Termine only — not Terminen/Termination. Not full i18n.
+ */
 const DE_INFO_ANY =
-  '(?:informier(?:e|en|t)|info\\s+an|status\\s+an|r[uü]ckmeldung|bescheid(?:\\s+(?:geben|sagen))?|gib(?:st|t)?\\s+(?:\\w+\\s+){0,4}bescheid)';
+  '(?:informier(?:e|en|t)|info\\s+an|status\\s+an|r[uü]ckmeldung|bescheid(?:\\s+(?:geben|sagen))?|gib(?:st|t)?\\s+(?:\\w+\\s+){0,4}bescheid|tagesordnung|termine?|zusammenfassung|übersicht)';
 
-const INFO_ANY_RE = new RegExp(`\\b(?:${EN_INFO_ANY}|${DE_INFO_ANY})\\b`, 'i');
+/**
+ * ASCII `\b` treats Ü/ü as non-word, so `\bübersicht\b` misses
+ * "Übersicht" and matches the glued form "xÜbersicht". Umlauts count
+ * as word characters; compounds stay out.
+ */
+const INFO_ANY_EDGE = '[^A-Za-z0-9_ÄÖÜäöü]';
+const INFO_ANY_RE = new RegExp(
+  `(?:^|${INFO_ANY_EDGE})(?:${EN_INFO_ANY}|${DE_INFO_ANY})(?=$|${INFO_ANY_EDGE})`,
+  'i',
+);
 
 const VALUE_HEAD_RE =
   /^(?:granting|grant|approve|approving|sign(?:ing)?|permit|transfer|send(?:ing)?\s+\d|swap(?:ping)?|bridge|pay(?:ing)?)\b/i;

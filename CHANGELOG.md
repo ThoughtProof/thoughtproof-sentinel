@@ -1,6 +1,14 @@
 ## Unreleased
 
 ### Changed
+- **Agenda/meeting text is informational:** bounded terms in
+  `EN_INFO_ANY` / `DE_INFO_ANY` (`agenda`, `meeting`, `briefing`,
+  `summary`; `Tagesordnung`, `Termin`/`Termine`, `Übersicht`,
+  `Zusammenfassung`). Caller-declared informational/informational
+  agenda requests no longer fail closed as
+  `objective_mismatch_fail_closed` when the prose is the same kind.
+  Payment, approve, and permission signals still upgrade. Compounds
+  and glued forms stay unknown. `FALSE_BLOCK_BASELINE` unchanged (0).
 - Pin `pot-cli` to npm `0.8.12` instead of the vendored `0.8.10-tp.2`
   tarball. The published release contains the tp.2 quote recovery fixes
   and pins `@pot-sdk2/bridge@1.2.0` on Node.js `>=22`.

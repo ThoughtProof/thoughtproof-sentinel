@@ -1630,3 +1630,165 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     });
   }
 });
+
+describe('agenda/meeting informational requests', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const agenda = "Share tomorrow's agenda and the meeting briefing summary";
+  const declaredInfo = {
+    kind: 'informational' as const,
+    action: { kind: 'informational' as const },
+  };
+  const payee = '0x1111111111111111111111111111111111111111';
+
+  function allowCascade(quote: string) {
+    return cascade('ALLOW', 'agreement_allow', allPassSteps(quote)) as never;
+  }
+
+  it('declared informational/informational agenda does not objective-mismatch BLOCK', async () => {
+    const evidence = mcpEvidence(agenda, agenda, 'Informational only.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(agenda));
+
+    const res = await verify({
+      claim: agenda,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('caller');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('caller');
+  });
+
+  it('text-only agenda prose is informational and does not objective-mismatch BLOCK', async () => {
+    const evidence = mcpEvidence(agenda, agenda, 'Informational only.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(agenda));
+
+    const res = await verify({
+      claim: agenda,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.reason).toBe('already_allow');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+    expect(res.meta.promotion?.action_kind_source).toBe('prose');
+    expect(res.meta.promotion?.mandate_kind_source).toBe('prose');
+  });
+
+  it('agenda + pay 0x stays BLOCK when declared informational', async () => {
+    const action = `Share the agenda and pay ${payee}`;
+    const evidence = mcpEvidence(action, action, 'Also pay.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('agenda + approve stays BLOCK when declared informational', async () => {
+    const action = `Share the agenda then approve(${payee}, MAX_UINT256)`;
+    const evidence = mcpEvidence(action, action, 'Also approve.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+
+    const res = await verify({
+      claim: action,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('DE agenda wording is informational on the text-only path', async () => {
+    const text = 'Bitte die Tagesordnung, den Termin und die Übersicht als Zusammenfassung schicken.';
+    const evidence = mcpEvidence(text, text, 'Nur Information.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+
+    const res = await verify({
+      claim: text,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+    expect(res.meta.promotion?.action_kind).toBe('informational');
+    expect(res.meta.promotion?.mandate_kind).toBe('informational');
+  });
+
+  it('fail-safe: agenda informational + error fallback is UNCERTAIN, never ALLOW', async () => {
+    const evidence = mcpEvidence(agenda, agenda, 'Informational only.');
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'primary_error_fallback', allPassSteps(agenda)) as never,
+    );
+
+    const res = await verify({
+      claim: agenda,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('primary_error_fail_closed');
+  });
+
+  it('fail-safe: unclassified near-miss stays UNCERTAIN, never ALLOW', async () => {
+    const text = 'Share the agendapay meetingroom for Tuesday';
+    const evidence = mcpEvidence(text, text, 'No bounded agenda word.');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+
+    const res = await verify({
+      claim: text,
+      evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('unclassified_abstention_fail_closed');
+  });
+
+  it('drain-04 stays objective_mismatch BLOCK even if cascade ALLOWs', async () => {
+    const s = suiteRow('drain-04-permit-malicious-order');
+    mockRunCascade.mockResolvedValueOnce(allowCascade(s.claim));
+
+    const res = await verify({
+      claim: s.claim,
+      evidence: s.evidence,
+      mode: 'action_authorization',
+      tier: 'standard',
+    });
+
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+  });
+});
