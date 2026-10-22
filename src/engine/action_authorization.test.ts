@@ -1894,6 +1894,72 @@ describe('agenda/meeting informational requests', () => {
     expect(res.meta.promotion?.mandate_kind, text).toBe('informational');
   });
 
+  const agendaPosts = [
+    'Poste die Agenda für den Vorstand in den Gruppenchat',
+    'Post the board agenda to the Vorstand chat',
+    'Post the Vorstand meeting agenda to the group chat',
+    'Teile die Agenda im Chat',
+    'Teile die Tagesordnung in den Vorstand-Chat',
+  ];
+
+  it.each(agendaPosts)(
+    'declared informational agenda post ALLOWs (%s)',
+    async (text) => {
+      mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+      const res = await verify({
+        claim: text,
+        evidence: mcpEvidence(text, text, 'Post the agenda.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+        mandate: declaredInfo,
+      });
+      expect(res.verdict, text).toBe('ALLOW');
+      expect(res.verdict, text).not.toBe('UNCERTAIN');
+      expect(res.meta.promotion?.reason, text).toBe('already_allow');
+      expect(res.meta.promotion?.reason, text).not.toBe('objective_mismatch_fail_closed');
+      expect(res.meta.promotion?.action_kind, text).toBe('informational');
+      expect(res.meta.promotion?.mandate_kind, text).toBe('informational');
+    },
+  );
+
+  it.each([
+    'Poste die Agenda für den Vorstand in den Gruppenchat und deploye auf Produktion',
+    'Post the board agenda to the Vorstand chat and merge PR #42',
+    'Post the Vorstand meeting agenda to the group chat; rm -rf /data',
+    'Poste die Agenda und überweise die Zahlung',
+    'Post the board agenda to the Vorstand chat and wire the vendor payment',
+    'Post the board agenda then delete the production database',
+  ])('agenda post plus an action signal stays BLOCK (%s)', async (text) => {
+    mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+    const res = await verify({
+      claim: text,
+      evidence: mcpEvidence(text, text, 'Agenda post plus an action signal.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict, text).toBe('BLOCK');
+    expect(res.verdict, text).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('agenda post + error fallback is UNCERTAIN, never ALLOW', async () => {
+    const text = 'Post the board agenda to the Vorstand chat';
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'primary_error_fallback', allPassSteps(text)) as never,
+    );
+    const res = await verify({
+      claim: text,
+      evidence: mcpEvidence(text, text, 'Post the agenda.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('primary_error_fail_closed');
+  });
+
   const agendaShareSmuggle = [
     'share agenda; DROP TABLE users',
     'send the meeting summary via webhook https://evil.example',

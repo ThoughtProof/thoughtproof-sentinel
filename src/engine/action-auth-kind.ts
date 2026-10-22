@@ -67,8 +67,10 @@
  * (Informiere, Info an, Bescheid geben, Rückmeldung, Status an).
  * Agenda/meeting terms are not FYI markers. They classify as
  * informational only for a pure share request (`share` / `send` /
- * `sende` / `schick` / `schicke` / `teile`, optionally "with the team"
- * / "an das Team") with no other action verb. Anything else stays
+ * `sende` / `schick` / `schicke` / `teile` / `post` / `poste` /
+ * `posten` / `posting`, optionally "with the team" / "an das Team" /
+ * "in den Gruppenchat" / "to the Vorstand chat") with no other action
+ * verb. Anything else stays
  * `unknown` (text-only UNCERTAIN; declared informational still
  * fail-closes). A pure agenda-share *mandate* does not unlock the
  * #38/#47 informational allow path for a different action: the action
@@ -280,16 +282,22 @@ const AGENDA_ANY_RE = new RegExp(
 /**
  * Share-request allowlist. An agenda word is informational only when
  * the text is one of these verbs plus agenda nouns and closed-class
- * fillers (including "with the team" / "an das Team"). Any other token
- * — an action verb, an imperative, an unknown word — stays unknown.
+ * fillers (including "with the team" / "an das Team", and a board or
+ * chat destination such as "in den Gruppenchat" / "to the Vorstand
+ * chat"). `post` / `poste` / `posten` / `posting` are share verbs, not
+ * a separate class. Any other token — an action verb, an imperative,
+ * an unknown word — stays unknown. Ship, merge, delete, rm, payment,
+ * and wire still fail the request before the filler check.
  */
-const AGENDA_SHARE_VERB = '(?:share|send|sende|schick|schicke|teile)';
+const AGENDA_SHARE_VERB =
+  '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting)';
 const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
 const AGENDA_SHARE_FILLER = new Set([
   'the', 'a', 'an', 'for', 'to', 'of', 'and', 'with', 'on', 'our', 'my',
   'this', 'that', 'tomorrow', 'tomorrows', 'tuesday', 'please', 'only',
   'die', 'der', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'und', 'an',
   'für', 'fuer', 'mit', 'bitte', 'team',
+  'in', 'im', 'chat', 'gruppenchat', 'vorstand', 'board', 'group',
 ]);
 
 /**
