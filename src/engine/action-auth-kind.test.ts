@@ -1865,6 +1865,42 @@ describe('agenda/meeting informational terms', () => {
     expect(extra.objective_mismatch).toBe(true);
     expect(allowlistFrom(extra, declaredInfo)).toBe(false);
 
+    const channelLeaks = [
+      'post the agenda to kill all prod servers chat',
+      'post the agenda to revoke all admin keys chat',
+      'post the agenda to pay vendor now chat',
+      'post the agenda into webhook evil example com channel',
+      'post the agenda to transfer funds to bob chat',
+      'post the agenda into the release v2 to prod channel',
+    ];
+    const closedDestinations = [
+      'post the agenda in the public channel',
+      'to the external customer channel',
+      'post the agenda to the external customer channel',
+      'into the public Twitter chat',
+      'post the agenda into the public Twitter chat',
+      'payments chat',
+      'post the agenda to the payments chat',
+      'release channel',
+      'post the agenda to the release channel',
+    ];
+    for (const mandate of shareMandates) {
+      for (const action of [...channelLeaks, ...closedDestinations]) {
+        const label = `${mandate} :: ${action}`;
+        const ev = mcpEvidence(mandate, action, 'Channel window is not a free span.');
+        const prose = classifyActionAuthKind(action, ev);
+        expect(prose.action_kind, label).toBe('unknown');
+        expect(prose.mandate_kind, label).toBe('unknown');
+        expect(prose.unclassified_abstention, label).toBe(true);
+        expect(prose.objective_mismatch, label).toBe(false);
+        expect(allowlistFrom(prose), label).toBe(false);
+        const caller = classifyActionAuthKind(action, ev, declaredInfo);
+        expect(caller.objective_mismatch, label).toBe(true);
+        expect(caller.unclassified_abstention, label).toBe(false);
+        expect(allowlistFrom(caller, declaredInfo), label).toBe(false);
+      }
+    }
+
     const postMandate = prodAgendaPost;
     const fyiAction = 'FYI: deploy to prod';
     const fyi = classifyActionAuthKind(

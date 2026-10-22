@@ -1924,6 +1924,86 @@ describe('agenda/meeting informational requests', () => {
     },
   );
 
+  const channelLeaks = [
+    'post the agenda to kill all prod servers chat',
+    'post the agenda to revoke all admin keys chat',
+    'post the agenda to pay vendor now chat',
+    'post the agenda into webhook evil example com channel',
+    'post the agenda to transfer funds to bob chat',
+    'post the agenda into the release v2 to prod channel',
+  ];
+  const closedDestinations = [
+    'post the agenda in the public channel',
+    'to the external customer channel',
+    'post the agenda to the external customer channel',
+    'into the public Twitter chat',
+    'post the agenda into the public Twitter chat',
+    'payments chat',
+    'post the agenda to the payments chat',
+    'release channel',
+    'post the agenda to the release channel',
+  ];
+  const channelShareMandates = [
+    'Share the meeting agenda with the team',
+    'Sende die Tagesordnung an das Team',
+  ];
+
+  it('share mandate does not ALLOW a free channel-window leak', async () => {
+    for (const mandate of channelShareMandates) {
+      for (const action of channelLeaks) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const prose = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Channel window leak.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+        });
+        expect(prose.verdict, label).toBe('UNCERTAIN');
+        expect(prose.verdict, label).not.toBe('ALLOW');
+        expect(prose.meta.promotion?.reason, label).toBe('unclassified_abstention_fail_closed');
+
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const declared = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Channel window leak.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: declaredInfo,
+        });
+        expect(declared.verdict, label).not.toBe('ALLOW');
+        expect(['BLOCK', 'UNCERTAIN']).toContain(declared.verdict);
+        expect(declared.meta.promotion?.reason, label).not.toBe('already_allow');
+      }
+    }
+  });
+
+  it('public, external, and non-name channel words are not an agenda share', async () => {
+    for (const mandate of channelShareMandates) {
+      for (const action of closedDestinations) {
+        const label = `${mandate} :: ${action}`;
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const prose = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Closed destination.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+        });
+        expect(prose.verdict, label).not.toBe('ALLOW');
+
+        mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+        const declared = await verify({
+          claim: action,
+          evidence: mcpEvidence(mandate, action, 'Closed destination.'),
+          mode: 'action_authorization',
+          tier: 'standard',
+          mandate: declaredInfo,
+        });
+        expect(declared.verdict, label).not.toBe('ALLOW');
+      }
+    }
+  });
+
   it.each(['deploy', 'merge', 'delete', 'rm -rf', 'payment', 'wire', 'ship'])(
     'prod agenda channel post does not ALLOW with %s',
     async (token) => {

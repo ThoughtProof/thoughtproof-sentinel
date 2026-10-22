@@ -293,13 +293,18 @@ const AGENDA_SHARE_VERB =
   '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting)';
 const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
 /**
- * "into the … channel" / "to the … chat". The words inside the
- * destination are the channel name, not fillers, and the span is
- * bounded so a later verb cannot hide there. Operative signals are
- * rejected before this runs.
+ * "into the internal Vorstand agent channel" / "to the Vorstand chat".
+ * At most six name words, each from this allowlist, then
+ * channel/chat/gruppenchat/kanal. Any other word means the destination
+ * does not match and the text stays unknown. public / external /
+ * customer / twitter / x / linkedin are not names (fail-closed).
+ * Case-insensitive. Operative signals are rejected before this runs.
  */
+const AGENDA_CHANNEL_NAME =
+  '(?:the|our|internal|agents|agent|vorstand|board|team|group|crew|ops|staff|internen|interne|gruppe)';
+const AGENDA_CHANNEL_NOUN = '(?:channel|chat|gruppenchat|kanal)';
 const AGENDA_CHANNEL_DEST_RE = new RegExp(
-  `\\b(?:into|in|im|to)\\b(?:\\s+[A-Za-z0-9ÄÖÜäöü]+){0,6}\\s+\\b(?:channel|chat|gruppenchat)\\b`,
+  `\\b(?:into|in|im|to)\\b(?:\\s+${AGENDA_CHANNEL_NAME}){0,6}\\s+\\b${AGENDA_CHANNEL_NOUN}\\b`,
   'gi',
 );
 const AGENDA_SHARE_FILLER = new Set([

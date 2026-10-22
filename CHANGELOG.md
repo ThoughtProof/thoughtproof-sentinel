@@ -8,10 +8,15 @@
   Gruppenchat` and `Post the board agenda to the Vorstand chat` are
   informational, so both-declared informational agrees and may ALLOW.
   Prod receipt `sent_52aef10e71ba4527` (`post one short agenda into the
-  internal Vorstand agent channel`) is that case: `into the … channel`
-  is a bounded destination, and `one` / `short` are the only added
-  fillers. Any other token stays unknown. A `deploy` / `merge` /
-  `delete` / `rm -rf` / `payment` / `wire` / `ship` token still BLOCK.
+  internal Vorstand agent channel`) is that case. The destination
+  window is a name allowlist only (`the`, `our`, `internal`, `agent` /
+  `agents`, `Vorstand`, `board`, `team`, `group`, `crew`, `ops`,
+  `staff`, `interne` / `internen`, `Gruppe`; max 6) then
+  `channel` / `chat` / `Gruppenchat` / `Kanal`. Any other word,
+  including `public` / `external` / `customer` / `twitter` / `x` /
+  `linkedin`, leaves the text unknown. `one` / `short` are the only
+  added fillers. A `deploy` / `merge` / `delete` / `rm -rf` /
+  `payment` / `wire` / `ship` token still BLOCK.
   A ship, merge, delete, `rm -rf`, wire, or payment signal still
   fails the share. FYI/notify actions under an agenda-share mandate
   stay `objective_mismatch` BLOCK. `FALSE_BLOCK_BASELINE` unchanged (0).
