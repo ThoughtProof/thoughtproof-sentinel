@@ -87,7 +87,7 @@ const spec = {
                   },
                   evidence: {
                     type: 'string',
-                    description: 'Context, reasoning trace, or market data supporting the claim',
+                    description: 'Context, reasoning trace, or market data supporting the claim. Leading and trailing ECMAScript String#trim whitespace is removed; internal whitespace, line endings and Unicode composition are preserved. Evidence receipt hashes bind the UTF-8 encoding of that validated text.',
                     maxLength: 500000,
                   },
                   mode: {
@@ -354,7 +354,7 @@ const spec = {
                             schema_version: {type: 'string', enum: ['sentinel.trade-risk-result.v1']},
                             status: {type: 'string', enum: ['pass', 'block', 'invalid']},
                             checked_input: {type: 'object', nullable: true},
-                            evidence_sha256: {type: 'string'},
+                            evidence_sha256: {type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Lowercase SHA-256 hex of UTF-8 evidence after ECMAScript String#trim. No internal whitespace, line-ending, Unicode or JSON normalization.'},
                             actual_risk_pct: {type: 'number', nullable: true},
                             allowed_risk_pct: {type: 'number', nullable: true},
                             codes: {type: 'array', items: {type: 'string'}},

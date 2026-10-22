@@ -3,6 +3,7 @@ import type { AuthorizationMandate, GateMode } from './engine/authorization-gate
 import { ACTION_KINDS, type ActionKind } from './engine/action-auth-kind.js';
 import { TIER_CONFIGS } from './tiers.js';
 import {tradeRiskInputErrors, type TradeRiskInput} from './engine/trade-risk-gate.js';
+import {normalizeEvidenceText} from './evidence-text.js';
 
 export interface ValidationError {
   field: string;
@@ -475,7 +476,7 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
     data: {
       id: b.id as string | undefined,
       claim: (b.claim as string).trim(),
-      evidence: (b.evidence as string).trim(),
+      evidence: normalizeEvidenceText(b.evidence as string),
       mode: b.mode as SentinelMode,
       tier: (b.tier as SentinelTier | undefined) ?? 'standard',
       mandate,

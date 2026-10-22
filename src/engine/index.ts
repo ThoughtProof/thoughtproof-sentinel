@@ -47,6 +47,7 @@ import {
 import { randomUUID } from 'crypto';
 import { finiteScore, receiptConfidence } from '../confidence.js';
 import {runTradeRiskGate} from './trade-risk-gate.js';
+import {normalizeEvidenceText} from '../evidence-text.js';
 
 /**
  * Run a single Sentinel verification.
@@ -56,6 +57,10 @@ import {runTradeRiskGate} from './trade-risk-gate.js';
  */
 export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerifyResponse> {
   const startMs = Date.now();
+  // Native callers must consume/hash the same evidence as HTTP callers. Copy
+  // rather than mutate the caller's request; all downstream checks and source
+  // references use this same text, not a hash-only normalization.
+  req = {...req, evidence: normalizeEvidenceText(req.evidence)};
   const id = req.id ?? `sent_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const tier: SentinelTier = req.tier ?? 'standard';
   const tradeRisk = req.mode === 'trade_execution' && req.trade_risk !== undefined

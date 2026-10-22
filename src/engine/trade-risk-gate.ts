@@ -17,6 +17,7 @@ export interface TradeRiskResult {
   schema_version: 'sentinel.trade-risk-result.v1';
   status: 'pass' | 'block' | 'invalid';
   checked_input: TradeRiskInput | null;
+  /** SHA-256 hex of UTF-8 normalized evidence (HTTP ECMAScript trim semantics). */
   evidence_sha256: string;
   actual_risk_pct: number | null;
   allowed_risk_pct: number | null;
@@ -42,7 +43,11 @@ export function tradeRiskInputErrors(raw: unknown): string[] {
   return errors;
 }
 
-/** No I/O or model call. A pass is necessary for this profile, never permission. */
+/**
+ * No I/O or model call. A pass is necessary for this profile, never permission.
+ * The caller supplies the normalized evidence actually consumed by the engine.
+ * Hash it verbatim here; do not introduce a second hash-only transformation.
+ */
 export function runTradeRiskGate(raw: unknown, evidence: string): TradeRiskResult {
   const errors = tradeRiskInputErrors(raw);
   const base = {

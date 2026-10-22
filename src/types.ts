@@ -80,7 +80,8 @@ export interface SentinelVerifyRequest {
   id?: string;
   /** The claim to verify */
   claim: string;
-  /** Evidence supporting or contradicting the claim */
+  /** Evidence supporting or contradicting the claim. HTTP and native verify
+   * apply ECMAScript String#trim; internal whitespace/Unicode remain unchanged. */
   evidence: string;
   /** Verification mode */
   mode: SentinelMode;

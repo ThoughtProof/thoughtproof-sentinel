@@ -44,6 +44,14 @@ including the contract, remains covered wherever a package digest is computed.
 Arithmetic assumes the supplied snapshot is truthful/current; fees, gaps,
 funding, liquidity and later order mutation are not covered by this profile.
 
+Evidence text uses the existing HTTP normalization contract: ECMAScript
+`String#trim`, followed by UTF-8 encoding for SHA-256. Native `verify` applies
+the same normalization before both evaluation and risk receipt construction.
+Internal whitespace, line endings, Unicode composition and JSON formatting
+are preserved. Clients must compare against this same text; never accept a
+second hash convention as a fallback. See
+[the boundary investigation and qualification limits](pr87-evidence-hash-investigation.md).
+
 ## Migration and scope
 
 The field is optional for existing Sentinel callers; omission retains the
