@@ -1894,7 +1894,9 @@ describe('agenda/meeting informational requests', () => {
     expect(res.meta.promotion?.mandate_kind, text).toBe('informational');
   });
 
+  const prodAgendaPost = 'post one short agenda into the internal Vorstand agent channel';
   const agendaPosts = [
+    prodAgendaPost,
     'Poste die Agenda für den Vorstand in den Gruppenchat',
     'Post the board agenda to the Vorstand chat',
     'Post the Vorstand meeting agenda to the group chat',
@@ -1919,6 +1921,24 @@ describe('agenda/meeting informational requests', () => {
       expect(res.meta.promotion?.reason, text).not.toBe('objective_mismatch_fail_closed');
       expect(res.meta.promotion?.action_kind, text).toBe('informational');
       expect(res.meta.promotion?.mandate_kind, text).toBe('informational');
+    },
+  );
+
+  it.each(['deploy', 'merge', 'delete', 'rm -rf', 'payment', 'wire', 'ship'])(
+    'prod agenda channel post does not ALLOW with %s',
+    async (token) => {
+      const text = `${prodAgendaPost} ${token}`;
+      mockRunCascade.mockResolvedValueOnce(allowCascade(text));
+      const res = await verify({
+        claim: text,
+        evidence: mcpEvidence(text, text, 'Prod agenda post plus an action signal.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+        mandate: declaredInfo,
+      });
+      expect(res.verdict, text).toBe('BLOCK');
+      expect(res.verdict, text).not.toBe('ALLOW');
+      expect(res.meta.promotion?.reason, text).toBe('objective_mismatch_fail_closed');
     },
   );
 

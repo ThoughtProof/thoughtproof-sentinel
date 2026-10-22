@@ -1782,7 +1782,9 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  const prodAgendaPost = 'post one short agenda into the internal Vorstand agent channel';
   const agendaPosts = [
+    prodAgendaPost,
     'Poste die Agenda für den Vorstand in den Gruppenchat',
     'Post the board agenda to the Vorstand chat',
     'Post the Vorstand meeting agenda to the group chat',
@@ -1845,7 +1847,25 @@ describe('agenda/meeting informational terms', () => {
       expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
     }
 
-    const postMandate = agendaPosts[1]!;
+    const actionSignals = ['deploy', 'merge', 'delete', 'rm -rf', 'payment', 'wire', 'ship'];
+    for (const token of actionSignals) {
+      const text = `${prodAgendaPost} ${token}`;
+      const ev = mcpEvidence(text, text, 'Prod agenda post plus an action signal.');
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+    const extra = classifyActionAuthKind(
+      `${prodAgendaPost} xyzzy`,
+      mcpEvidence(`${prodAgendaPost} xyzzy`, `${prodAgendaPost} xyzzy`, 'Unknown token.'),
+      declaredInfo,
+    );
+    expect(extra.prose_action_kind).toBe('unknown');
+    expect(extra.objective_mismatch).toBe(true);
+    expect(allowlistFrom(extra, declaredInfo)).toBe(false);
+
+    const postMandate = prodAgendaPost;
     const fyiAction = 'FYI: deploy to prod';
     const fyi = classifyActionAuthKind(
       fyiAction,

@@ -292,12 +292,24 @@ const AGENDA_ANY_RE = new RegExp(
 const AGENDA_SHARE_VERB =
   '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting)';
 const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
+/**
+ * "into the … channel" / "to the … chat". The words inside the
+ * destination are the channel name, not fillers, and the span is
+ * bounded so a later verb cannot hide there. Operative signals are
+ * rejected before this runs.
+ */
+const AGENDA_CHANNEL_DEST_RE = new RegExp(
+  `\\b(?:into|in|im|to)\\b(?:\\s+[A-Za-z0-9ÄÖÜäöü]+){0,6}\\s+\\b(?:channel|chat|gruppenchat)\\b`,
+  'gi',
+);
 const AGENDA_SHARE_FILLER = new Set([
   'the', 'a', 'an', 'for', 'to', 'of', 'and', 'with', 'on', 'our', 'my',
   'this', 'that', 'tomorrow', 'tomorrows', 'tuesday', 'please', 'only',
   'die', 'der', 'das', 'den', 'dem', 'des', 'ein', 'eine', 'und', 'an',
   'für', 'fuer', 'mit', 'bitte', 'team',
   'in', 'im', 'chat', 'gruppenchat', 'vorstand', 'board', 'group',
+  // Receipt sent_52aef10e71ba4527: "one short agenda". Nothing else.
+  'one', 'short',
 ]);
 
 /**
@@ -495,6 +507,7 @@ function isAgendaShareRequest(text: string): boolean {
   const residual = text
     .replace(agendaWord, ' ')
     .replace(new RegExp(AGENDA_SHARE_VERB_RE.source, 'gi'), ' ')
+    .replace(new RegExp(AGENDA_CHANNEL_DEST_RE.source, 'gi'), ' ')
     .replace(/['’]/g, '')
     .toLowerCase();
   const tokens = residual.split(/[^a-z0-9äöü]+/).filter(Boolean);
