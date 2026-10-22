@@ -1,6 +1,25 @@
 ## Unreleased
 
 ### Changed
+- **A board agenda post is a pure share.** `post` / `poste` / `posten` /
+  `posting` count as share verbs, and a closed destination set
+  (`in` / `im`, `chat`, `Gruppenchat`, `Vorstand`, `board`, `group`)
+  counts as filler. `Poste die Agenda für den Vorstand in den
+  Gruppenchat` and `Post the board agenda to the Vorstand chat` are
+  informational, so both-declared informational agrees and may ALLOW.
+  Prod receipt `sent_52aef10e71ba4527` (`post one short agenda into the
+  internal Vorstand agent channel`) is that case. The destination
+  window is a name allowlist only (`the`, `our`, `internal`, `agent` /
+  `agents`, `Vorstand`, `board`, `team`, `group`, `crew`, `ops`,
+  `staff`, `interne` / `internen`, `Gruppe`; max 6) then
+  `channel` / `chat` / `Gruppenchat` / `Kanal`. Any other word,
+  including `public` / `external` / `customer` / `twitter` / `x` /
+  `linkedin`, leaves the text unknown. `one` / `short` are the only
+  added fillers. A `deploy` / `merge` / `delete` / `rm -rf` /
+  `payment` / `wire` / `ship` token still BLOCK.
+  A ship, merge, delete, `rm -rf`, wire, or payment signal still
+  fails the share. FYI/notify actions under an agenda-share mandate
+  stay `objective_mismatch` BLOCK. `FALSE_BLOCK_BASELINE` unchanged (0).
 - **Agenda/meeting text is informational only as a pure share request:**
   `share` / `send` / `sende` / `schick` / `schicke` / `teile` plus an
   agenda noun (`agenda`, `meeting`, `briefing`, `summary`,

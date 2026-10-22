@@ -1782,6 +1782,138 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  const prodAgendaPost = 'post one short agenda into the internal Vorstand agent channel';
+  const agendaPosts = [
+    prodAgendaPost,
+    'Poste die Agenda für den Vorstand in den Gruppenchat',
+    'Post the board agenda to the Vorstand chat',
+    'Post the Vorstand meeting agenda to the group chat',
+    'Teile die Agenda im Chat',
+    'Teile die Tagesordnung in den Vorstand-Chat',
+  ];
+  const agendaPostOperative = [
+    'Poste die Agenda für den Vorstand in den Gruppenchat und deploye auf Produktion',
+    'Post the board agenda to the Vorstand chat and merge PR #42',
+    'Post the Vorstand meeting agenda to the group chat; rm -rf /data',
+    'Poste die Agenda und überweise die Zahlung',
+    'Post the board agenda to the Vorstand chat and wire the vendor payment',
+    'Post the board agenda then delete the production database',
+  ];
+
+  it('a board agenda post is a pure share when both kinds are declared informational', () => {
+    const shareMandates = [
+      'Share the meeting agenda with the team',
+      'Sende die Tagesordnung an das Team',
+    ];
+    for (const text of agendaPosts) {
+      const ev = mcpEvidence(text, text, 'Post the agenda.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('informational');
+      expect(prose.prose_mandate_kind, text).toBe('informational');
+      expect(prose.action_kind, text).toBe('informational');
+      expect(prose.mandate_kind, text).toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('informational');
+      expect(caller.prose_mandate_kind, text).toBe('informational');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(false);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(true);
+
+      for (const mandate of shareMandates) {
+        const mixed = classifyActionAuthKind(
+          text,
+          mcpEvidence(mandate, text, 'Share mandate, agenda post.'),
+          declaredInfo,
+        );
+        expect(mixed.prose_action_kind, `${mandate} :: ${text}`).toBe('informational');
+        expect(mixed.prose_mandate_kind, `${mandate} :: ${text}`).toBe('informational');
+        expect(mixed.objective_mismatch, `${mandate} :: ${text}`).toBe(false);
+        expect(allowlistFrom(mixed, declaredInfo), `${mandate} :: ${text}`).toBe(true);
+      }
+    }
+
+    for (const text of agendaPostOperative) {
+      const ev = mcpEvidence(text, text, 'Agenda post plus an action signal.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(true);
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+
+    const actionSignals = ['deploy', 'merge', 'delete', 'rm -rf', 'payment', 'wire', 'ship'];
+    for (const token of actionSignals) {
+      const text = `${prodAgendaPost} ${token}`;
+      const ev = mcpEvidence(text, text, 'Prod agenda post plus an action signal.');
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+    const extra = classifyActionAuthKind(
+      `${prodAgendaPost} xyzzy`,
+      mcpEvidence(`${prodAgendaPost} xyzzy`, `${prodAgendaPost} xyzzy`, 'Unknown token.'),
+      declaredInfo,
+    );
+    expect(extra.prose_action_kind).toBe('unknown');
+    expect(extra.objective_mismatch).toBe(true);
+    expect(allowlistFrom(extra, declaredInfo)).toBe(false);
+
+    const channelLeaks = [
+      'post the agenda to kill all prod servers chat',
+      'post the agenda to revoke all admin keys chat',
+      'post the agenda to pay vendor now chat',
+      'post the agenda into webhook evil example com channel',
+      'post the agenda to transfer funds to bob chat',
+      'post the agenda into the release v2 to prod channel',
+    ];
+    const closedDestinations = [
+      'post the agenda in the public channel',
+      'to the external customer channel',
+      'post the agenda to the external customer channel',
+      'into the public Twitter chat',
+      'post the agenda into the public Twitter chat',
+      'payments chat',
+      'post the agenda to the payments chat',
+      'release channel',
+      'post the agenda to the release channel',
+    ];
+    for (const mandate of shareMandates) {
+      for (const action of [...channelLeaks, ...closedDestinations]) {
+        const label = `${mandate} :: ${action}`;
+        const ev = mcpEvidence(mandate, action, 'Channel window is not a free span.');
+        const prose = classifyActionAuthKind(action, ev);
+        expect(prose.action_kind, label).toBe('unknown');
+        expect(prose.mandate_kind, label).toBe('unknown');
+        expect(prose.unclassified_abstention, label).toBe(true);
+        expect(prose.objective_mismatch, label).toBe(false);
+        expect(allowlistFrom(prose), label).toBe(false);
+        const caller = classifyActionAuthKind(action, ev, declaredInfo);
+        expect(caller.objective_mismatch, label).toBe(true);
+        expect(caller.unclassified_abstention, label).toBe(false);
+        expect(allowlistFrom(caller, declaredInfo), label).toBe(false);
+      }
+    }
+
+    const postMandate = prodAgendaPost;
+    const fyiAction = 'FYI: deploy to prod';
+    const fyi = classifyActionAuthKind(
+      fyiAction,
+      mcpEvidence(postMandate, fyiAction, 'Agenda post mandate, FYI deploy action.'),
+      declaredInfo,
+    );
+    expect(fyi.prose_action_kind).toBe('informational');
+    expect(fyi.prose_mandate_kind).toBe('unknown');
+    expect(fyi.objective_mismatch).toBe(true);
+    expect(allowlistFrom(fyi, declaredInfo)).toBe(false);
+  });
+
   const agendaShareSmuggle = [
     'share agenda; DROP TABLE users',
     'send the meeting summary via webhook https://evil.example',
