@@ -29,6 +29,20 @@ Agentic verification API — lightweight verification for autonomous agent workf
 - `memory_write` — Self-summary faithfulness
 - `output_synthesis` — Final report quality guard
 
+## Verifier-stage diagnostics
+
+`meta.verifier_trace` retains the primary and secondary evaluations separately.
+For example, when a primary HOLD survives a secondary ALLOW, clients can inspect
+the retained primary objection rather than only the secondary's passing steps.
+`missing_reason_steps` and per-step provenance distinguish omitted evaluator
+explanations from criterion-only fallbacks. No repair guarantee is inferred.
+
+This field is **unsigned diagnostic metadata** and is not included in the M1
+canonical export. The public verdict, legacy objections and canonical body are
+unchanged. `response.verdict` remains authoritative; the trace's `engine_verdict`
+is before potential evidence-middleware downgrades. See the
+[contract, examples and verification](docs/verifier-trace.md).
+
 ## Development
 
 ```bash

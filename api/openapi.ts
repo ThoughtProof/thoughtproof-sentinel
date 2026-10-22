@@ -4,6 +4,8 @@ import {
   GLOBAL_RATE_LIMIT_PER_MINUTE_DEFAULT,
 } from '../src/rate-limit-policy.js';
 import { getPotCliVersion } from '../src/runtime-versions.js';
+import { evaluatorShapeSchema } from '../src/evaluator-shape-schema.js';
+import { evaluatorSourceReferencesSchema } from '../src/evaluator-source-references-schema.js';
 
 const spec = {
   openapi: '3.1.0',
@@ -108,6 +110,19 @@ const spec = {
                     default: 'standard',
                     description:
                       'Verification tier. checkpoint: nano solo ($0.005). standard: 2-model cascade ($0.008, default).',
+                  },
+                  trade_risk: {
+                    type: 'object', additionalProperties: false,
+                    description: 'Optional enforced Cycle risk profile for trade_execution only. Actual order facts from the execution host. Fixed server ceilings: risk 1%, leverage 2. No shadow mode. A pass is not an ALLOW. Callers requiring this protection must reject ALLOW without a matching meta.trade_risk receipt. Omission retains the legacy prose-only interface without deterministic risk protection.',
+                    required: ['policy', 'side', 'entry', 'stop', 'size_pct', 'risk_pct', 'leverage', 'macro_size_mult'],
+                    properties: {
+                      policy: {type: 'string', enum: ['cycle-risk-v1']},
+                      side: {type: 'string', enum: ['long', 'short']},
+                      entry: {type: 'number'}, stop: {type: 'number'},
+                      size_pct: {type: 'number', description: 'Actual order notional divided by account equity; not margin fraction'},
+                      risk_pct: {type: 'number', description: 'Requested fraction of equity at the initial stop before macro adjustment'},
+                      leverage: {type: 'number'}, macro_size_mult: {type: 'number'},
+                    },
                   },
                   mandate: {
                     type: 'object',
@@ -299,8 +314,8 @@ const spec = {
                               'cascade: evaluator cited this span. recovered_mandate: Sentinel filled a missing cite from the MCP Principal mandate (verbatim quote) span. Null when quote is null.',
                           },
                           quote_match_mode: {
-                            type: 'string',
-                            enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none'],
+                            type: ['string', 'null'],
+                            enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none', null],
                             description:
                               'How quote matched evidence. unicode/whitespace matches return the evidence span, not the LLM folding.',
                           },
@@ -332,6 +347,19 @@ const spec = {
                     meta: {
                       type: 'object',
                       properties: {
+                        trade_risk: {
+                          type: 'object',
+                          description: 'Unsigned diagnostic receipt for the enforced risk profile. Does not attest market facts or authorization. Bind checked_input to the submitted actual order and evidence_sha256 to the validated evidence. Final verdict remains authoritative.',
+                          properties: {
+                            schema_version: {type: 'string', enum: ['sentinel.trade-risk-result.v1']},
+                            status: {type: 'string', enum: ['pass', 'block', 'invalid']},
+                            checked_input: {type: 'object', nullable: true},
+                            evidence_sha256: {type: 'string'},
+                            actual_risk_pct: {type: 'number', nullable: true},
+                            allowed_risk_pct: {type: 'number', nullable: true},
+                            codes: {type: 'array', items: {type: 'string'}},
+                          },
+                        },
                         duration_ms: { type: 'integer', example: 1200 },
                         models_used: {
                           type: 'array',
@@ -339,6 +367,77 @@ const spec = {
                           example: ['serv-nano', 'serv-swift'],
                         },
                         verified_at: { type: 'string', format: 'date-time' },
+                        verifier_trace: {
+                          type: 'object',
+                          description: 'Optional unsigned evaluator diagnostics; not covered by the M1 canonical export or its signature. Preserves primary and secondary findings without changing the verdict. response.verdict remains authoritative; engine_verdict precedes possible middleware downgrades. Missing details are not inferred. Omitted on deterministic short-circuits and engine-budget exits.',
+                          properties: {
+                            schema_version: { type: 'string', enum: ['sentinel.verifier-trace.v1'] },
+                            signature_scope: { type: 'string', enum: ['unsigned_diagnostics'] },
+                            cascade_reason: { type: ['string', 'null'] },
+                            internal_verdict: { type: 'string' },
+                            engine_verdict: { type: 'string', enum: ['ALLOW', 'BLOCK', 'UNCERTAIN'] },
+                            legacy_surface_stage: { type: ['string', 'null'], enum: ['solo', 'primary', 'secondary', null] },
+                            retained_primary_restriction: { type: 'boolean' },
+                            missing_reason_steps: { type: 'array', items: {
+                              type: 'object', properties: {
+                                stage: { type: 'string', enum: ['solo', 'primary', 'secondary'] },
+                                step_id: { type: 'string' },
+                              },
+                            } },
+                            stages: { type: 'array', items: {
+                              type: 'object', properties: {
+                                stage: { type: 'string', enum: ['solo', 'primary', 'secondary'] },
+                                model: { type: 'string', description: 'Configured verifier alias, not an attested model identity.' },
+                                status: { type: 'string', enum: ['completed', 'unavailable', 'not_invoked'] },
+                                output_contract: {
+                                  type: 'object', description: 'Optional validation of consumed model assessment fields before scoring. Invalid assessment means technical review needed, not a finding against the task; never an ALLOW. No raw model text is exposed. Signature scope remains unsigned diagnostics.',
+                                  properties: {
+                                    schema_version: {type: 'string', enum: ['plv.evaluator-output.v1']},
+                                    status: {type: 'string', enum: ['valid', 'invalid']},
+                                    response_sha256: {type: 'string', pattern: '^[a-f0-9]{64}$'},
+                                    shape: evaluatorShapeSchema,
+                                    source_references: evaluatorSourceReferencesSchema,
+                                    issues: {type: 'array', maxItems: 128, items: {type: 'object', properties: {code: {type: 'string'}, step_id: {type: ['string', 'null']}}}},
+                                  },
+                                },
+                                verdict: { type: ['string', 'null'] },
+                                reasoning: { type: ['string', 'null'] },
+                                reasoning_source: { type: 'string', enum: ['evaluator', 'evidence_bind', 'missing'] },
+                                objections: { type: 'array', items: {
+                                  type: 'object', description: 'Normalized, evidence-bound per-step surface for this evaluator. A provided reason is not proof of a useful or sufficient repair.',
+                                  properties: {
+                                    step_id: { type: 'string' }, criterion: { type: 'string' },
+                                    score: { type: 'number', minimum: 0, maximum: 1 }, predicate: { type: 'string' },
+                                    quote: { type: ['string', 'null'] },
+                                    quote_source: { type: ['string', 'null'], enum: ['cascade', 'recovered_mandate', null] },
+                                    quote_match_mode: { type: ['string', 'null'], enum: ['exact', 'trimmed', 'line_whitespace', 'unicode', 'none', null] },
+                                    reasoning: { type: 'string' },
+                                    reasoning_source: { type: 'string', enum: ['evaluator', 'surface_normalizer', 'criterion_fallback', 'evidence_bind'] },
+                                    evaluator_reasoning_present: { type: 'boolean' },
+                                    quote_diagnostics: {
+                                      type: 'object', description: 'Optional unsigned identity of the post-evaluator quote candidate and allowlisted host provenance results. Rejected quote text is not exposed. Missing historical diagnostics are not inferred; no verdict or score changes.',
+                                      properties: {
+                                        candidate_present: {type: 'boolean'}, candidate_length: {type: 'integer', minimum: 0},
+                                        candidate_sha256: {type: ['string', 'null'], pattern: '^[a-f0-9]{64}$'},
+                                        evaluator_match_path: {type: ['string', 'null'], enum: ['exact', 'whitespace-normalized', 'fuzzy-truncated', 'unicode-normalized', 'structural-unwrapped', 'no-match', null]},
+                                        evaluator_failure_codes: {type: 'array', maxItems: 3, items: {type: 'string', enum: ['PROV_FAIL_01', 'PROV_FAIL_02', 'PROV_FAIL_03']}},
+                                      },
+                                    },
+                                    numeric_binding: {
+                                      type: 'object', description: 'Optional unsigned generic numeric binding status. Available bounds are not a guarantee of correct units or a verified trade-risk calculation.',
+                                      properties: {
+                                        status: {type: 'string', enum: ['non_numeric', 'verified', 'numbers_rewritten', 'objection_evidence_fail', 'unverified_insufficient_bounds']},
+                                        has_amount: {type: 'boolean'}, has_ceiling: {type: 'boolean'},
+                                        relation: {type: ['string', 'null'], enum: ['exceed', 'within', null]},
+                                        verdict_unchanged: {type: 'boolean', enum: [true]},
+                                      },
+                                    },
+                                  },
+                                } },
+                              },
+                            } },
+                          },
+                        },
                       },
                     },
                   },

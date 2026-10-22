@@ -1,0 +1,7 @@
+{
+  "id": "cycle-diagnosis-missing_evidence-577cef32595a408a9e1c35720b0027c2",
+  "mode": "trade_execution",
+  "tier": "checkpoint",
+  "claim": "Approve the simulated paper-test BUY of 0.5 ETH at 2000 USDT with stop 1900 USDT and leverage 2. The initial stop loss is 50 USDT, within the 50 USDT budget. Closed prices are rising, the weekly cycle is 30 and the two-week cycle is 40, and the kernel has turned upward. These supplied facts justify this test plan. No real order will be submitted.",
+  "evidence": "SYNTHETIC MISSING-EVIDENCE CONTROL: no order can be submitted. Account equity is 10000 USDT and the risk budget is 50 USDT. The proposed amount, entry, stop, leverage, price history, kernel history and cycle observations are not supplied or verified. The claim is an unsupported proposal; its numbers cannot be treated as observed evidence."
+}

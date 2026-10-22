@@ -20,6 +20,7 @@ import type {
 
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
+import { buildVerifierTrace, surfaceEvaluation } from './verifier-trace.js';
 import {
   mapVerdict,
   canPromoteStep2Only,
@@ -33,9 +34,7 @@ import {
   UNCLASSIFIED_ABSTENTION_REASON,
   recordActionAuthUnknownKinds,
 } from './action-auth-kind.js';
-import { bindStepObjections } from '../objection-evidence-bind.js';
 import {
-  normalizeCascadeSteps,
   sanitizeReasoning,
 } from '../step-quote-provenance.js';
 import {
@@ -47,6 +46,7 @@ import {
 } from './budget.js';
 import { randomUUID } from 'crypto';
 import { finiteScore, receiptConfidence } from '../confidence.js';
+import {runTradeRiskGate} from './trade-risk-gate.js';
 
 /**
  * Run a single Sentinel verification.
@@ -58,6 +58,22 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const startMs = Date.now();
   const id = req.id ?? `sent_${randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const tier: SentinelTier = req.tier ?? 'standard';
+  const tradeRisk = req.mode === 'trade_execution' && req.trade_risk !== undefined
+    ? runTradeRiskGate(req.trade_risk, req.evidence) : undefined;
+  if (tradeRisk && tradeRisk.status !== 'pass') {
+    return {
+      id, verdict: tradeRisk.status === 'block' ? 'BLOCK' : 'UNCERTAIN',
+      confidence: receiptConfidence(tradeRisk.status === 'block' ? 1 : 0),
+      reasoning: 'Deterministic trade risk check: ' + tradeRisk.codes.join(', '),
+      objections: tradeRisk.codes.map(code => ({step_id: `trade_risk_${code}`,
+        criterion: 'Actual order must satisfy the cycle-risk-v1 limits', score: 0,
+        predicate: tradeRisk.status === 'block' ? 'violated' : 'unproven',
+        quote: null, quote_source: null, objection_source: 'deterministic_gate', reasoning: code})),
+      mode: req.mode, tier,
+      meta: {duration_ms: Date.now() - startMs, models_used: [], verified_at: new Date().toISOString(),
+        trade_risk: tradeRisk, ...(req.agent_context ? {agent_context: req.agent_context} : {})},
+    };
+  }
 
   // 0. Deterministic authorization gate (ADR-0019 follow-up). Only runs for
   //    action_authorization with a machine-readable mandate. It hard-checks the
@@ -140,6 +156,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     evidence: req.evidence,
     mode: req.mode,
     mandate: req.mandate,
+    tradeRisk: tradeRisk?.checked_input ?? undefined,
   });
 
   // 2. Run through cascade (or solo for checkpoint) under engine budget.
@@ -153,6 +170,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       evalInput: modeOutput.evalInput,
       evalMode: modeOutput.evalMode,
       tier,
+      mode: req.mode,
+      sourceReferences: req.mode === 'trade_execution',
       signal: budget.controller.signal,
       budgetStartedAt: budget.startedAt,
       budgetMs: budget.budgetMs,
@@ -195,6 +214,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
           models_used: err.modelsUsed,
           verified_at: new Date().toISOString(),
           engine_budget: trace,
+          ...(tradeRisk ? {trade_risk: tradeRisk} : {}),
           ...(req.mode === 'action_authorization'
             ? {
                 promotion: {
@@ -240,6 +260,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
 
   // 3. Map verdict (mode-aware: trade_execution & trade_reasoning are conservative)
   const internalVerdict = cascadeOutput.result.verdict;
+  const invalidOutputStages = (cascadeOutput.evaluations ?? []).filter(s => s.item?.output_contract?.status === 'invalid').map(s => s.stage);
+  const hasInvalidOutput = invalidOutputStages.length > 0;
   let verdict = mapVerdict(internalVerdict, req.mode);
   let promotionMeta: SentinelVerifyResponse['meta']['promotion'] | undefined;
 
@@ -252,6 +274,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const steps3b = cascadeOutput.result.step_evaluations;
   if (
     req.mode === 'trade_reasoning' &&
+    !hasInvalidOutput &&
     verdict === 'UNCERTAIN' &&
     canPromoteStep2Only(
       steps3b.map((s) => ({
@@ -350,6 +373,13 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     };
   }
 
+  // Assessment-format failure cannot become an ALLOW through any promotion path.
+  // A separate genuine BLOCK remains restrictive; no fabricated research objection is added.
+  if (hasInvalidOutput && verdict === 'ALLOW') {
+    verdict = 'UNCERTAIN';
+    if (promotionMeta) promotionMeta = {...promotionMeta, public_verdict: verdict, promoted: false, reason: 'evaluator_output_invalid'};
+  }
+
   // 4. Calculate confidence from step scores.
   //    Non-finite / missing scores coerce to 0 (fail-closed). `steps.length > 0`
   //    does not protect against undefined/NaN scores — those produced
@@ -361,9 +391,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
 
   // 5. Surface per-step objections (the actionable substance). pot-cli
   //    already computes these; we slim them to client-relevant fields and
-  //    attach the gold-step criterion (always deterministic). When the cheap
-  //    SERV tiers omit per-step prose, synthesize a reasoning fallback so the
-  //    objection is never opaque.
+  //    attach the gold-step criterion (always deterministic). Missing evaluator
+  //    prose gets the legacy criterion fallback; verifier_trace marks the gap.
   const criterionByStepId = new Map<string, string>();
   for (const gs of modeOutput.evalInput.gold_plan_steps) {
     criterionByStepId.set(`step_${gs.index}`, gs.acceptance_criterion ?? gs.description);
@@ -373,33 +402,13 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   // action_authorization that is sanitized evidence (caller structural_fact
   // neutralized, no system hint mixed in). Other modes: trace_steps === claim evidence.
   const evidence = modeOutput.evalInput.trace_steps ?? req.evidence ?? '';
-  const rawObjections = normalizeCascadeSteps(steps, evidence).map((s) => {
-    const criterion = criterionByStepId.get(s.step_id) ?? '';
-    const prose = s.reasoning.trim();
-    return {
-      step_id: s.step_id,
-      criterion,
-      score: receiptConfidence(s.score),
-      predicate: String(s.predicate),
-      quote: s.quote,
-      quote_source: s.quote_source ?? null,
-      quote_match_mode: s.quote ? s.match_mode : null,
-      reasoning: prose.length > 0
-        ? prose
-        : synthesizeReasoning(String(s.predicate), criterion, s.quote),
-    };
-  });
 
   // 5b. Objection evidence bind (surface gate only — verdict unchanged).
   // Numeric specialist reasons are claims; where checkable against mandate /
   // claim+evidence bound fields, strip or rewrite fabricated exceed/within text
   // before client / replan / attest surfaces see them. Paris class: 583 ≤ 600
   // must never ship as "exceeds budget".
-  const bind = bindStepObjections(rawObjections, {
-    mandate: req.mandate,
-    claim: req.claim,
-    evidence: req.evidence,
-  });
+  const {bind} = surfaceEvaluation(cascadeOutput.result, criterionByStepId, evidence, req);
   let objections = bind.surface_objections;
 
   // 5c. Objective-mismatch surface: if the allowlist/classifier fired,
@@ -415,16 +424,20 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   }
 
   const durationMs = Date.now() - startMs;
-  const publicReasoning = unclassifiedAbstention
+  const verifierTrace = buildVerifierTrace(cascadeOutput, criterionByStepId, evidence, req, verdict);
+  const existingReasoning = unclassifiedAbstention
     ? UNCLASSIFIED_ABSTENTION_REASON
     : objectiveMismatch && internalVerdict !== 'BLOCK'
       ? OBJECTIVE_MISMATCH_BLOCK_REASON
       : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
+  const publicReasoning = hasInvalidOutput
+    ? `Evaluator output is invalid or incomplete (${invalidOutputStages.join(', ')}). Correct the evaluator response before deciding; missing assessment fields are not missing task evidence.\n\n${existingReasoning}`
+    : existingReasoning;
 
   return {
     id,
     verdict,
-    confidence: receiptConfidence(avgScore),
+    confidence: receiptConfidence(hasInvalidOutput ? 0 : avgScore),
     reasoning: publicReasoning,
     objections,
     mode: req.mode,
@@ -432,8 +445,10 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     gate: gateField,
     meta: {
       duration_ms: durationMs,
+      ...(tradeRisk ? {trade_risk: tradeRisk} : {}),
       models_used: cascadeOutput.modelsUsed,
       verified_at: new Date().toISOString(),
+      ...(verifierTrace ? {verifier_trace: verifierTrace} : {}),
       ...(bind.surface_gated
         ? {
             objection_evidence_bind: {
@@ -450,33 +465,6 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       ...(req.agent_context ? { agent_context: req.agent_context } : {}),
     },
   };
-}
-
-/**
- * Deterministic per-step reasoning fallback.
- *
- * The cheap SERV tiers (Nano) frequently omit the per-step `reasoning` prose
- * the evaluator prompt requests, leaving only predicate + score + quote. This
- * synthesizes a human-actionable sentence from the structured signal so a
- * consumer (agent or dashboard) is never handed an objection with no
- * explanation.
- */
-function synthesizeReasoning(predicate: string, criterion: string, quote: string | null): string {
-  const verdictPhrase: Record<string, string> = {
-    unsupported: 'failed: the evidence does not support this criterion',
-    unfaithful: 'failed: the decision is not faithful to the evidence for this criterion',
-    partial: 'only partially met by the evidence',
-    weakly_faithful: 'only weakly supported by the evidence',
-    partially_faithful: 'only partially faithful to the evidence',
-    supported: 'met by the evidence',
-    faithful: 'faithful to the evidence',
-    skipped: 'was not evaluated',
-  };
-  const phrase = verdictPhrase[predicate] ?? `evaluated as "${predicate}"`;
-  const base = criterion
-    ? `Criterion "${criterion}" was ${phrase}.`
-    : `This step was ${phrase}.`;
-  return quote ? `${base} Keyed on: "${quote}"` : base;
 }
 
 function applyObjectiveMismatchSurface(

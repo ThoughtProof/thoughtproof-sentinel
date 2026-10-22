@@ -1,10 +1,11 @@
 /**
- * Lock the published pot-cli release containing the Sentinel quote fixes.
+ * Lock the evaluator-contract overlay on the published 0.8.12 release.
  *
  * Must fail if someone swaps back an unpatched upstream 0.8.10 tarball
  * that happens to export the same function names.
  */
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -16,10 +17,10 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const POT_CLI_VERSION = '0.8.12';
-export const POT_CLI_TARBALL = 'https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.12.tgz';
+export const POT_CLI_VERSION = '0.8.12-eval-contract.7';
+export const POT_CLI_TARBALL = 'file:vendor/pot-cli-0.8.12-eval-contract.7.tgz';
 export const POT_CLI_INTEGRITY =
-  'sha512-8hM8jsVtZXNW+rFdqQw0vD9UbFvSG6HINB8s5JtY7ZvH3pqH7wjgNDz3W2Y4g3rmsexGlv14J4gcojzOjIvMfA==';
+  'sha512-PrwM2RuCULO/Nn3wm9rajDZxkB7jGTte1mYfVbWQiYlTYvQq3mFQ82L/Jk3ZNFht8JW9BAB/c0aQXeMPkDYiRw==';
 
 const COERCE_CASES: unknown[] = [
   undefined,
@@ -33,8 +34,8 @@ const COERCE_CASES: unknown[] = [
   'Tell CoS host runs git main',
 ];
 
-describe('published pot-cli identity with the Sentinel fixes', () => {
-  it('installed package and health version match the pinned npm release', () => {
+describe('pinned pot-cli overlay identity with the Sentinel fixes', () => {
+  it('installed package and health version identify the audited overlay', () => {
     const pkg = JSON.parse(
       readFileSync(join(process.cwd(), 'node_modules', 'pot-cli', 'package.json'), 'utf8'),
     ) as { name: string; version: string };
@@ -44,11 +45,11 @@ describe('published pot-cli identity with the Sentinel fixes', () => {
     expect(getPotCliVersion()).toBe(POT_CLI_VERSION);
   });
 
-  it('manifest and lockfile pin the audited npm tarball and integrity', () => {
+  it('manifest, lockfile and actual archive pin the audited overlay', () => {
     const manifest = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'));
     const lock = JSON.parse(readFileSync(join(process.cwd(), 'package-lock.json'), 'utf8'));
-    expect(manifest.dependencies['pot-cli']).toBe(POT_CLI_VERSION);
-    expect(lock.packages[''].dependencies['pot-cli']).toBe(POT_CLI_VERSION);
+    expect(manifest.dependencies['pot-cli']).toBe(POT_CLI_TARBALL);
+    expect(lock.packages[''].dependencies['pot-cli']).toBe(POT_CLI_TARBALL);
     expect(lock.packages['node_modules/pot-cli']).toMatchObject({
       version: POT_CLI_VERSION,
       resolved: POT_CLI_TARBALL,
@@ -58,6 +59,14 @@ describe('published pot-cli identity with the Sentinel fixes', () => {
     expect(patches).toContain(POT_CLI_VERSION);
     expect(patches).toContain(POT_CLI_TARBALL);
     expect(patches).toContain(POT_CLI_INTEGRITY);
+    const archive = readFileSync(join(process.cwd(), POT_CLI_TARBALL.slice('file:'.length)));
+    expect('sha512-' + createHash('sha512').update(archive).digest('base64')).toBe(POT_CLI_INTEGRITY);
+    const base = readFileSync(join(process.cwd(), 'vendor/pot-cli-0.8.12.tgz'));
+    expect(createHash('sha256').update(base).digest('hex')).toBe('aaf93fe02d58e804323ccd1836ec00e268269db398af406adb905a7c67701ad1');
+    // Keep the published release's Node and bridge corrections when rebasing the overlay.
+    const installed = JSON.parse(readFileSync(join(process.cwd(), 'node_modules/pot-cli/package.json'), 'utf8'));
+    expect(installed.engines.node).toBe('>=22');
+    expect(installed.dependencies['@pot-sdk2/bridge']).toBe('1.2.0');
   });
 
   it('installed evaluator source has the Sentinel patch markers (not stub exports)', () => {
@@ -70,6 +79,8 @@ describe('published pot-cli identity with the Sentinel fixes', () => {
     expect(src).toContain('USER INSTRUCTION:');
     expect(src).toContain('recoverCiteableQuote(coerceQuote(ev.quote)');
     expect(src).toContain('appendReasoningNote(processed.reasoning');
+    expect(src).toContain('decodeEvaluationOutput');
+    expect(src).toContain('tier1ResolvedEvals.includes(ev)');
     // Unpatched 0.8.10 used reasoning += which produces the undefined prefix.
     expect(src).not.toMatch(
       /processed\.reasoning \+= ['"] \[PROVENANCE DOWNGRADE: quote invalid or missing\]['"]/,

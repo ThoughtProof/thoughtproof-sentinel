@@ -1,8 +1,119 @@
+## 0.8.12-eval-contract.7 — exact direct-provider routes (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.7.tgz`
+- Integrity: `sha512-PrwM2RuCULO/Nn3wm9rajDZxkB7jGTte1mYfVbWQiYlTYvQq3mFQ82L/Jk3ZNFht8JW9BAB/c0aQXeMPkDYiRw==`
+- SHA256: `24be787c295de01fb00171e4ca0c761016d3dcda06b8f613da328fdb1a1e2d72`
+- Adds exact `deepseek/deepseek-flash` and `xai/grok-4.7` routes with each
+  provider's own credentials and endpoint, explicit reasoning effort and
+  `max_tokens`. No OpenServ/BRAID is involved in these direct requests.
+- Named direct routes omit sampling overrides and fail closed on a mismatched
+  model ID or incomplete output. Final content alone enters the existing decoder.
+- The `.6` archive/manifest and OpenServ router patch remain unchanged. This
+  separate overlay changes no prompt, rule, score or fallback policy.
+
+## 0.8.12-eval-contract.6 — cheaper named-model diagnostic (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.6.tgz`
+- Integrity: `sha512-YbJ1tyqp7pjMWO/k3TYwhqje8Lo1SkKfDB+C/GdCOzE+/VXK3vSjOdZUd1Jq5fX0i3eTcaqa9XKeHdmvCPX+kw==`
+- SHA256: `f2879cc46a2f6592cf9109cc785acc27fcbdd2d1b1c5018a5d44264660fb29c1`
+- Adds the catalog-listed `openserv/gpt-6-luna` to the same exact-ID allowlist.
+  Host selection remains opt-in; the default checkpoint remains Nano.
+- The only router change from `.5` is this additional permitted ID. Prompt,
+  output contract, source checks, risk checks, reasoning settings and fallback
+  policy are unchanged. Prior `.5` archive and manifest remain preserved.
+- Availability and offline routing tests do not establish decision quality.
+
+## 0.8.12-eval-contract.5 — named OpenServ routes (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.5.tgz`
+- Integrity: `sha512-Eseic2pRhiG0swtkFPBJvgDWcPRynpk/Ab3LVEqqr6i3akeIbUd3Ylwlj0AyCKqagb28xBCLVt6iJXRQNAR5Mw==`
+- SHA256: `e1579eb7630799504d3379c8e7dc01a9e45424b1f9845f6e6a95bfd43d9679b7`
+- Adds exact `openserv/gpt-6-sol` and `openserv/gpt-6-astra` routes using
+  SERV credentials and default BRAID processing; never the direct OpenAI route.
+- Named reasoning routes use `reasoning_effort` (low by default), provider
+  sampling defaults, and `max_completion_tokens`. They require the exact
+  response model ID and a complete final answer. No repair/fallback is added.
+- Legacy routes retain their outgoing settings. The trade prompt, strict
+  decoder, source references, rubric, scores and risk checks are unchanged.
+- Prior `.4` archive/manifest are retained. The build compiles the router and
+  its declarations from the patched source and pins the extra patch digest.
+- Availability does not qualify a model for trading. See the named-model docs.
+
+## 0.8.12-eval-contract.4 — decision task profile (2026-10-18)
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.4.tgz`
+- Integrity: `sha512-4PYnHvf/bDkM+8qz9gsFv0F4B40wRjSdYoNDVJHsAg0lFfHqYjflcBxJYZkT0JsvSTKrR5s92U9EseAk0aWUCw==`
+- SHA256: `6e1e571e5be7f72dd6cc41992918c2c058683d81190e1909f7778db37b7882ac`
+- Adds host-selected `evaluationTask: trade_decision` for Sentinel trade execution.
+  The dedicated prompt assesses the proposed action against facts and criteria,
+  removing the research-completion and reasoning-only task framing.
+- Other evaluator tasks retain their messages. Decoder, provenance, score floors,
+  numeric thresholds, model selection and retry policy are unchanged.
+- The old `.3` archive and its manifest remain preserved. Reproduce with
+  `node scripts/build-evaluator-contract-vendor.mjs --install-local`.
+- Native Sentinel also adds an opt-in, enforced `cycle-risk-v1` numeric gate;
+  this arithmetic is host code, not part of the model prompt or vendor overlay.
+
+## 0.8.12-eval-contract.3 — complete response format after the catalog
+
+Current dependency: `file:vendor/pot-cli-0.8.12-eval-contract.3.tgz`.
+Integrity: `sha512-mb+9WRcKGi6rUphXztGu49ZlwOo/YbqhbvCMpHZ9/76RDibY+bP+JzncVqGBV26NaXcD9zuPIQ63QE57XgZioA==`.
+
+The .2 matched preview produced invalid output in all eleven candidate calls.
+This revision adds the full required JSON response schema after the source catalog
+and explicitly rejects the observed `assessment` alias in the model instructions.
+It changes no parser acceptance rules, score, source resolver or retry behavior.
+The failed .2 experiment remains preserved; .3 requires separate qualification.
+
+## 0.8.12-eval-contract.2 — source references (18 October 2026)
+
+Current dependency: `file:vendor/pot-cli-0.8.12-eval-contract.2.tgz`.
+Integrity: `sha512-gfSRCa7fEDL17o2VxQABwHupLy45vstXKr2i9i+5vgZdxYlMwDWFWs8nm5rk0oyTiKQWo7SVldrVZ6YEg1nF8g==`.
+
+This retains the strict output contract and all existing provenance/score rules.
+The opt-in `sourceReferences` evaluation option creates a request-local catalog
+of unchanged source lines. A model-selected `quote_ref` is resolved only for its
+step's designated source. Unknown/stale/wrong-source references and conflicting
+quote strings produce technical HOLD without repair or retry. No reference is
+selected automatically, and a source match never raises a score. Original trace,
+answer, rubric and chronology remain unchanged. Native Sentinel initially enables
+this only for `trade_execution`.
+
+The audit records host-derived source hashes and offsets; the rejected reference
+text is not exposed. See `docs/source-references.md` for the exact contract.
+Rebuild with `node scripts/build-evaluator-contract-vendor.mjs`; the prior .1
+archive and manifest remain available for comparisons.
+
 # pot-cli release and historical vendored patches
+
+## 0.8.12-eval-contract.1 (local compatibility candidate, 2026-10-17)
+
+The strict response contract from draft PR #87 is rebuilt on published 0.8.12.
+This avoids reverting its Node >=22 and pinned `@pot-sdk2/bridge@1.2.0` fixes.
+The evaluator source in 0.8.12 is byte-identical to the audited tp.2 source
+(SHA-256 `5302b8fb14d5179eb2b1be6dce3723ca100673d9477aa624eb9b3671198c118e`).
+The builder checks the entire base archive and that source before applying the
+unchanged contract overlay. No provider/model switch or new repair retry is added.
+
+Missing response fields yield technical HOLD/UNCERTAIN with bounded field-shape
+diagnostics. Explicit null quotes still undergo the original provenance rules.
+Valid restrictive judgments stay restrictive; a secondary ALLOW cannot override
+an invalid assessment. Six Cycle Engine regression cases exercise the actual
+router, evaluator and native engine with synthetic HTTP completions.
+
+- Dependency: `file:vendor/pot-cli-0.8.12-eval-contract.1.tgz`
+- Integrity: `sha512-Yz0G3SxHp+iANOvwg1XUUaSniBHh3hehTPkSDc6hcnU7uCOfqzXi+qeVfWGoLr7nY65n+XgFrQvvl23PZpNIgg==`
+- SHA-256: `fcfdf5965200fe59e633a849ec468d5350b62918c362368d64a6162485303574`
+- Rebuild: `node scripts/build-evaluator-contract-vendor.mjs`
+- Manifest: `patches/vendor-manifest.json`; prior .4 manifest is retained separately.
+
+This candidate corrects handling and visibility of malformed assessments. It
+does not establish that the live provider will emit complete fields or that
+Sentinel's natural trade decisions are reliable.
 
 ## npm 0.8.12 (2026-10-10)
 
-Sentinel pins the published `pot-cli@0.8.12` exactly. It keeps the tp.2
+Production at the start of this work pins `pot-cli@0.8.12` exactly. It keeps the tp.2
 quote and reasoning fixes from
 [pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52).
 [pot-cli v0.8.12](https://github.com/ThoughtProof/pot-cli/releases/tag/v0.8.12)
@@ -22,7 +133,7 @@ The older tarballs below are retained as historical rollback artifacts.
 - Engines: Node.js `>=22`
 - Published file count: 599
 
-`src/pot-cli-quote-patch.test.ts` pins the exact dependency, registry URL,
+`src/pot-cli-quote-patch.test.ts` pins the current overlay, base archive,
 lockfile integrity, installed version, source markers, and behavior.
 Update that pin and this document together when upgrading.
 
