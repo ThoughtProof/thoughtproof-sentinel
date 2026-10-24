@@ -19,7 +19,7 @@
  *   FAIL_ON_FALSE_BLOCK=1         treat FALSE_BLOCK_BASELINE as 0 (already 0)
  *   VERCEL_AUTOMATION_BYPASS_SECRET  only if overriding to protected Preview
  *   ACTION_AUTH_SUITE_REPORT_PATH  opt-in JSON archive of synthetic fixtures,
- *                                 full final receipts and request hashes
+ *                                 allowlisted receipt fields and request hashes
  *   --dry-run                     load + print plan, no HTTP
  *
  * Auth header is X-Sentinel-Key. Do not hardcode keys.
@@ -42,6 +42,10 @@ import {
   resolveGate,
   scoreRows,
 } from './lib/action-auth-suite-metrics.mjs';
+import {
+  redactSuiteReceipt,
+  summarizeDroppedReceiptFields,
+} from './lib/action-auth-suite-receipt.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_SUITE = join(ROOT, 'scenarios', 'action-authorization-suite.json');
@@ -369,8 +373,10 @@ export async function runSuite(opts = {}) {
   const headers = buildHeaders(key, bypass);
   const rows = [];
   // Opt-in for the synthetic nightly suite. Never persist auth headers/env.
-  // The CI checkout SHA identifies the runner, not the production deployment;
-  // server release/model/path/objection data stay in each original receipt.
+  // Receipts are copied through an explicit field allowlist; unknown fields
+  // are dropped and only their names are recorded. Scoring below still reads
+  // the original response, so redaction cannot change a verdict.
+  // The CI checkout SHA identifies the runner, not the production deployment.
   const sha256 = (text) => createHash('sha256').update(text).digest('hex');
   const diagnostics = reportPath ? {
     schema: 'sentinel.action-auth-suite.diagnostics.v1',
@@ -413,11 +419,7 @@ export async function runSuite(opts = {}) {
       printRow(row);
       continue;
     }
-    if (diagnostic) {
-      diagnostic.http_status = res.status;
-      // Exclude error/HTML bodies; successful JSON receipts are kept verbatim.
-      diagnostic.receipt = res.status >= 200 && res.status < 300 ? res.json : null;
-    }
+    if (diagnostic) archiveAllowlistedReceipt(diagnostic, res);
     const row = rowFromResponse(scenario, res);
     rows.push(row);
     printRow(row);
@@ -426,6 +428,10 @@ export async function runSuite(opts = {}) {
   const score = scoreRows(rows);
   const gate = resolveGate(score, { failOnFalseBlock });
   const overdue = listOverdueKnownFalseBlocks(suite.scenarios);
+  if (diagnostics) {
+    const droppedFields = summarizeDroppedReceiptFields(diagnostics.cases);
+    if (droppedFields.length > 0) diagnostics.dropped_fields = droppedFields;
+  }
   const report = {
     ts: new Date().toISOString(),
     base,
@@ -508,6 +514,26 @@ export async function runSuite(opts = {}) {
 
   writeStepSummary({ score, gate, overdue });
   return report;
+}
+
+/**
+ * Archive a 2xx JSON body through the receipt allowlist.
+ * Non-2xx and non-JSON bodies stay null. The caller still scores `res`.
+ *
+ * @param {{ http_status: number | null, receipt: unknown, dropped_fields?: string[] }} diagnostic
+ * @param {{ status: number, json: unknown }} res
+ */
+function archiveAllowlistedReceipt(diagnostic, res) {
+  diagnostic.http_status = res.status;
+  if (res.status < 200 || res.status >= 300 || res.json == null) {
+    diagnostic.receipt = null;
+    return;
+  }
+  const redacted = redactSuiteReceipt(res.json);
+  diagnostic.receipt = redacted.receipt;
+  if (redacted.dropped_fields.length > 0) {
+    diagnostic.dropped_fields = redacted.dropped_fields;
+  }
 }
 
 function emptyish(n) {

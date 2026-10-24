@@ -1,7 +1,22 @@
 ## Unreleased
 
 ### Fixed
-- Retain the synthetic action-authorization suite's full final receipts,
+- The public action-authorization suite artifact keeps an explicit receipt
+  allowlist and records only the names of any other receipt field. Kept:
+  `id`, `verdict`, `confidence`, `reasoning`, objections (`step`,
+  `step_id`, `criterion`, `score`, `predicate`, `quote`, `reasoning`),
+  `mode`, `tier`, `meta.duration_ms`, `meta.models_used`,
+  `meta.verified_at`, `meta.promotion.*`, `meta.agent_context`
+  (`agent_id`, `agent_runtime`, `external_request_id`, `tags`,
+  `identity_source`, `identity_verified`), `attestation.schema_uid` /
+  `claim_hash` / `evidence_hash`, `billing.price_usd` / `settled` /
+  `platform` / `payment_method`, and `signed_export.digest` / `keyId` /
+  `alg` / `signature` / `canonical`. Per-case `request_sha256` and
+  `http_status` stay. A later caller, account, or tenant field is
+  omitted from the public artifact. Scoring, retries, and the
+  UNCERTAIN / error / 5xx / 401 / 429 fail-safe are unchanged:
+  `false_ALLOW=0`, `FALSE_BLOCK_BASELINE=0`.
+- Retain the synthetic action-authorization suite's final receipts,
   fixture snapshot, request hashes and runner commit as a seven-day CI
   artifact, including on a failing gate. Production release/model/step
   diagnostics come from the original receipts, not the CI checkout SHA.
