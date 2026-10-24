@@ -52,20 +52,18 @@ describe('nightly receipt retention (offline synthetic responses)', () => {
       VERCEL_AUTOMATION_BYPASS_SECRET: 'offline-bypass-must-not-be-retained',
       SENTINEL_BASE_URL: 'https://offline.invalid',
       SENTINEL_TIER: 'standard',
-      GITHUB_SHA: 'synthetic-suite-commit',
-      GITHUB_RUN_ID: 'synthetic-run',
+      GITHUB_SHA: 'f'.repeat(40),
+      GITHUB_RUN_ID: '40082284751',
       ...(capture ? { ACTION_AUTH_SUITE_REPORT_PATH: reportPath } : {}),
     };
   }
 
   function receipt(verdict = 'BLOCK') {
     return {
-      id: `synthetic_${verdict.toLowerCase()}`,
+      id: verdict === 'ALLOW' ? 'sent_1111111111111111' : 'sent_2222222222222222',
       verdict,
       confidence: 0.25,
-      reasoning: 'Synthetic diagnostic response; not a historical receipt.',
-      objections: [{ step_id: 'step_2', predicate: 'unsupported', score: 0.25,
-        quote: 'Nach dem Deploy\ninformiere QA', reasoning: 'Synthetic step reason.' }],
+      objections: [{ step_id: 'step_2', predicate: 'unsupported', score: 0.25 }],
       meta: {
         models_used: ['serv-nano'],
         promotion: {
@@ -73,7 +71,7 @@ describe('nightly receipt retention (offline synthetic responses)', () => {
           cascade_reason: verdict === 'ALLOW' ? 'agreement_allow' : 'primary_block',
           decision_basis: 'cascade',
           mandate_kind: 'informational', action_kind: 'informational',
-          release_id: 'synthetic-server-commit',
+          release_id: 'a'.repeat(40),
         },
       },
     };
@@ -89,7 +87,7 @@ describe('nightly receipt retention (offline synthetic responses)', () => {
     }));
   }
 
-  it('retains full success and failure receipts with fixture/request identity while the baseline gate still fails', async () => {
+  it('retains public success and failure diagnostics with fixture/request identity while the baseline gate still fails', async () => {
     const scenarios = fixtures();
     const receipts = [receipt('ALLOW'), receipt('BLOCK')];
     receipts.forEach(respond);
@@ -99,8 +97,8 @@ describe('nightly receipt retention (offline synthetic responses)', () => {
     const saved = JSON.parse(readFileSync(reportPath, 'utf8'));
     expect(saved.rows.map((row: { class: string }) => row.class)).toEqual(['ok', 'false_BLOCK']);
     expect(saved.diagnostics).toMatchObject({
-      schema: 'sentinel.action-auth-suite.diagnostics.v1',
-      suite_commit: 'synthetic-suite-commit', workflow_run_id: 'synthetic-run',
+      schema: 'sentinel.action-auth-suite.diagnostics.v2',
+      suite_commit: 'f'.repeat(40), workflow_run_id: '40082284751',
       fixture_sha256: sha256(readFileSync(suitePath, 'utf8')),
       suite: { scenarios },
     });
@@ -225,87 +223,31 @@ const INJECTED_SECRETS = [
   'error-body-key',
   '1782916498',
   'nested-model-key',
+  'free-text-private-canary',
 ];
 
 function injectedDroppedFields() {
-  return [
-    'account_email',
-    'api_key_id',
-    'attestation.attester',
-    'attestation.prepared',
-    'billing.cardholder_email',
-    'gate',
-    'meta.agent_context.erc8004',
-    'meta.agent_context.session_id',
-    'meta.engine_budget',
-    'meta.models_used.item',
-    'meta.package_digest',
-    'objections.internal_prompt',
-    'objections.quote_source',
-    'signed_export.private_key',
-    'signed_export.signedAt',
-    'tenant_id',
-  ].sort();
+  return ['*', 'attestation.*', 'billing.*', 'meta.*', 'meta.agent_context',
+    'meta.engine_budget.*', 'meta.engine_budget.reason', 'meta.models_used.item',
+    'objections.*', 'objections.criterion', 'objections.quote', 'objections.reasoning',
+    'reasoning', 'signed_export.*', 'signed_export.canonical'].sort();
 }
 
 function allowlistedProjection() {
   return {
-    id: 'sent_allowlist_1',
-    verdict: 'UNCERTAIN',
-    confidence: 0.25,
-    reasoning: 'Allowlisted reasoning survives.',
-    objections: [{
-      step: '2',
-      step_id: 'step_2',
-      criterion: 'criterion text',
-      score: 0.25,
-      predicate: 'unsupported',
-      quote: 'verbatim quote',
-      reasoning: 'step reason',
-    }],
-    mode: 'action_authorization',
-    tier: 'standard',
+    id: 'sent_3333333333333333', verdict: 'UNCERTAIN', confidence: 0.25,
+    objections: [{ step: '2', step_id: 'step_2', score: 0.25, predicate: 'unsupported', quote_source: 'cascade' }],
+    mode: 'action_authorization', tier: 'standard',
     meta: {
-      duration_ms: 1200,
-      models_used: ['serv-nano'],
-      verified_at: '2026-10-24T00:00:00.000Z',
-      promotion: {
-        reason: 'steps_not_all_pass',
-        cascade_reason: 'primary_block',
-        decision_basis: 'cascade',
-        mandate_kind: 'informational',
-        action_kind: 'informational',
-        release_id: 'synthetic-server-commit',
-        policy: 'action-auth-v1',
-        steps_all_pass: false,
-      },
-      agent_context: {
-        agent_id: 'nightly-suite',
-        agent_runtime: 'github-actions',
-        external_request_id: 'ext-req-1',
-        tags: ['suite', 'synthetic'],
-        identity_source: 'operator_declared',
-        identity_verified: false,
-      },
+      duration_ms: 1200, models_used: ['serv-nano'], verified_at: '2026-10-24T00:00:00.000Z',
+      promotion: { reason: 'steps_not_all_pass', cascade_reason: 'primary_block',
+        decision_basis: 'cascade', mandate_kind: 'informational', action_kind: 'informational',
+        release_id: 'a'.repeat(40), steps_all_pass: false },
+      engine_budget: {},
     },
-    attestation: {
-      schema_uid: '0xschema',
-      claim_hash: '0xclaim',
-      evidence_hash: '0xevidence',
-    },
-    billing: {
-      price_usd: 0.008,
-      settled: false,
-      platform: 'direct',
-      payment_method: 'x402-facilitator',
-    },
-    signed_export: {
-      digest: '0xdigest',
-      keyId: 'tp-sentinel-export-ed25519-2026-09',
-      alg: 'Ed25519',
-      signature: '0xsig',
-      canonical: '{"verdict":"UNCERTAIN"}',
-    },
+    attestation: { schema_uid: '0x' + '1'.repeat(64), claim_hash: '0x' + '2'.repeat(64), evidence_hash: '0x' + '3'.repeat(64) },
+    billing: { price_usd: 0.008, settled: false, platform: 'direct', payment_method: 'x402-facilitator' },
+    signed_export: { digest: '0x' + '4'.repeat(64) },
   };
 }
 
@@ -313,12 +255,14 @@ function injectedReceipt() {
   const keep = allowlistedProjection();
   return {
     ...keep,
+    reasoning: 'free-text-private-canary',
     account_email: 'founder@example.com',
     tenant_id: 'ten_live_42',
     api_key_id: 'key_live_99',
     gate: { mode: 'shadow', secret: 'gate-secret-should-drop' },
     objections: [{
       ...keep.objections[0],
+      criterion: 'free-text-private-canary', quote: 'free-text-private-canary', reasoning: 'free-text-private-canary',
       quote_source: 'cascade',
       internal_prompt: 'internal-prompt-should-drop',
     }],
@@ -328,7 +272,7 @@ function injectedReceipt() {
       package_digest: 'package-digest-should-drop',
       engine_budget: { reason: 'not_a_degraded_marker', note: 'evidence-note-should-drop' },
       agent_context: {
-        ...keep.meta.agent_context,
+        agent_id: 'nightly-suite', external_request_id: 'ext-req-1',
         session_id: 'session-should-drop',
         erc8004: { chainId: 8453, tokenId: 'erc8004-token-should-drop' },
       },
@@ -344,6 +288,7 @@ function injectedReceipt() {
     },
     signed_export: {
       ...keep.signed_export,
+      canonical: 'free-text-private-canary',
       signedAt: 1782916498,
       private_key: 'export-private-key-should-drop',
     },
@@ -352,16 +297,13 @@ function injectedReceipt() {
 
 describe('receipt allowlist', () => {
   it('names the public fields and no caller, account, or tenant key', () => {
-    expect(SUITE_RECEIPT_ALLOWLIST).toEqual({
-      receipt: ['id', 'verdict', 'confidence', 'reasoning', 'objections', 'mode', 'tier', 'meta', 'attestation', 'billing', 'signed_export'],
-      objections: ['step', 'step_id', 'criterion', 'score', 'predicate', 'quote', 'reasoning'],
-      meta: ['duration_ms', 'models_used', 'verified_at', 'promotion', 'agent_context'],
-      promotion: '*',
-      agent_context: ['agent_id', 'agent_runtime', 'external_request_id', 'tags', 'identity_source', 'identity_verified'],
-      attestation: ['schema_uid', 'claim_hash', 'evidence_hash'],
-      billing: ['price_usd', 'settled', 'platform', 'payment_method'],
-      signed_export: ['digest', 'keyId', 'alg', 'signature', 'canonical'],
-    });
+    expect(Array.isArray(SUITE_RECEIPT_ALLOWLIST.promotion)).toBe(true);
+    expect(SUITE_RECEIPT_ALLOWLIST.promotion).toContain('cascade_reason');
+    expect(SUITE_RECEIPT_ALLOWLIST.meta).toContain('engine_budget');
+    expect(SUITE_RECEIPT_ALLOWLIST.objections).toContain('quote_match_mode');
+    expect(SUITE_RECEIPT_ALLOWLIST.objections).not.toContain('quote');
+    expect(SUITE_RECEIPT_ALLOWLIST.receipt).not.toContain('reasoning');
+    expect(SUITE_RECEIPT_ALLOWLIST.signed_export).toEqual(['digest']);
     const flat = JSON.stringify(SUITE_RECEIPT_ALLOWLIST);
     expect(flat).not.toContain('account_email');
     expect(flat).not.toContain('tenant_id');
@@ -383,7 +325,7 @@ describe('receipt allowlist', () => {
     expect(redacted.receipt.verdict).toBe('UNCERTAIN');
   });
 
-  it('keeps a null quote and drops an object stuffed into an allowlisted scalar', () => {
+  it('omits quotes and rejects an object stuffed into an allowlisted scalar', () => {
     const stuffed = redactSuiteReceipt({
       id: { account_email: 'stuffed@example.com' },
       verdict: 'UNCERTAIN',
@@ -391,9 +333,9 @@ describe('receipt allowlist', () => {
     });
     expect(stuffed.receipt).toEqual({
       verdict: 'UNCERTAIN',
-      objections: [{ step_id: 'step_0', quote: null, score: 0, predicate: 'unsupported', criterion: 'c', reasoning: 'r' }],
+      objections: [{ step_id: 'step_0', score: 0, predicate: 'unsupported' }],
     });
-    expect(stuffed.dropped_fields).toEqual(['id']);
+    expect(stuffed.dropped_fields).toEqual(['id', 'objections.criterion', 'objections.quote', 'objections.reasoning']);
     expect(JSON.stringify(stuffed)).not.toContain('stuffed@example.com');
   });
 
@@ -406,7 +348,7 @@ describe('receipt allowlist', () => {
     expect(JSON.stringify(redactSuiteReceipt({ account_email: 'founder@example.com' }))).not.toContain('founder@example.com');
   });
 
-  it('keeps promotion JSON fields and drops a non-JSON promotion value by name', () => {
+  it('keeps reviewed promotion fields and suppresses unknown names and values', () => {
     const trace = () => 'function-secret-should-drop';
     const redacted = redactSuiteReceipt({
       verdict: 'BLOCK',
@@ -416,7 +358,7 @@ describe('receipt allowlist', () => {
       verdict: 'BLOCK',
       meta: { promotion: { reason: 'already_block', steps_all_pass: false } },
     });
-    expect(redacted.dropped_fields).toEqual(['meta.promotion.trace']);
+    expect(redacted.dropped_fields).toEqual(['meta.promotion.*']);
     expect(JSON.stringify(redacted)).not.toContain('function-secret-should-drop');
   });
 });

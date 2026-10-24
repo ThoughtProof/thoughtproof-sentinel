@@ -1,112 +1,100 @@
 /**
- * Allowlist for the public action-authorization suite artifact.
- *
- * The report is uploaded as a GitHub Actions artifact on a public repo.
- * Receipts are copied field-by-field. Any key not listed here is omitted
- * and its name is recorded (never its value), so a later caller, account,
- * or tenant field cannot leak by riding along on a verbatim receipt.
- *
- * Live objections use `step_id` (SentinelStepObjection). `step` is the
- * same slot when a receipt names it that way. `meta.promotion` is the
- * promotion-layer trace and is kept in full (`promotion.*`) as JSON.
- * Scoring still reads the original response; this module only shapes
- * the archived copy.
+ * Public diagnostics, not a full receipt or a signed-export verification bundle.
+ * Treat every response string (including JSON key names) as untrusted. Free text,
+ * identity echoes and canonical bodies are omitted; machine diagnostics have
+ * closed vocabularies/types. New fields/enum values require deliberate review.
+ * Scoring must always use the ORIGINAL response, never this projection.
  */
+const oneOf = (...values) => (value) => values.includes(value);
+const matches = (pattern) => (value) => typeof value === 'string' && pattern.test(value);
+const bool = (value) => typeof value === 'boolean';
+const number = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const count = (value) => Number.isSafeInteger(value) && value >= 0;
+const unit = (value) => number(value) && value <= 1;
+const hash = matches(/^0x[a-f0-9]{64}$/);
+const receiptId = matches(/^sent_[a-f0-9]{16}$/);
+const verdict = oneOf('ALLOW', 'BLOCK', 'UNCERTAIN');
+const internalVerdict = oneOf('ALLOW', 'BLOCK', 'HOLD', 'CONDITIONAL_ALLOW', 'REVIEW', 'UNCERTAIN');
+const kind = oneOf('informational', 'value_transfer', 'permission', 'deploy_ship', 'unknown');
+const promotionReason = oneOf(
+  'not_action_authorization', 'already_allow', 'already_block',
+  'primary_block_disagreement', 'primary_error_fail_closed',
+  'conditional_allow_no_machine_proof', 'steps_not_all_pass',
+  'promoted_all_steps_pass', 'no_promote_path', 'objective_mismatch_fail_closed',
+  'unclassified_abstention_fail_closed', 'engine_budget_exhausted', 'inferential_step_promoted',
+);
+const cascadeReason = oneOf(
+  'primary_block', 'confirmed_block', 'primary_block_rejected', 'primary_hold',
+  'agreement_allow', 'agreement_conditional_allow', 'disagreement_hold',
+  'disagreement_conditional_hold', 'cascade_disabled', 'primary_error_fallback',
+  'secondary_error_fallback', 'both_error', 'engine_budget_exhausted',
+);
+const reason = (value) => promotionReason(value) || cascadeReason(value);
+const decisionBasis = oneOf('deterministic', 'cascade');
+const promotion = {
+  cascade_reason: cascadeReason, internal_verdict: internalVerdict,
+  mapped_verdict: verdict, public_verdict: verdict,
+  promoted: bool, reason: promotionReason, steps_all_pass: bool,
+  machine_condition_proof_present: bool, machine_condition_proof_accepted: bool,
+  action_kind: kind, mandate_kind: kind,
+  action_kind_source: oneOf('caller', 'prose'), mandate_kind_source: oneOf('caller', 'prose'),
+  unknown_action: bool, unknown_mandate: bool, unclassified_abstention: bool,
+  decision_basis: decisionBasis,
+  release_id: matches(/^[a-f0-9]{7,40}$/),
+  policy: oneOf(
+    'adr-0018-trade-reasoning-step2-promotion',
+    'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-caller-declared-kinds',
+  ),
+};
+const objections = {
+  step: oneOf('0', '1', '2', '3'), step_id: oneOf('step_0', 'step_1', 'step_2', 'step_3'),
+  score: unit,
+  predicate: oneOf('faithful', 'unfaithful', 'weakly_faithful', 'partially_faithful',
+    'supported', 'unsupported', 'partial', 'skipped', 'unauthorized'),
+  quote_source: oneOf('cascade', 'recovered_mandate'),
+  quote_match_mode: oneOf('exact', 'trimmed', 'line_whitespace', 'unicode', 'none'),
+  objection_source: oneOf('cascade', 'deterministic_gate'),
+  criterion: null, quote: null, reasoning: null,
+};
+const engineBudget = {
+  reason: oneOf('engine_budget_exhausted'), degradedMode: bool,
+  stage: oneOf('pre_cascade', 'primary', 'secondary', 'solo', 'post_cascade', 'unknown'),
+  elapsed_ms: number, budget_ms: number, reserve_ms: number, vercel_max_duration_s: number,
+  known_internal_verdict: internalVerdict, public_verdict: verdict, late_result_ignored: bool,
+};
+const evidenceBind = {
+  surface_gated: bool, n_evidence_fail: count, n_unverified: count, n_verified: count,
+  codes: [oneOf('numeric_identifier_not_spend', 'numeric_exceed_false', 'numeric_exceed_true_numbers_fixed',
+    'numeric_exceed_true', 'numeric_within_false', 'numeric_within_true', 'numeric_unverified')],
+  verdict_unchanged: bool,
+};
+const meta = {
+  duration_ms: number, models_used: [oneOf('serv-nano', 'serv-swift', 'serv-pro')],
+  verified_at: matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+  promotion, engine_budget: engineBudget, objection_evidence_bind: evidenceBind,
+  agent_context: null,
+};
+const attestation = { schema_uid: hash, claim_hash: hash, evidence_hash: hash };
+const billing = {
+  price_usd: number, settled: bool,
+  platform: oneOf('direct', 'rapidapi', 'x402', 'api-key'),
+  payment_method: oneOf('api-key', 'x402', 'x402-facilitator', 'free'),
+};
+// Digest is only a correlation reference to the original private export.
+// Never rewrite canonical under its old signature or imply it verifies this copy.
+const signedExport = { digest: hash, canonical: null, signature: null, keyId: null, alg: null };
+const receiptSchema = {
+  id: receiptId, verdict, confidence: unit,
+  mode: oneOf('action_authorization'), tier: oneOf('checkpoint', 'standard', 'swift', 'pro', 'swift-real'),
+  objections: [objections], meta, attestation, billing, signed_export: signedExport,
+  reasoning: null,
+};
 
-const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
-
-/** @type {const} */
+const keys = (schema) => Object.freeze(Object.keys(schema).filter((key) => schema[key] !== null));
 export const SUITE_RECEIPT_ALLOWLIST = Object.freeze({
-  receipt: Object.freeze([
-    'id',
-    'verdict',
-    'confidence',
-    'reasoning',
-    'objections',
-    'mode',
-    'tier',
-    'meta',
-    'attestation',
-    'billing',
-    'signed_export',
-  ]),
-  objections: Object.freeze([
-    'step',
-    'step_id',
-    'criterion',
-    'score',
-    'predicate',
-    'quote',
-    'reasoning',
-  ]),
-  meta: Object.freeze([
-    'duration_ms',
-    'models_used',
-    'verified_at',
-    'promotion',
-    'agent_context',
-  ]),
-  /** Every JSON field under meta.promotion. */
-  promotion: '*',
-  agent_context: Object.freeze([
-    'agent_id',
-    'agent_runtime',
-    'external_request_id',
-    'tags',
-    'identity_source',
-    'identity_verified',
-  ]),
-  attestation: Object.freeze(['schema_uid', 'claim_hash', 'evidence_hash']),
-  billing: Object.freeze(['price_usd', 'settled', 'platform', 'payment_method']),
-  signed_export: Object.freeze(['digest', 'keyId', 'alg', 'signature', 'canonical']),
-});
-
-const TOP_SCALARS = Object.freeze({
-  id: ['string'],
-  verdict: ['string'],
-  confidence: ['number'],
-  reasoning: ['string'],
-  mode: ['string'],
-  tier: ['string'],
-});
-
-const OBJECTION_KINDS = Object.freeze({
-  step: ['string'],
-  step_id: ['string'],
-  criterion: ['string'],
-  score: ['number'],
-  predicate: ['string'],
-  quote: ['string'],
-  reasoning: ['string'],
-});
-
-const AGENT_KINDS = Object.freeze({
-  agent_id: ['string'],
-  agent_runtime: ['string'],
-  external_request_id: ['string'],
-  identity_source: ['string'],
-  identity_verified: ['boolean'],
-});
-
-const ATTESTATION_KINDS = Object.freeze({
-  schema_uid: ['string'],
-  claim_hash: ['string'],
-  evidence_hash: ['string'],
-});
-
-const BILLING_KINDS = Object.freeze({
-  price_usd: ['number'],
-  settled: ['boolean'],
-  platform: ['string'],
-  payment_method: ['string'],
-});
-
-const SIGNED_EXPORT_KINDS = Object.freeze({
-  digest: ['string'],
-  keyId: ['string'],
-  alg: ['string'],
-  signature: ['string'],
-  canonical: ['string'],
+  receipt: keys(receiptSchema), objections: keys(objections), meta: keys(meta),
+  promotion: keys(promotion), engine_budget: keys(engineBudget), objection_evidence_bind: keys(evidenceBind),
+  attestation: keys(attestation), billing: keys(billing), signed_export: keys(signedExport),
 });
 
 function isPlainObject(value) {
@@ -114,318 +102,92 @@ function isPlainObject(value) {
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 }
+const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-function has(obj, key) {
-  return Object.prototype.hasOwnProperty.call(obj, key);
-}
-
-function note(dropped, name) {
-  dropped.add(name);
-}
-
-function assign(target, key, value) {
-  Object.defineProperty(target, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
-}
-
-function isFiniteNumber(value) {
-  return typeof value === 'number' && Number.isFinite(value);
-}
-
-/**
- * @param {unknown} value
- * @param {string[]} kinds
- */
-function copyScalar(value, kinds) {
-  if (value === null) return { ok: true, value: null };
-  if (kinds?.includes('string') && typeof value === 'string') return { ok: true, value };
-  if (kinds?.includes('number') && isFiniteNumber(value)) return { ok: true, value };
-  if (kinds?.includes('boolean') && typeof value === 'boolean') return { ok: true, value };
-  return { ok: false };
-}
-
-function fieldPath(prefix, key) {
-  return prefix ? `${prefix}.${key}` : key;
-}
-
-function copyScalarsInto(target, source, keys, kinds, dropped, prefix) {
-  for (const key of keys) {
-    if (!has(source, key)) continue;
-    const copied = copyScalar(source[key], kinds[key]);
-    if (!copied.ok) {
-      note(dropped, fieldPath(prefix, key));
-      continue;
-    }
-    assign(target, key, copied.value);
+function project(value, schema, dropped, path, secrets) {
+  if (schema === null) { dropped.add(path); return undefined; }
+  if (typeof value === 'string' && secrets.some((secret) => value.includes(secret))) {
+    dropped.add(path); return undefined;
   }
-}
-
-/**
- * @param {unknown} value
- * @param {Set<string>} dropped
- * @param {string} path
- * @returns {string[] | undefined}
- */
-function copyStringArray(value, dropped, path) {
-  if (!Array.isArray(value)) {
-    note(dropped, path);
-    return undefined;
+  if (typeof schema === 'function') {
+    if (value === null || schema(value)) return value;
+    dropped.add(path); return undefined;
   }
-  const out = [];
-  let rejected = false;
-  for (const el of value) {
-    if (typeof el === 'string') out.push(el);
-    else rejected = true;
+  if (Array.isArray(schema)) {
+    if (!Array.isArray(value)) { dropped.add(path); return undefined; }
+    return value.flatMap((item) => {
+      const copy = project(item, schema[0], dropped, `${path}.item`, secrets);
+      return copy === undefined ? [] : [copy];
+    });
   }
-  if (rejected) note(dropped, `${path}.item`);
-  return out;
-}
-
-/**
- * JSON-safe clone. Rejects functions, bigint, and prototype keys.
- * @param {unknown} value
- * @returns {{ ok: true, value: unknown } | { ok: false }}
- */
-function jsonValue(value) {
-  if (value === null) return { ok: true, value: null };
-  if (typeof value === 'string' || typeof value === 'boolean') return { ok: true, value };
-  if (isFiniteNumber(value)) return { ok: true, value };
-  if (Array.isArray(value)) {
-    const out = [];
-    for (const el of value) {
-      const child = jsonValue(el);
-      if (!child.ok) return { ok: false };
-      out.push(child.value);
-    }
-    return { ok: true, value: out };
-  }
-  if (isPlainObject(value)) {
-    const out = {};
-    for (const key of Object.keys(value)) {
-      if (DANGEROUS_KEYS.has(key)) return { ok: false };
-      const child = jsonValue(value[key]);
-      if (!child.ok) return { ok: false };
-      assign(out, key, child.value);
-    }
-    return { ok: true, value: out };
-  }
-  return { ok: false };
-}
-
-function noteUnknownKeys(source, allowed, dropped, prefix) {
-  for (const key of Object.keys(source)) {
-    if (!allowed.has(key)) note(dropped, fieldPath(prefix, key));
-  }
-}
-
-/**
- * @param {unknown} value
- * @param {Set<string>} dropped
- */
-function redactObjections(value, dropped) {
-  if (!Array.isArray(value)) {
-    note(dropped, 'objections');
-    return undefined;
-  }
-  const keys = SUITE_RECEIPT_ALLOWLIST.objections;
-  const allowed = new Set(keys);
-  return value.map((item) => {
-    if (!isPlainObject(item)) {
-      note(dropped, 'objections.item');
-      return {};
-    }
-    noteUnknownKeys(item, allowed, dropped, 'objections');
-    const out = {};
-    copyScalarsInto(out, item, keys, OBJECTION_KINDS, dropped, 'objections');
-    return out;
-  });
-}
-
-/**
- * @param {unknown} value
- * @param {Set<string>} dropped
- */
-function redactPromotion(value, dropped) {
-  if (!isPlainObject(value)) {
-    note(dropped, 'meta.promotion');
-    return undefined;
-  }
+  if (!isPlainObject(value)) { dropped.add(path || '(non-object)'); return undefined; }
   const out = {};
   for (const key of Object.keys(value)) {
-    if (DANGEROUS_KEYS.has(key)) {
-      note(dropped, `meta.promotion.${key}`);
-      continue;
-    }
-    const cloned = jsonValue(value[key]);
-    if (!cloned.ok) {
-      note(dropped, `meta.promotion.${key}`);
-      continue;
-    }
-    assign(out, key, cloned.value);
+    // Do not echo unknown names: keys themselves may contain sensitive values.
+    if (!has(schema, key)) { dropped.add(path ? `${path}.*` : '*'); continue; }
+    const name = path ? `${path}.${key}` : key;
+    const copy = project(value[key], schema[key], dropped, name, secrets);
+    if (copy !== undefined) out[key] = copy;
   }
   return out;
 }
 
-/**
- * @param {unknown} value
- * @param {Set<string>} dropped
- */
-function redactAgentContext(value, dropped) {
-  if (!isPlainObject(value)) {
-    note(dropped, 'meta.agent_context');
-    return undefined;
-  }
-  const keys = SUITE_RECEIPT_ALLOWLIST.agent_context;
-  noteUnknownKeys(value, new Set(keys), dropped, 'meta.agent_context');
-  const out = {};
-  copyScalarsInto(
-    out,
-    value,
-    ['agent_id', 'agent_runtime', 'external_request_id', 'identity_source', 'identity_verified'],
-    AGENT_KINDS,
-    dropped,
-    'meta.agent_context',
-  );
-  if (has(value, 'tags')) {
-    const tags = copyStringArray(value.tags, dropped, 'meta.agent_context.tags');
-    if (tags !== undefined) assign(out, 'tags', tags);
-  }
-  return out;
-}
-
-/**
- * @param {unknown} value
- * @param {Set<string>} dropped
- */
-function redactMeta(value, dropped) {
-  if (!isPlainObject(value)) {
-    note(dropped, 'meta');
-    return undefined;
-  }
-  noteUnknownKeys(value, new Set(SUITE_RECEIPT_ALLOWLIST.meta), dropped, 'meta');
-  const out = {};
-  copyScalarsInto(
-    out,
-    value,
-    ['duration_ms', 'verified_at'],
-    { duration_ms: ['number'], verified_at: ['string'] },
-    dropped,
-    'meta',
-  );
-  if (has(value, 'models_used')) {
-    const models = copyStringArray(value.models_used, dropped, 'meta.models_used');
-    if (models !== undefined) assign(out, 'models_used', models);
-  }
-  if (has(value, 'promotion')) {
-    const promotion = redactPromotion(value.promotion, dropped);
-    if (promotion !== undefined) assign(out, 'promotion', promotion);
-  }
-  if (has(value, 'agent_context')) {
-    const agent = redactAgentContext(value.agent_context, dropped);
-    if (agent !== undefined) assign(out, 'agent_context', agent);
-  }
-  return out;
-}
-
-/**
- * @param {unknown} value
- * @param {readonly string[]} keys
- * @param {Record<string, string[]>} kinds
- * @param {Set<string>} dropped
- * @param {string} prefix
- */
-function redactNamedObject(value, keys, kinds, dropped, prefix) {
-  if (!isPlainObject(value)) {
-    note(dropped, prefix);
-    return undefined;
-  }
-  noteUnknownKeys(value, new Set(keys), dropped, prefix);
-  const out = {};
-  copyScalarsInto(out, value, keys, kinds, dropped, prefix);
-  return out;
-}
-
-/**
- * Copy one receipt through the public allowlist.
- *
- * @param {unknown} receipt
- * @returns {{ receipt: Record<string, unknown> | null, dropped_fields: string[] }}
- */
-export function redactSuiteReceipt(receipt) {
-  const dropped = new Set();
+/** Projection only; no mutation or scoring. Never publish raw free-text hashes. */
+export function redactSuiteReceipt(receipt, { secrets = [], evidence } = {}) {
   if (receipt == null) return { receipt: null, dropped_fields: [] };
-  if (!isPlainObject(receipt)) return { receipt: null, dropped_fields: ['(non-object)'] };
-
-  noteUnknownKeys(receipt, new Set(SUITE_RECEIPT_ALLOWLIST.receipt), dropped, '');
-  const out = {};
-  copyScalarsInto(
-    out,
-    receipt,
-    ['id', 'verdict', 'confidence', 'reasoning', 'mode', 'tier'],
-    TOP_SCALARS,
-    dropped,
-    '',
-  );
-  if (has(receipt, 'objections')) {
-    const objections = redactObjections(receipt.objections, dropped);
-    if (objections !== undefined) assign(out, 'objections', objections);
+  const dropped = new Set();
+  const safeSecrets = secrets.filter((s) => typeof s === 'string' && s.length > 0);
+  const copy = project(receipt, receiptSchema, dropped, '', safeSecrets);
+  // Keep an exact quote inspectable via the already-public fixture, without
+  // trusting or publishing any response text. Never accept a server-made span.
+  if (copy?.objections && typeof evidence === 'string') {
+    const originals = receipt.objections.filter(isPlainObject);
+    copy.objections.forEach((objection, i) => {
+      const quote = originals[i].quote;
+      const start = typeof quote === 'string' && quote.length > 0 ? evidence.indexOf(quote) : -1;
+      if (start >= 0 && !safeSecrets.some((secret) => quote.includes(secret))) {
+        objection.quote_evidence_span = { start, end: start + quote.length };
+      }
+    });
   }
-  if (has(receipt, 'meta')) {
-    const meta = redactMeta(receipt.meta, dropped);
-    if (meta !== undefined) assign(out, 'meta', meta);
-  }
-  if (has(receipt, 'attestation')) {
-    const attestation = redactNamedObject(
-      receipt.attestation,
-      SUITE_RECEIPT_ALLOWLIST.attestation,
-      ATTESTATION_KINDS,
-      dropped,
-      'attestation',
-    );
-    if (attestation !== undefined) assign(out, 'attestation', attestation);
-  }
-  if (has(receipt, 'billing')) {
-    const billing = redactNamedObject(
-      receipt.billing,
-      SUITE_RECEIPT_ALLOWLIST.billing,
-      BILLING_KINDS,
-      dropped,
-      'billing',
-    );
-    if (billing !== undefined) assign(out, 'billing', billing);
-  }
-  if (has(receipt, 'signed_export')) {
-    const signed = redactNamedObject(
-      receipt.signed_export,
-      SUITE_RECEIPT_ALLOWLIST.signed_export,
-      SIGNED_EXPORT_KINDS,
-      dropped,
-      'signed_export',
-    );
-    if (signed !== undefined) assign(out, 'signed_export', signed);
-  }
-  return { receipt: out, dropped_fields: [...dropped].sort() };
+  // Array item indices are deliberately absent from schema-drift markers.
+  return { receipt: copy ?? null, dropped_fields: [...new Set([...dropped].map((p) => p.replaceAll('.item.', '.')))].sort() };
 }
 
-/**
- * Sorted unique dropped-field names across archived cases.
- * Values are never included.
- *
- * @param {Array<{ dropped_fields?: string[] }> | null | undefined} cases
- * @returns {string[]}
- */
+const rowSchema = {
+  // id/expect/class are runner/fixture-owned, not echoed from the response.
+  id: matches(/^[a-z0-9][a-z0-9_-]{0,95}$/), expect: oneOf('allow', 'not-allow'),
+  class: oneOf('ok', 'false_ALLOW', 'false_BLOCK', 'known_false_block', 'error'),
+  known_false_block: bool, uncertain_ok: bool,
+  http_status: (value) => Number.isInteger(value) && value >= 100 && value <= 599,
+  verdict, receipt_id: receiptId, decision_basis: decisionBasis,
+  promotion: reason, promotion_reason: reason, cascade_reason: cascadeReason,
+  engine_budget_reason: oneOf('engine_budget_exhausted'), reason,
+  degradedMode: bool, mandate_kind: kind, action_kind: kind,
+  error: (value) => oneOf('UNAUTHORIZED', 'rate_limited', 'internal', 'INTERNAL_ERROR',
+    'MODEL_CONFIG_MISSING', 'engine_budget_exhausted', 'fetch_error', 'Error',
+    'TypeError', 'AbortError', 'TimeoutError', 'ECONNRESET', 'ECONNREFUSED',
+    'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN',
+    'vercel_deployment_protection (set VERCEL_AUTOMATION_BYPASS_SECRET)')(value) ||
+    matches(/^http_[1-5]\d\d$/)(value),
+};
+
+/** Apply to rows AND score failure lists AND console/step-summary output. */
+export function redactSuiteRow(row, { secrets = [] } = {}) {
+  const copy = project(row, rowSchema, new Set(), '', secrets.filter(Boolean)) ?? {};
+  if (has(row, 'error') && row.error != null && !has(copy, 'error')) copy.error = 'redacted_error';
+  return copy;
+}
+
+/** Target metadata must not serialize URL credentials, paths, queries or fragments. */
+export function publicSuiteOrigin(value, secrets = []) {
+  try {
+    const url = new URL(value);
+    if (!['https:', 'http:'].includes(url.protocol)) return '[redacted target]';
+    return secrets.filter(Boolean).some((secret) => url.origin.includes(secret)) ? '[redacted target]' : url.origin;
+  } catch { return '[redacted target]'; }
+}
+
 export function summarizeDroppedReceiptFields(cases) {
-  const names = new Set();
-  for (const row of cases ?? []) {
-    const fields = row?.dropped_fields;
-    if (!Array.isArray(fields)) continue;
-    for (const name of fields) {
-      if (typeof name === 'string' && name) names.add(name);
-    }
-  }
-  return [...names].sort();
+  return [...new Set((cases ?? []).flatMap((row) => row.dropped_fields ?? []))].sort();
 }

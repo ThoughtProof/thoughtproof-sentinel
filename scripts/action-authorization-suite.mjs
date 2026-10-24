@@ -44,6 +44,8 @@ import {
 } from './lib/action-auth-suite-metrics.mjs';
 import {
   redactSuiteReceipt,
+  redactSuiteRow,
+  publicSuiteOrigin,
   summarizeDroppedReceiptFields,
 } from './lib/action-auth-suite-receipt.mjs';
 
@@ -242,7 +244,8 @@ function rowFromResponse(scenario, res) {
   };
 }
 
-function printRow(row) {
+function printRow(rawRow, secrets) {
+  const row = redactSuiteRow(rawRow, { secrets });
   const bits = [
     row.id,
     `expect=${row.expect}`,
@@ -319,11 +322,15 @@ export async function runSuite(opts = {}) {
   const reportPath = env.ACTION_AUTH_SUITE_REPORT_PATH;
   const dryRun = opts.dryRun === true;
   const base = resolveBaseUrl(env);
-  console.log(`SUITE_TARGET=${base}`);
   const url = `${base}/sentinel/verify`;
   const tier = env.SENTINEL_TIER || DEFAULT_TIER;
   const key = resolveApiKey(env);
   const bypass = resolveBypass(env);
+  const secrets = [key, bypass].filter(Boolean);
+  const publicBase = publicSuiteOrigin(base, secrets);
+  const publicUrl = `${publicBase}/sentinel/verify`;
+  const publicTier = ['checkpoint', 'standard', 'swift', 'pro', 'swift-real'].includes(tier) ? tier : null;
+  console.log(`SUITE_TARGET=${publicBase}`);
   const failOnFalseBlock = parseFailOnFalseBlock(env.FAIL_ON_FALSE_BLOCK);
 
   if (dryRun) {
@@ -338,9 +345,9 @@ export async function runSuite(opts = {}) {
       JSON.stringify(
         {
           dry_run: true,
-          base,
-          url,
-          tier,
+          base: publicBase,
+          url: publicUrl,
+          tier: publicTier,
           mode: MODE,
           n: plan.length,
           agent_id: NIGHTLY_AGENT_ID,
@@ -373,15 +380,15 @@ export async function runSuite(opts = {}) {
   const headers = buildHeaders(key, bypass);
   const rows = [];
   // Opt-in for the synthetic nightly suite. Never persist auth headers/env.
-  // Receipts are copied through an explicit field allowlist; unknown fields
-  // are dropped and only their names are recorded. Scoring below still reads
-  // the original response, so redaction cannot change a verdict.
+  // Public diagnostics omit free text/identity echoes and validate values.
+  // Unknown key names are also untrusted; record only fixed schema paths.
+  // Scoring below still reads the original response.
   // The CI checkout SHA identifies the runner, not the production deployment.
   const sha256 = (text) => createHash('sha256').update(text).digest('hex');
   const diagnostics = reportPath ? {
-    schema: 'sentinel.action-auth-suite.diagnostics.v1',
-    suite_commit: env.GITHUB_SHA ?? null,
-    workflow_run_id: env.GITHUB_RUN_ID ?? null,
+    schema: 'sentinel.action-auth-suite.diagnostics.v2',
+    suite_commit: /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') ? env.GITHUB_SHA : null,
+    workflow_run_id: /^\d{1,20}$/.test(env.GITHUB_RUN_ID ?? '') ? env.GITHUB_RUN_ID : null,
     fixture_sha256: sha256(readFileSync(suitePath, 'utf8')),
     suite,
     cases: [],
@@ -416,17 +423,22 @@ export async function runSuite(opts = {}) {
         error: err?.cause?.code || err?.name || 'fetch_error',
       };
       rows.push(row);
-      printRow(row);
+      printRow(row, secrets);
       continue;
     }
-    if (diagnostic) archiveAllowlistedReceipt(diagnostic, res);
+    if (diagnostic) archiveAllowlistedReceipt(diagnostic, res, secrets, scenario.evidence);
     const row = rowFromResponse(scenario, res);
     rows.push(row);
-    printRow(row);
+    printRow(row, secrets);
   }
 
-  const score = scoreRows(rows);
-  const gate = resolveGate(score, { failOnFalseBlock });
+  const originalScore = scoreRows(rows);
+  const gate = resolveGate(originalScore, { failOnFalseBlock });
+  // Sanitize every duplicate only AFTER the safety gate has been evaluated.
+  const score = { ...originalScore };
+  for (const name of ['false_ALLOW_failures', 'false_BLOCK_failures', 'known_false_block_failures', 'error_failures']) {
+    score[name] = originalScore[name].map((row) => redactSuiteRow(row, { secrets }));
+  }
   const overdue = listOverdueKnownFalseBlocks(suite.scenarios);
   if (diagnostics) {
     const droppedFields = summarizeDroppedReceiptFields(diagnostics.cases);
@@ -434,9 +446,9 @@ export async function runSuite(opts = {}) {
   }
   const report = {
     ts: new Date().toISOString(),
-    base,
-    url,
-    tier,
+    base: publicBase,
+    url: publicUrl,
+    tier: publicTier,
     mode: MODE,
     false_ALLOW: score.false_ALLOW,
     false_BLOCK: score.false_BLOCK,
@@ -462,7 +474,7 @@ export async function runSuite(opts = {}) {
         `false_ALLOW must be 0. false_BLOCK ratchet: fail if count > ${gate.falseBlockBaseline} (named FALSE_BLOCK_BASELINE; CHANGELOG to change). Engine degradation (promotion=engine_budget_exhausted / degradedMode) counts as errors, not false_BLOCK (issue #77) — night not evaluable; fail reason includes errors=N engine_degraded. false_ALLOW is never swallowed by the degraded→errors remap. known_false_block is informational only (issue #64) — do not raise the baseline to hide those fixtures. After seven nights from since, Ship/founder decide: fix the classifier or document as product limitation. Overdue WARN does not fail the gate. Baseline is 0 after ≥3 green suite nights + founder GO (shipped #73; #51 closed).`,
     },
     known_false_block_overdue: overdue.map((o) => o.warn),
-    rows,
+    rows: rows.map((row) => redactSuiteRow(row, { secrets })),
     score,
     overdue,
     ...(diagnostics ? { diagnostics } : {}),
@@ -523,13 +535,13 @@ export async function runSuite(opts = {}) {
  * @param {{ http_status: number | null, receipt: unknown, dropped_fields?: string[] }} diagnostic
  * @param {{ status: number, json: unknown }} res
  */
-function archiveAllowlistedReceipt(diagnostic, res) {
+function archiveAllowlistedReceipt(diagnostic, res, secrets, evidence) {
   diagnostic.http_status = res.status;
   if (res.status < 200 || res.status >= 300 || res.json == null) {
     diagnostic.receipt = null;
     return;
   }
-  const redacted = redactSuiteReceipt(res.json);
+  const redacted = redactSuiteReceipt(res.json, { secrets, evidence });
   diagnostic.receipt = redacted.receipt;
   if (redacted.dropped_fields.length > 0) {
     diagnostic.dropped_fields = redacted.dropped_fields;

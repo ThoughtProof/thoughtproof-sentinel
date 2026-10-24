@@ -172,12 +172,12 @@ jobs:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           FAIL_ON_FALSE_BLOCK: ${{ github.event.inputs.fail_on_false_block == 'true' && '1' || '0' }}
           SENTINEL_TIER: standard
-          # Synthetic suite only. Receipts are field-allowlisted; unknown
-          # fields are recorded by name. Authentication headers are not archived.
+          # Public synthetic fixtures only. Receipts use typed diagnostic fields;
+          # free text/identity echoes and unknown field names are omitted.
           ACTION_AUTH_SUITE_REPORT_PATH: action-authorization-suite-report.json
         run: |
           set -euo pipefail
-          echo "SUITE_TARGET=${SENTINEL_BASE_URL}"
+          # The runner logs only the sanitized target origin.
           KEY="${SENTINEL_NIGHTLY_API_KEY:-}"
           if [ -z "$KEY" ]; then
             KEY="${SENTINEL_API_KEY:-}"

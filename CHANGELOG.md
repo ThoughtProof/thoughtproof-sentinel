@@ -1,21 +1,18 @@
 ## Unreleased
 
 ### Fixed
-- The public action-authorization suite artifact keeps an explicit receipt
-  allowlist and records only the names of any other receipt field. Kept:
-  `id`, `verdict`, `confidence`, `reasoning`, objections (`step`,
-  `step_id`, `criterion`, `score`, `predicate`, `quote`, `reasoning`),
-  `mode`, `tier`, `meta.duration_ms`, `meta.models_used`,
-  `meta.verified_at`, `meta.promotion.*`, `meta.agent_context`
-  (`agent_id`, `agent_runtime`, `external_request_id`, `tags`,
-  `identity_source`, `identity_verified`), `attestation.schema_uid` /
-  `claim_hash` / `evidence_hash`, `billing.price_usd` / `settled` /
-  `platform` / `payment_method`, and `signed_export.digest` / `keyId` /
-  `alg` / `signature` / `canonical`. Per-case `request_sha256` and
-  `http_status` stay. A later caller, account, or tenant field is
-  omitted from the public artifact. Scoring, retries, and the
-  UNCERTAIN / error / 5xx / 401 / 429 fail-safe are unchanged:
-  `false_ALLOW=0`, `FALSE_BLOCK_BASELINE=0`.
+- Public action-authorization artifacts now use diagnostics schema v2:
+  typed/enum-validated receipt and promotion fields, step scores/predicates,
+  quote provenance, engine-budget and evidence-bind markers, model aliases,
+  release SHA, receipt/request/fixture identity. Exact quotes are represented
+  by UTF-16 offsets into the public fixture evidence. Raw reasoning, criteria,
+  quotes, identity echoes and canonical signed bodies are omitted; only the
+  original signed-export digest remains as a correlation reference, not a
+  verifiable signed export. Unknown keys use fixed `*` markers, never raw
+  names. Rows, failure lists, logs and step summaries use the same value rules,
+  including non-2xx errors and transport failures. Scoring still uses original
+  responses: no changes to engine behavior, retries or safety gates
+  (`false_ALLOW=0`, `FALSE_BLOCK_BASELINE=0`).
 - Retain the synthetic action-authorization suite's final receipts,
   fixture snapshot, request hashes and runner commit as a seven-day CI
   artifact, including on a failing gate. Production release/model/step
