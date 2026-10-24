@@ -171,6 +171,8 @@ jobs:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           FAIL_ON_FALSE_BLOCK: ${{ github.event.inputs.fail_on_false_block == 'true' && '1' || '0' }}
           SENTINEL_TIER: standard
+          # Synthetic suite only; includes receipts, never authentication headers.
+          ACTION_AUTH_SUITE_REPORT_PATH: action-authorization-suite-report.json
         run: |
           set -euo pipefail
           echo "SUITE_TARGET=${SENTINEL_BASE_URL}"
@@ -190,3 +192,12 @@ jobs:
           # Prefer nightly-named env for the runner's resolveApiKey order.
           export SENTINEL_NIGHTLY_API_KEY="$KEY"
           node scripts/action-authorization-suite.mjs
+
+      - name: Retain suite receipts even when the quality gate fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: action-authorization-suite-report
+          path: action-authorization-suite-report.json
+          if-no-files-found: warn
+          retention-days: 7

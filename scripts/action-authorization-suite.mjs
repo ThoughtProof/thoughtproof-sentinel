@@ -18,11 +18,14 @@
  *   SENTINEL_TIER                 default standard
  *   FAIL_ON_FALSE_BLOCK=1         treat FALSE_BLOCK_BASELINE as 0 (already 0)
  *   VERCEL_AUTOMATION_BYPASS_SECRET  only if overriding to protected Preview
+ *   ACTION_AUTH_SUITE_REPORT_PATH  opt-in JSON archive of synthetic fixtures,
+ *                                 full final receipts and request hashes
  *   --dry-run                     load + print plan, no HTTP
  *
  * Auth header is X-Sentinel-Key. Do not hardcode keys.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -307,7 +310,9 @@ function writeStepSummary(report) {
 
 export async function runSuite(opts = {}) {
   const env = opts.env ?? process.env;
-  const suite = loadSuite(opts.suitePath ?? DEFAULT_SUITE);
+  const suitePath = opts.suitePath ?? DEFAULT_SUITE;
+  const suite = loadSuite(suitePath);
+  const reportPath = env.ACTION_AUTH_SUITE_REPORT_PATH;
   const dryRun = opts.dryRun === true;
   const base = resolveBaseUrl(env);
   console.log(`SUITE_TARGET=${base}`);
@@ -363,10 +368,29 @@ export async function runSuite(opts = {}) {
 
   const headers = buildHeaders(key, bypass);
   const rows = [];
+  // Opt-in for the synthetic nightly suite. Never persist auth headers/env.
+  // The CI checkout SHA identifies the runner, not the production deployment;
+  // server release/model/path/objection data stay in each original receipt.
+  const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+  const diagnostics = reportPath ? {
+    schema: 'sentinel.action-auth-suite.diagnostics.v1',
+    suite_commit: env.GITHUB_SHA ?? null,
+    workflow_run_id: env.GITHUB_RUN_ID ?? null,
+    fixture_sha256: sha256(readFileSync(suitePath, 'utf8')),
+    suite,
+    cases: [],
+  } : null;
   for (const scenario of suite.scenarios) {
+    const body = buildVerifyBody(scenario, tier);
+    const diagnostic = diagnostics ? {
+      id: scenario.id,
+      request_sha256: sha256(JSON.stringify(body)),
+      http_status: null,
+      receipt: null,
+    } : null;
+    if (diagnostic) diagnostics.cases.push(diagnostic);
     let res;
     try {
-      const body = buildVerifyBody(scenario, tier);
       res = await postVerify(url, headers, body);
       if ((res.status === 429 || res.status === 503) && res.json) {
         const retryAfter = Number(res.json.retry_after_ms ?? 2000);
@@ -388,6 +412,11 @@ export async function runSuite(opts = {}) {
       rows.push(row);
       printRow(row);
       continue;
+    }
+    if (diagnostic) {
+      diagnostic.http_status = res.status;
+      // Exclude error/HTML bodies; successful JSON receipts are kept verbatim.
+      diagnostic.receipt = res.status >= 200 && res.status < 300 ? res.json : null;
     }
     const row = rowFromResponse(scenario, res);
     rows.push(row);
@@ -430,7 +459,11 @@ export async function runSuite(opts = {}) {
     rows,
     score,
     overdue,
+    ...(diagnostics ? { diagnostics } : {}),
   };
+
+  // Write before reporting/exiting so a failed quality gate keeps its evidence.
+  if (reportPath) writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n');
 
   console.log('');
   console.log(

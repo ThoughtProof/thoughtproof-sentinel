@@ -1,5 +1,16 @@
 ## Unreleased
 
+### Fixed
+- Retain the synthetic action-authorization suite's full final receipts,
+  fixture snapshot, request hashes and runner commit as a seven-day CI
+  artifact, including on a failing gate. Production release/model/step
+  diagnostics come from the original receipts, not the CI checkout SHA.
+  Local receipt capture is opt-in via `ACTION_AUTH_SUITE_REPORT_PATH`;
+  authentication headers and environment secrets are not archived. This
+  repairs missing diagnostic evidence, not the October 20/22 cascade
+  false_BLOCKs. No policy, fixture expectation, retry or threshold changes:
+  `false_ALLOW=0`, `FALSE_BLOCK_BASELINE=0`, engine errors still fail.
+
 ### Changed
 - **A board agenda post is a pure share.** `post` / `poste` / `posten` /
   `posting` count as share verbs, and a closed destination set
