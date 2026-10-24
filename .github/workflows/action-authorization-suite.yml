@@ -121,6 +121,7 @@ on:
       - 'scenarios/action-authorization-suite.json'
       - 'scripts/action-authorization-suite.mjs'
       - 'scripts/lib/action-auth-suite-metrics.mjs'
+      - 'scripts/lib/action-auth-suite-receipt.mjs'
       - '.github/workflows/action-authorization-suite.yml'
       - 'src/engine/**'
 
@@ -171,11 +172,12 @@ jobs:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           FAIL_ON_FALSE_BLOCK: ${{ github.event.inputs.fail_on_false_block == 'true' && '1' || '0' }}
           SENTINEL_TIER: standard
-          # Synthetic suite only; includes receipts, never authentication headers.
+          # Public synthetic fixtures only. Receipts use typed diagnostic fields;
+          # free text/identity echoes and unknown field names are omitted.
           ACTION_AUTH_SUITE_REPORT_PATH: action-authorization-suite-report.json
         run: |
           set -euo pipefail
-          echo "SUITE_TARGET=${SENTINEL_BASE_URL}"
+          # The runner logs only the sanitized target origin.
           KEY="${SENTINEL_NIGHTLY_API_KEY:-}"
           if [ -z "$KEY" ]; then
             KEY="${SENTINEL_API_KEY:-}"

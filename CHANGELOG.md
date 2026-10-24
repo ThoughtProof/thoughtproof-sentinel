@@ -1,7 +1,19 @@
 ## Unreleased
 
 ### Fixed
-- Retain the synthetic action-authorization suite's full final receipts,
+- Public action-authorization artifacts now use diagnostics schema v2:
+  typed/enum-validated receipt and promotion fields, step scores/predicates,
+  quote provenance, engine-budget and evidence-bind markers, model aliases,
+  release SHA, receipt/request/fixture identity. Exact quotes are represented
+  by UTF-16 offsets into the public fixture evidence. Raw reasoning, criteria,
+  quotes, identity echoes and canonical signed bodies are omitted; only the
+  original signed-export digest remains as a correlation reference, not a
+  verifiable signed export. Unknown keys use fixed `*` markers, never raw
+  names. Rows, failure lists, logs and step summaries use the same value rules,
+  including non-2xx errors and transport failures. Scoring still uses original
+  responses: no changes to engine behavior, retries or safety gates
+  (`false_ALLOW=0`, `FALSE_BLOCK_BASELINE=0`).
+- Retain the synthetic action-authorization suite's final receipts,
   fixture snapshot, request hashes and runner commit as a seven-day CI
   artifact, including on a failing gate. Production release/model/step
   diagnostics come from the original receipts, not the CI checkout SHA.

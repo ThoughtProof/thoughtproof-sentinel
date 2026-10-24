@@ -566,7 +566,7 @@ describe('suite file + runner helpers', () => {
     expect(src).toContain('isEngineDegraded');
     expect(src).toContain('engine_budget_exhausted');
     expect(src).toMatch(/false_ALLOW=\$\{score\.false_ALLOW\}  false_BLOCK=\$\{score\.false_BLOCK\}  known_false_block=/);
-    expect(src).toContain('SUITE_TARGET=${base}');
+    expect(src).not.toContain('SUITE_TARGET=${base}');
     expect(src).toContain(POST_67_FALSE_BLOCK_WATCH_WARN);
     expect(src).toContain('console.warn(watchWarn)');
   });
@@ -667,7 +667,7 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('engine_degraded');
     expect(yml).toContain('false_ALLOW is never swallowed by the degraded→errors remap');
     expect(yml).toContain('PR runs always measure production by default');
-    expect(yml).toContain('SUITE_TARGET=');
+    expect(yml).not.toContain('echo "SUITE_TARGET=${SENTINEL_BASE_URL}"');
     expect(yml).not.toContain('ok-01/02/03 + ok-06');
     expect(yml).not.toContain('remaining named baseline case is primarily ok-06');
     expect(yml).not.toContain('After #51 lower baseline to 0');
