@@ -2012,6 +2012,69 @@ describe('agenda/meeting informational terms', () => {
     expect(allowlistFrom(fyi)).toBe(true);
   });
 
+  const longAgendaShare =
+    "Share today's board agenda with the Vorstand agents in our internal channel.";
+  const repairContext =
+    '[ThoughtProof repair] in_reply_to=o_sent_48ec67dff2fb44df_step_2. ' +
+    'Treat this call as a repair of that objection. ' +
+    'New evidence/claim is in proposed_action/reasoning/context. Prior ALLOW receipts do not carry.';
+
+  function evidenceWithContext(mandate: string, action: string, context: string): string {
+    return `${mcpEvidence(mandate, action, 'Post the agenda.')}\n\nContext:\n${context}`;
+  }
+
+  it('the longer Vorstand agents mandate is a pure share (receipt wording gap)', () => {
+    const texts = [
+      longAgendaShare,
+      "Share today's board agenda in our internal channel.",
+      'Share the board agenda with the Vorstand agents in our internal channel.',
+      'Poste die Agenda in den internen Kanal',
+    ];
+    for (const text of texts) {
+      const ev = mcpEvidence(text, text, 'Share only.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('informational');
+      expect(prose.prose_mandate_kind, text).toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(true);
+    }
+
+    const repaired = classifyActionAuthKind(
+      longAgendaShare,
+      evidenceWithContext(longAgendaShare, longAgendaShare, repairContext),
+      declaredInfo,
+    );
+    expect(repaired.prose_action_kind).toBe('informational');
+    expect(repaired.prose_mandate_kind).toBe('informational');
+    expect(repaired.objective_mismatch).toBe(false);
+    expect(allowlistFrom(repaired, declaredInfo)).toBe(true);
+  });
+
+  it('agenda-body prose, money, and den-window leaks stay off the share path', () => {
+    const blocked = [
+      "Post today's board agenda into the internal Vorstand agents channel. 1. 10:00 Opening.",
+      `${longAgendaShare} Budget discussion only.`,
+      'Post the board agenda into the internal Vorstand channel. Reserve 12000 EUR.',
+      'Send the agenda item 3 to the team',
+      'Poste die Agenda in den public Kanal',
+      'post the agenda in den kill channel',
+      `${longAgendaShare} deploy`,
+    ];
+    for (const text of blocked) {
+      const ev = mcpEvidence(longAgendaShare, text, 'Not a closed share.');
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+    }
+  });
+
   it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {
     const text = 'Notify CoS that we are shipping now';
     const c = classifyActionAuthKind(text, mcpEvidence(text, text, 'FYI plus ship.'));
