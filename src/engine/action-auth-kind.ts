@@ -295,13 +295,15 @@ const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
 /**
  * "into the internal Vorstand agent channel" / "to the Vorstand chat".
  * At most six name words, each from this allowlist, then
- * channel/chat/gruppenchat/kanal. Any other word means the destination
- * does not match and the text stays unknown. public / external /
- * customer / twitter / x / linkedin are not names (fail-closed).
- * Case-insensitive. Operative signals are rejected before this runs.
+ * channel/chat/gruppenchat/kanal. `den` is a name word so
+ * "in den internen Kanal" matches; it is not a free token. Any other
+ * word means the destination does not match and the text stays unknown.
+ * public / external / customer / twitter / x / linkedin are not names
+ * (fail-closed). Case-insensitive. Operative signals are rejected
+ * before this runs.
  */
 const AGENDA_CHANNEL_NAME =
-  '(?:the|our|internal|agents|agent|vorstand|board|team|group|crew|ops|staff|internen|interne|gruppe)';
+  '(?:the|our|internal|agents|agent|vorstand|board|team|group|crew|ops|staff|internen|interne|gruppe|den)';
 const AGENDA_CHANNEL_NOUN = '(?:channel|chat|gruppenchat|kanal)';
 const AGENDA_CHANNEL_DEST_RE = new RegExp(
   `\\b(?:into|in|im|to)\\b(?:\\s+${AGENDA_CHANNEL_NAME}){0,6}\\s+\\b${AGENDA_CHANNEL_NOUN}\\b`,
@@ -315,6 +317,12 @@ const AGENDA_SHARE_FILLER = new Set([
   'in', 'im', 'chat', 'gruppenchat', 'vorstand', 'board', 'group',
   // Receipt sent_52aef10e71ba4527: "one short agenda". Nothing else.
   'one', 'short',
+  // Receipts sent_48ec67dff2fb44df and sent_1f4bd7db78664336 (repair).
+  // "Share today's board agenda with the Vorstand agents in our internal
+  // channel." Apostrophe strip turns today's into todays (same pair as
+  // tomorrow/tomorrows). "agents" sits before the destination, so the
+  // channel regex does not consume it. agent/agents are already names.
+  'today', 'todays', 'agent', 'agents',
 ]);
 
 /**

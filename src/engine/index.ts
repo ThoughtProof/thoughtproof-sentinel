@@ -369,6 +369,19 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     criterionByStepId.set(`step_${gs.index}`, gs.acceptance_criterion ?? gs.description);
   }
 
+  // Step 0's acceptance criterion says "no scope to exceed" and names
+  // MAX_UINT256. Checkpoint often omits per-step prose, and the fallback
+  // embeds that criterion. The numeric-claim gate then rewrites it to
+  // "[objection_unverified] numeric claim without bound evidence" even
+  // when the pair is a pure informational share with no spend. Omit the
+  // criterion body only for that positive informational pair. Every other
+  // kind still embeds it, so the gate is unchanged for them. Model-written
+  // numeric reasons are still bound.
+  const omitInformationalCriterionBody =
+    actionAuthKind?.action_kind === 'informational' &&
+    actionAuthKind?.mandate_kind === 'informational' &&
+    !objectiveMismatch;
+
   // Cite/normalize against the same string the cascade saw. For
   // action_authorization that is sanitized evidence (caller structural_fact
   // neutralized, no system hint mixed in). Other modes: trace_steps === claim evidence.
@@ -376,6 +389,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const rawObjections = normalizeCascadeSteps(steps, evidence).map((s) => {
     const criterion = criterionByStepId.get(s.step_id) ?? '';
     const prose = s.reasoning.trim();
+    const fallbackCriterion = omitInformationalCriterionBody ? '' : criterion;
     return {
       step_id: s.step_id,
       criterion,
@@ -386,7 +400,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       quote_match_mode: s.quote ? s.match_mode : null,
       reasoning: prose.length > 0
         ? prose
-        : synthesizeReasoning(String(s.predicate), criterion, s.quote),
+        : synthesizeReasoning(String(s.predicate), fallbackCriterion, s.quote),
     };
   });
 

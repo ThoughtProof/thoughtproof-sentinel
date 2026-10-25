@@ -1,6 +1,22 @@
 ## Unreleased
 
 ### Fixed
+- A declared-informational board-agenda share no longer fail-closes when
+  the instruction is `Share today's board agenda with the Vorstand agents
+  in our internal channel.` `today` / `todays` match the existing
+  `tomorrow` / `tomorrows` fillers, and `agent` / `agents` are fillers
+  when they sit outside the destination window. `den` is a channel-name
+  word so `in den internen Kanal` matches. Prod receipts
+  `sent_48ec67dff2fb44df` and the `in_reply_to` repair
+  `sent_1f4bd7db78664336` are that pair: prose was `unknown`, caller
+  informational was a widen, and promotion emitted `Deterministic
+  objective mismatch`. An empty checkpoint step no longer embeds the
+  step-0 criterion (`exceed`, `MAX_UINT256`) into a positive informational
+  objection, which the numeric-claim gate was rewriting to
+  `numeric claim without bound evidence`. The gate still strips real
+  numeric specialist claims, and it is unchanged for every
+  non-informational kind. Money, `send` plus a digit, budget/EUR,
+  operative verbs, agenda-body prose, and error fallback stay fail-closed.
 - Public action-authorization artifacts now use diagnostics schema v2:
   typed/enum-validated receipt and promotion fields, step scores/predicates,
   quote provenance, engine-budget and evidence-bind markers, model aliases,
