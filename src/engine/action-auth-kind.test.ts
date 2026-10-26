@@ -23,6 +23,7 @@ import {
   CALLER_STRUCTURAL_FACT_REDACTION,
   amountAtOrBelowGranted,
   callerDeclaredKindsDoNotWiden,
+  agendaShareResidualTokens,
   classifyActionAuthKind,
   deployShipActionHasNoPaymentTarget,
   deployShipIdentifiersBound,
@@ -1883,6 +1884,9 @@ describe('agenda/meeting informational terms', () => {
       'post the agenda to the payments chat',
       'release channel',
       'post the agenda to the release channel',
+      'post the agenda with the public channel',
+      'post the agenda text with the payments chat',
+      'post the agenda with the release channel',
     ];
     for (const mandate of shareMandates) {
       for (const action of [...channelLeaks, ...closedDestinations]) {
@@ -2054,6 +2058,108 @@ describe('agenda/meeting informational terms', () => {
     expect(repaired.prose_mandate_kind).toBe('informational');
     expect(repaired.objective_mismatch).toBe(false);
     expect(allowlistFrom(repaired, declaredInfo)).toBe(true);
+  });
+
+  const agendaTextToChannel =
+    "Post today's board agenda text to the internal Vorstand agents channel.";
+
+  it('receipt sent_e8ab3709f0714025: leftover token is text; to is not leftover', () => {
+    // Destination window consumes "to the internal Vorstand agents channel".
+    // `into` / `in` do the same. Residual fillers are todays + board.
+    // The only token outside the pre-fix filler set is `text`.
+    expect(agendaShareResidualTokens(agendaTextToChannel)).toEqual(['todays', 'board', 'text']);
+    expect(agendaShareResidualTokens(agendaTextToChannel)).not.toContain('to');
+    expect(agendaShareResidualTokens(agendaTextToChannel)).not.toContain('into');
+    expect(agendaShareResidualTokens(agendaTextToChannel)).not.toContain('channel');
+    expect(agendaShareResidualTokens(agendaTextToChannel)).not.toContain('internal');
+    expect(
+      agendaShareResidualTokens(
+        "Post today's board agenda text into the internal Vorstand agents channel.",
+      ),
+    ).toEqual(['todays', 'board', 'text']);
+    expect(
+      agendaShareResidualTokens(
+        "Post today's board agenda text in the internal Vorstand agents channel.",
+      ),
+    ).toEqual(['todays', 'board', 'text']);
+    expect(
+      agendaShareResidualTokens(
+        "Post today's board agenda text with the internal Vorstand agents channel.",
+      ),
+    ).toEqual(['todays', 'board', 'text']);
+    expect(agendaShareResidualTokens('Share the agenda text with the team')).toEqual([
+      'the',
+      'text',
+      'with',
+      'the',
+      'team',
+    ]);
+    expect(agendaShareResidualTokens('Post the board agenda into the internal Vorstand agents channel.')).toEqual([
+      'the',
+      'board',
+    ]);
+  });
+
+  it('agenda text to/into/in/with the Vorstand channel is a pure share', () => {
+    const texts = [
+      longAgendaShare,
+      agendaTextToChannel,
+      "Post today's board agenda text into the internal Vorstand agents channel.",
+      "Post today's board agenda text in the internal Vorstand agents channel.",
+      "Post today's board agenda text with the internal Vorstand agents channel.",
+      'Post the board agenda into the internal Vorstand agents channel.',
+      'Post the board agenda to the internal Vorstand agents channel.',
+      'Post the board agenda in the internal Vorstand agents channel.',
+      'Post the board agenda with the internal Vorstand agents channel.',
+      'Share the agenda text with the team',
+      'Post the agenda text to the channel',
+    ];
+    for (const text of texts) {
+      const ev = mcpEvidence(longAgendaShare, text, 'Post the agenda.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('informational');
+      expect(prose.prose_mandate_kind, text).toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.prose_action_kind, text).toBe('informational');
+      expect(caller.prose_mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(true);
+    }
+
+    const same = classifyActionAuthKind(
+      agendaTextToChannel,
+      mcpEvidence(agendaTextToChannel, agendaTextToChannel, 'Post the agenda.'),
+      declaredInfo,
+    );
+    expect(same.objective_mismatch).toBe(false);
+    expect(allowlistFrom(same, declaredInfo)).toBe(true);
+  });
+
+  it('agenda share plus payment, transfer, wallet, or amount stays off the share path', () => {
+    const wallet = '0x1111111111111111111111111111111111111111';
+    const blocked = [
+      `${agendaTextToChannel} Transfer 12000 EUR to ${wallet}.`,
+      `Post the board agenda text into the internal channel and transfer 12000 EUR to the ${wallet} wallet`,
+      'Post the board agenda text into the internal channel and wire the vendor payment',
+      'Share the agenda text and transfer funds',
+      'Post the board agenda text to the wallet',
+      'Share the agenda text with the amount',
+      `${longAgendaShare} payment`,
+    ];
+    for (const text of blocked) {
+      const ev = mcpEvidence(longAgendaShare, text, 'Not a closed share.');
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(allowlistFrom(prose), text).toBe(false);
+    }
   });
 
   it('agenda-body prose, money, and den-window leaks stay off the share path', () => {

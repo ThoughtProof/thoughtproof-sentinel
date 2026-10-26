@@ -293,20 +293,22 @@ const AGENDA_SHARE_VERB =
   '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting)';
 const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
 /**
- * "into the internal Vorstand agent channel" / "to the Vorstand chat".
- * At most six name words, each from this allowlist, then
- * channel/chat/gruppenchat/kanal. `den` is a name word so
- * "in den internen Kanal" matches; it is not a free token. Any other
+ * "into the internal Vorstand agent channel" / "to the Vorstand chat" /
+ * "with the internal channel". At most six name words, each from this
+ * allowlist, then channel/chat/gruppenchat/kanal. `den` is a name word
+ * so "in den internen Kanal" matches; it is not a free token. Any other
  * word means the destination does not match and the text stays unknown.
  * public / external / customer / twitter / x / linkedin are not names
- * (fail-closed). Case-insensitive. Operative signals are rejected
+ * (fail-closed). `to` / `into` / `in` / `im` / `with` are the closed
+ * preposition set. Case-insensitive. Operative signals are rejected
  * before this runs.
  */
 const AGENDA_CHANNEL_NAME =
   '(?:the|our|internal|agents|agent|vorstand|board|team|group|crew|ops|staff|internen|interne|gruppe|den)';
 const AGENDA_CHANNEL_NOUN = '(?:channel|chat|gruppenchat|kanal)';
+const AGENDA_CHANNEL_PREP = '(?:into|in|im|to|with)';
 const AGENDA_CHANNEL_DEST_RE = new RegExp(
-  `\\b(?:into|in|im|to)\\b(?:\\s+${AGENDA_CHANNEL_NAME}){0,6}\\s+\\b${AGENDA_CHANNEL_NOUN}\\b`,
+  `\\b${AGENDA_CHANNEL_PREP}\\b(?:\\s+${AGENDA_CHANNEL_NAME}){0,6}\\s+\\b${AGENDA_CHANNEL_NOUN}\\b`,
   'gi',
 );
 const AGENDA_SHARE_FILLER = new Set([
@@ -323,6 +325,10 @@ const AGENDA_SHARE_FILLER = new Set([
   // tomorrow/tomorrows). "agents" sits before the destination, so the
   // channel regex does not consume it. agent/agents are already names.
   'today', 'todays', 'agent', 'agents',
+  // Receipt sent_e8ab3709f0714025: "Post today's board agenda text to
+  // the internal Vorstand agents channel." `to` is already a destination
+  // preposition. The leftover token is `text` (agenda / agenda text).
+  'text',
 ]);
 
 /**
@@ -507,12 +513,13 @@ function agendaOperativeKind(text: string): ActionKind | null {
 }
 
 /**
- * True only for a pure agenda share. Closed filler list: when in doubt,
- * unknown. Does not treat "schick" as covering "schicken".
+ * Tokens left after stripping agenda nouns, the share verb, and one
+ * closed destination ("to/into/in/im/with … channel"). Apostrophes are
+ * removed first so "today's" is the token "todays". Operative signals
+ * are not stripped here; the caller rejects those before the filler check.
  */
-function isAgendaShareRequest(text: string): boolean {
-  if (!text || !AGENDA_ANY_RE.test(text) || !AGENDA_SHARE_VERB_RE.test(text)) return false;
-  if (textHasAgendaOperativeSignal(text)) return false;
+export function agendaShareResidualTokens(text: string): string[] {
+  if (!text) return [];
   const agendaWord = new RegExp(
     `(?:^|${AGENDA_EDGE})(?:${EN_AGENDA_ANY}|${DE_AGENDA_ANY})(?=$|${AGENDA_EDGE})`,
     'gi',
@@ -523,8 +530,17 @@ function isAgendaShareRequest(text: string): boolean {
     .replace(new RegExp(AGENDA_CHANNEL_DEST_RE.source, 'gi'), ' ')
     .replace(/['’]/g, '')
     .toLowerCase();
-  const tokens = residual.split(/[^a-z0-9äöü]+/).filter(Boolean);
-  return tokens.every((token) => AGENDA_SHARE_FILLER.has(token));
+  return residual.split(/[^a-z0-9äöü]+/).filter(Boolean);
+}
+
+/**
+ * True only for a pure agenda share. Closed filler list: when in doubt,
+ * unknown. Does not treat "schick" as covering "schicken".
+ */
+function isAgendaShareRequest(text: string): boolean {
+  if (!text || !AGENDA_ANY_RE.test(text) || !AGENDA_SHARE_VERB_RE.test(text)) return false;
+  if (textHasAgendaOperativeSignal(text)) return false;
+  return agendaShareResidualTokens(text).every((token) => AGENDA_SHARE_FILLER.has(token));
 }
 
 function classifyBlob(text: string): ActionKind {

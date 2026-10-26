@@ -1,6 +1,18 @@
 ## Unreleased
 
 ### Fixed
+- A declared-informational agenda share no longer fail-closes when the
+  action is `Post today's board agenda text to the internal Vorstand
+  agents channel.` against `Share today's board agenda with the Vorstand
+  agents in our internal channel.` Prod receipt
+  `sent_e8ab3709f0714025`: the destination preposition `to` was already
+  consumed (same window as `into` / `in`); the leftover token was
+  `text`. `text` is a filler so `agenda` and `agenda text` match, and
+  `with` is a destination preposition alongside `to` / `into` / `in` /
+  `im`. Empty checkpoint steps still omit the step-0 criterion on that
+  positive informational pair, so the numeric-claim gate does not
+  rewrite it. Payment, transfer, wallet, amount, a 12000 EUR transfer
+  to a 0x wallet, and error fallback stay fail-closed.
 - A declared-informational board-agenda share no longer fail-closes when
   the instruction is `Share today's board agenda with the Vorstand agents
   in our internal channel.` `today` / `todays` match the existing
