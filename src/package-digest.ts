@@ -9,7 +9,7 @@
  * making the verification result recomputable by third parties.
  */
 
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - canonicalize types are loose; runtime export is the function
 import canonicalize from 'canonicalize';
@@ -64,9 +64,152 @@ function removeUndefinedFields(obj: unknown): unknown {
   return obj;
 }
 
+/** 32-byte salt for mandate/action commitments. Not a secret key; it is caller-private. */
+export const COMMITMENT_SALT_BYTES = 32;
+
+const COMMITMENT_DIGEST = /^sha256:[0-9a-f]{64}$/;
+const COMMITMENT_SALT_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * sha256(salt || UTF-8(JCS(value))), as `sha256:` + lowercase hex.
+ * JCS matches computePackageDigest: drop undefined fields, then canonicalize.
+ * An unsalted hash of a mandate is dictionary-reversible (amount, recipient, kind).
+ * The salt is not part of the hashed value and must stay off the public receipt.
+ */
+export function saltedCommitmentDigest(value: unknown, salt: Buffer): string {
+  if (!Buffer.isBuffer(salt) || salt.length !== COMMITMENT_SALT_BYTES) {
+    throw new Error('commitment salt must be 32 bytes');
+  }
+  const canonical = (canonicalize as unknown as (v: unknown) => string)(
+    removeUndefinedFields(value),
+  );
+  if (typeof canonical !== 'string') {
+    throw new Error('canonicalize() did not return a string');
+  }
+  const hex = createHash('sha256').update(salt).update(canonical, 'utf8').digest('hex');
+  return `sha256:${hex}`;
+}
+
+export interface MandateActionCommitments {
+  /** Lowercase hex of the 32-byte salt. Returned to the caller, not signed. */
+  digestSalt: string;
+  mandateDigest?: string;
+  actionDigest?: string;
+}
+
+function commitmentAction(mandate: unknown): unknown {
+  if (mandate === null || typeof mandate !== 'object' || Array.isArray(mandate)) {
+    return undefined;
+  }
+  if (!Object.prototype.hasOwnProperty.call(mandate, 'action')) return undefined;
+  const action = (mandate as { action?: unknown }).action;
+  if (action === undefined || action === null) return undefined;
+  return action;
+}
+
+function tryCommitment(value: unknown, salt: Buffer): string | undefined {
+  try {
+    const digest = saltedCommitmentDigest(value, salt);
+    return COMMITMENT_DIGEST.test(digest) ? digest : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Salted commitments for a validated mandate and, when present, its action.
+ * Returns undefined when both are absent or neither digest can be produced.
+ * Does not throw. A hash failure omits that field only.
+ * Pass `salt` in tests; production generates 32 crypto-random bytes per call.
+ */
+export function computeMandateActionCommitments(
+  mandate: unknown,
+  salt?: Buffer,
+): MandateActionCommitments | undefined {
+  if (mandate === undefined || mandate === null) return undefined;
+  let saltBytes: Buffer;
+  try {
+    saltBytes = salt ?? randomBytes(COMMITMENT_SALT_BYTES);
+  } catch {
+    return undefined;
+  }
+  if (!Buffer.isBuffer(saltBytes) || saltBytes.length !== COMMITMENT_SALT_BYTES) {
+    return undefined;
+  }
+
+  const result: MandateActionCommitments = { digestSalt: saltBytes.toString('hex') };
+  const mandateDigest = tryCommitment(mandate, saltBytes);
+  if (mandateDigest) result.mandateDigest = mandateDigest;
+  const action = commitmentAction(mandate);
+  if (action !== undefined) {
+    const actionDigest = tryCommitment(action, saltBytes);
+    if (actionDigest) result.actionDigest = actionDigest;
+  }
+  if (!result.mandateDigest && !result.actionDigest) return undefined;
+  return result;
+}
+
+export interface V2CommitmentSupplements {
+  mandateDigest?: string;
+  actionDigest?: string;
+  digestSaltCandidate?: string;
+}
+
+/** Fail-safe wrapper for the verify handler. Never throws. */
+export function prepareV2CommitmentSupplements(mandate: unknown): V2CommitmentSupplements {
+  try {
+    const commitments = computeMandateActionCommitments(mandate);
+    if (!commitments) return {};
+    return {
+      mandateDigest: commitments.mandateDigest,
+      actionDigest: commitments.actionDigest,
+      digestSaltCandidate: commitments.digestSalt,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Return the caller salt only when the issued v2 canonical actually carries
+ * at least one commitment. Otherwise omit it. Never throws.
+ */
+export function digestSaltIfCommitted(
+  canonicalJcs: string | undefined,
+  digestSalt: string | undefined,
+): string | undefined {
+  if (!digestSalt || !COMMITMENT_SALT_HEX.test(digestSalt)) return undefined;
+  if (typeof canonicalJcs !== 'string' || canonicalJcs.length === 0) return undefined;
+  let body: unknown;
+  try {
+    body = JSON.parse(canonicalJcs);
+  } catch {
+    return undefined;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  const record = body as Record<string, unknown>;
+  const mandateOk =
+    typeof record.mandateDigest === 'string' && COMMITMENT_DIGEST.test(record.mandateDigest);
+  const actionOk =
+    typeof record.actionDigest === 'string' && COMMITMENT_DIGEST.test(record.actionDigest);
+  if (!mandateOk && !actionOk) return undefined;
+  return digestSalt;
+}
+
+export function responseDigestSalt(
+  signedExportV2: { canonical?: string } | null | undefined,
+  digestSaltCandidate: string | undefined,
+): string | undefined {
+  try {
+    return digestSaltIfCommitted(signedExportV2?.canonical, digestSaltCandidate);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Verify a package digest against a request.
- * 
+ *
  * @param request The request to check
  * @param expectedDigest The expected digest (with "sha256:" prefix)
  * @returns true if the digest matches

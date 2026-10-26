@@ -395,6 +395,14 @@ export interface SentinelVerifyResponse {
      */
     pot_cli?: string;
     /**
+     * Caller-private 32-byte salt (lowercase hex) for v2 mandateDigest and
+     * actionDigest (ADR-0022 addendum). Present only when signed_export_v2
+     * committed at least one of those digests. Not part of the signed body,
+     * not a verdict input, and not on the public receipt allowlist.
+     * The engine does not set this field.
+     */
+    digest_salt?: string;
+    /**
      * Reliability Option 3 — engine budget / timeout trace.
      * Present when cascade hit ENGINE_BUDGET_MS (45s) before Vercel wall (60s).
      */
