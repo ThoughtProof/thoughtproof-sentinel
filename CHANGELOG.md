@@ -1,5 +1,36 @@
 ## Unreleased
 
+### Added
+- Canonical verdict `sentinel.verdict.canonical.v2` (ADR-0022) is issued
+  beside the existing v1 `signed_export` as `signed_export_v2`. v2 is a
+  superset of v1 with optional `releaseId`, `policy`, and `potCli`
+  (promotion release/policy, and the installed pot-cli semver). v1 export
+  bytes and the committed M1 vectors are unchanged.
+  `verifySignedCanonicalExport` accepts both schemas. A failure while
+  building or signing v2 omits `signed_export_v2` only; the verdict,
+  promotion, and v1 export stay as they were. Public
+  action-authorization receipts may include `meta.pot_cli` when it is a
+  semver. That version is already public on `/sentinel/health` and is not
+  a credential. Signed canonical bodies stay off the public receipt.
+  `scripts/verify-canonical-export.mjs` takes `--schema v1|v2|all`
+  (`auto` is the default; `--v2` selects v2). A response field is
+  present when the key exists, including null. null, strings, arrays,
+  and other non-objects are `invalid_export`. `signed_export` must be
+  canonical v1 and `signed_export_v2` must be canonical v2
+  (`schema_field_mismatch` otherwise). A document that is both a
+  top-level envelope and a response is `ambiguous_input` and is not
+  verified. Requesting v2 fails when `signed_export_v2` is missing or
+  invalid, and does not accept a v1 body in that field. `all` and
+  `auto` verify every present export and fail if any present export is
+  invalid. The JSON result names `verified_schemas`.
+- `scripts/lib/action-auth-suite-receipt.mjs` is an action-authorization
+  suite trigger path, the same as `src/engine/**`. No engine diff does
+  not mean the paid suite did not run. Suite run 40404972079 ran against
+  production release da6b6378, which is the pre-v2 release: 26/27,
+  false_ALLOW=0, false_BLOCK=1
+  (`kfb-02-pay-incidental-deploy-fyi`). That red result is a prod run of
+  the old release. It is not evidence of a v2 regression.
+
 ### Fixed
 - A declared-informational agenda share no longer fail-closes when the
   action is `Post today's board agenda text to the internal Vorstand

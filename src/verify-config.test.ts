@@ -152,6 +152,9 @@ describe('POST /sentinel/verify model config', () => {
     expect(ctx.statusCode).toBe(200);
     expect((ctx.body as { verdict: string }).verdict).toBe('UNCERTAIN');
     expect((ctx.body as { verdict: string }).verdict).not.toBe('ALLOW');
+    expect((ctx.body as { meta: { pot_cli?: string } }).meta.pot_cli).toMatch(/^\d+\.\d+\.\d+/);
+    expect(ctx.body).not.toHaveProperty('signed_export');
+    expect(ctx.body).not.toHaveProperty('signed_export_v2');
     expect(JSON.stringify(ctx.body)).not.toContain(SECRET);
   });
 

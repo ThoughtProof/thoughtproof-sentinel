@@ -6,7 +6,21 @@
  *
  *   node scripts/verify-canonical-export.mjs <export.json> \
  *     [--keys path-or-url] [--now unix] [--require-valid-until] \
- *     [--allow-vector-only]
+ *     [--allow-vector-only] [--schema v1|v2|all|auto] [--v2]
+ *
+ * --schema (default auto):
+ *   v1   verify signed_export / a v1 envelope only; fail if it is missing or invalid
+ *   v2   verify signed_export_v2 / a v2 envelope only; fail if it is missing or invalid
+ *   all  verify every present export; any present-but-invalid export fails
+ *   auto same selection as all (bare envelope, or whichever response fields exist)
+ * --v2 is shorthand for --schema v2.
+ * A response field counts as present when the key exists, including null.
+ * null, strings, arrays and other non-objects are invalid (invalid_export).
+ * signed_export must be canonical v1 and signed_export_v2 must be canonical v2
+ * (schema_field_mismatch otherwise). A document that is both a top-level
+ * envelope and a response (signed_export* keys) is ambiguous_input.
+ * Result JSON includes verified_schemas (schemas that passed). A failure also
+ * names failed_schema. A full API response is not "v1 only".
  *
  * Default keys URL:
  *   https://sentinel.thoughtproof.ai/.well-known/thoughtproof-keys.json
@@ -15,13 +29,14 @@
  * JWK alg = EdDSA (JOSE). Envelope alg = Ed25519. Do not cross-compare them.
  *
  * Verification order (PriorSeal §4):
- *   1. resolve keyId against key doc
+ *   1. artifactSchema is sentinel.verdict.canonical.v1 or .v2 (ADR-0022)
+ *   2. resolve keyId against key doc
  *        - notBefore/notAfter vs export **signedAt** (not verifier clock)
  *        - status=retired still verifies in-window historical sigs
  *        - vector-only needs --allow-vector-only
- *   2. Ed25519 verify domain||0x00||JCS(fields)  → DECISION_SIGNATURE_INVALID on fail
- *   3. sha256(UTF-8(transported canonical)) === digest → DECISION_COMMITMENT_DIGEST_MISMATCH
- *   4. optional validUntil vs verifier --now (freshness)
+ *   3. Ed25519 verify domain||0x00||JCS(fields)  → DECISION_SIGNATURE_INVALID on fail
+ *   4. sha256(UTF-8(transported canonical)) === digest → DECISION_COMMITMENT_DIGEST_MISMATCH
+ *   5. optional validUntil vs verifier --now (freshness)
  *
  * DECISION_SIGNER_UNTRUSTED is reserved for key_not_found / window / vector-only —
  * not for a broken signature on a known key.
@@ -35,6 +50,10 @@ import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 const DOMAIN = 'thoughtproof.sentinel.export.v1';
+const SCHEMA_V1 = 'sentinel.verdict.canonical.v1';
+const SCHEMA_V2 = 'sentinel.verdict.canonical.v2';
+const ACCEPTED_ARTIFACT_SCHEMAS = new Set([SCHEMA_V1, SCHEMA_V2]);
+const SCHEMA_MODES = new Set(['v1', 'v2', 'all', 'auto']);
 const DEFAULT_KEYS =
   process.env.THOUGHTPROOF_KEYS_URL ||
   'https://sentinel.thoughtproof.ai/.well-known/thoughtproof-keys.json';
@@ -150,6 +169,7 @@ function parseArgs(argv) {
     now: Math.floor(Date.now() / 1000),
     requireValidUntil: false,
     allowVectorOnly: false,
+    schema: 'auto',
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -158,24 +178,145 @@ function parseArgs(argv) {
     else if (a === '--now') out.now = Number(argv[++i]);
     else if (a === '--require-valid-until') out.requireValidUntil = true;
     else if (a === '--allow-vector-only') out.allowVectorOnly = true;
-    else rest.push(a);
+    else if (a === '--v2') out.schema = 'v2';
+    else if (a === '--schema') {
+      const value = argv[++i];
+      if (!SCHEMA_MODES.has(value)) {
+        throw new Error('--schema must be v1, v2, all, or auto');
+      }
+      out.schema = value;
+    } else rest.push(a);
   }
   out.path = rest[0] || null;
   return out;
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-  if (!args.path) {
-    console.error(
-      'Usage: node scripts/verify-canonical-export.mjs <export.json> [--keys path|url] [--now unix] [--require-valid-until] [--allow-vector-only]',
-    );
-    process.exit(1);
-  }
-  const exp = JSON.parse(readFileSync(args.path, 'utf8'));
-  const artifact =
-    exp.signed_export && typeof exp.signed_export === 'object' ? exp.signed_export : exp;
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
 
+function isEnvelope(value) {
+  return (
+    isPlainObject(value) &&
+    typeof value.artifactSchema === 'string' &&
+    typeof value.canonical === 'string' &&
+    typeof value.signature === 'string'
+  );
+}
+
+const EXPORT_FIELDS = [
+  { field: 'signed_export', schema: SCHEMA_V1 },
+  { field: 'signed_export_v2', schema: SCHEMA_V2 },
+];
+const ENVELOPE_MARKERS = ['artifactSchema', 'canonical', 'signature'];
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function selectionError(mode, body) {
+  return {
+    exitCode: 2,
+    error: {
+      ok: false,
+      verified_schemas: [],
+      schema_selection: mode,
+      ...body,
+    },
+  };
+}
+
+/**
+ * Pick the envelope(s) to verify.
+ * Key presence is hasOwnProperty, not truthiness. A present null, string,
+ * array or other non-object is invalid. signed_export is v1 only and
+ * signed_export_v2 is v2 only. Top-level envelope fields together with
+ * signed_export* keys are ambiguous and are not verified.
+ */
+function selectExports(exp, mode) {
+  if (!isPlainObject(exp)) {
+    return selectionError(mode, {
+      error: 'invalid_export',
+      detail: 'input must be a JSON object',
+    });
+  }
+
+  const exportKeys = EXPORT_FIELDS.filter(({ field }) => hasOwn(exp, field));
+  const envelopeMarkers = ENVELOPE_MARKERS.filter((key) => hasOwn(exp, key));
+  if (exportKeys.length > 0 && envelopeMarkers.length > 0) {
+    return selectionError(mode, {
+      error: 'ambiguous_input',
+      detail: 'input has both top-level envelope fields and signed_export* keys',
+      fields: exportKeys.map(({ field }) => field),
+    });
+  }
+
+  if (exportKeys.length === 0) {
+    if (!isEnvelope(exp)) {
+      return selectionError(mode, {
+        error: 'missing_fields',
+        field: 'signed_export',
+        detail: 'no signed_export or signed_export_v2 on response, and input is not an envelope',
+      });
+    }
+    if (mode === 'v1' && exp.artifactSchema !== SCHEMA_V1) {
+      return selectionError(mode, {
+        error: 'schema_unsupported',
+        artifactSchema: exp.artifactSchema,
+        detail: 'requested schema v1',
+      });
+    }
+    if (mode === 'v2' && exp.artifactSchema !== SCHEMA_V2) {
+      return selectionError(mode, {
+        error: 'schema_unsupported',
+        artifactSchema: exp.artifactSchema,
+        detail: 'requested schema v2',
+      });
+    }
+    return { artifacts: [exp] };
+  }
+
+  const wanted = EXPORT_FIELDS.filter(({ field }) => {
+    if (mode === 'v1') return field === 'signed_export';
+    if (mode === 'v2') return field === 'signed_export_v2';
+    return hasOwn(exp, field);
+  });
+
+  const artifacts = [];
+  for (const { field, schema } of wanted) {
+    if (!hasOwn(exp, field)) {
+      return selectionError(mode, {
+        error: 'missing_fields',
+        field,
+        detail: `requested schema ${mode}`,
+      });
+    }
+    const value = exp[field];
+    if (!isPlainObject(value)) {
+      return selectionError(mode, {
+        error: 'invalid_export',
+        field,
+        detail: `${field} is present but not an object`,
+      });
+    }
+    if (value.artifactSchema !== schema) {
+      return selectionError(mode, {
+        error: 'schema_field_mismatch',
+        field,
+        artifactSchema: typeof value.artifactSchema === 'string' ? value.artifactSchema : null,
+        detail: `${field} must be ${schema}`,
+      });
+    }
+    artifacts.push(value);
+  }
+  return { artifacts };
+}
+
+function fail(exitCode, body) {
+  return { exitCode, body };
+}
+
+function verifyOne(artifact, args, doc, source) {
   const required = [
     'artifactSchema',
     'verificationId',
@@ -188,80 +329,96 @@ async function main() {
   ];
   for (const k of required) {
     if (artifact[k] === undefined || artifact[k] === null) {
-      console.log(JSON.stringify({ ok: false, error: 'missing_fields', field: k }, null, 2));
-      process.exit(2);
+      return fail(2, {
+        ok: false,
+        error: 'missing_fields',
+        field: k,
+        artifactSchema: typeof artifact.artifactSchema === 'string' ? artifact.artifactSchema : null,
+      });
     }
   }
+  if (args.schema === 'v1' && artifact.artifactSchema !== SCHEMA_V1) {
+    return fail(2, {
+      ok: false,
+      error: 'schema_unsupported',
+      artifactSchema: artifact.artifactSchema,
+      detail: 'requested schema v1',
+    });
+  }
+  if (args.schema === 'v2' && artifact.artifactSchema !== SCHEMA_V2) {
+    return fail(2, {
+      ok: false,
+      error: 'schema_unsupported',
+      artifactSchema: artifact.artifactSchema,
+      detail: 'requested schema v2',
+    });
+  }
   if (artifact.alg !== 'Ed25519') {
-    console.log(JSON.stringify({ ok: false, error: 'alg_unsupported', alg: artifact.alg }, null, 2));
-    process.exit(2);
+    return fail(2, {
+      ok: false,
+      error: 'alg_unsupported',
+      alg: artifact.alg,
+      artifactSchema: artifact.artifactSchema,
+      keyId: artifact.keyId,
+    });
+  }
+  if (!ACCEPTED_ARTIFACT_SCHEMAS.has(artifact.artifactSchema)) {
+    return fail(2, {
+      ok: false,
+      error: 'schema_unsupported',
+      artifactSchema: artifact.artifactSchema,
+      keyId: artifact.keyId,
+    });
   }
   if (!/^0x[0-9a-f]{64}$/.test(artifact.digest)) {
-    console.log(
-      JSON.stringify({ ok: false, error: 'bad_digest_format', digest: artifact.digest }, null, 2),
-    );
-    process.exit(2);
+    return fail(2, {
+      ok: false,
+      error: 'bad_digest_format',
+      digest: artifact.digest,
+      artifactSchema: artifact.artifactSchema,
+      keyId: artifact.keyId,
+    });
   }
 
-  // --- 1. Resolve key ---
-  const { doc, source } = await loadKeys(args.keys);
   const entry = (doc.keys || []).find(
     (k) => k.kid === artifact.keyId || k.keyId === artifact.keyId,
   );
   if (!entry) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          error: 'key_not_found',
-          code: 'DECISION_SIGNER_UNTRUSTED',
-          keyId: artifact.keyId,
-          keys: source,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(3);
+    return fail(3, {
+      ok: false,
+      error: 'key_not_found',
+      code: 'DECISION_SIGNER_UNTRUSTED',
+      keyId: artifact.keyId,
+      artifactSchema: artifact.artifactSchema,
+      keys: source,
+    });
   }
 
   const usable = keyUsable(entry, args.allowVectorOnly, artifact.signedAt);
   if (!usable.ok) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          error: usable.reason,
-          code: usable.code,
-          keyId: artifact.keyId,
-          status: entry.status || null,
-          keys: source,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(3);
+    return fail(3, {
+      ok: false,
+      error: usable.reason,
+      code: usable.code,
+      keyId: artifact.keyId,
+      artifactSchema: artifact.artifactSchema,
+      status: entry.status || null,
+      keys: source,
+    });
   }
 
   let pub;
   try {
     pub = resolvePub(entry);
   } catch (err) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          error: 'key_unusable',
-          code: 'DECISION_SIGNER_UNTRUSTED',
-          detail: err instanceof Error ? err.message : String(err),
-          keyId: artifact.keyId,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(3);
+    return fail(3, {
+      ok: false,
+      error: 'key_unusable',
+      code: 'DECISION_SIGNER_UNTRUSTED',
+      detail: err instanceof Error ? err.message : String(err),
+      keyId: artifact.keyId,
+      artifactSchema: artifact.artifactSchema,
+    });
   }
 
   const fields = {
@@ -275,93 +432,142 @@ async function main() {
   };
   if (artifact.validUntil !== undefined) fields.validUntil = artifact.validUntil;
   else if (args.requireValidUntil) {
-    console.log(JSON.stringify({ ok: false, error: 'validUntil_required' }, null, 2));
-    process.exit(2);
+    return fail(2, {
+      ok: false,
+      error: 'validUntil_required',
+      artifactSchema: artifact.artifactSchema,
+      keyId: artifact.keyId,
+    });
   }
 
-  // --- 2. Signature ---
   const sigHex = String(artifact.signature).replace(/^0x/i, '');
   const signedInput = buildSignedInput(fields);
   const sigOk = cryptoVerify(null, signedInput, pub, Buffer.from(sigHex, 'hex'));
   if (!sigOk) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          error: 'signature_invalid',
-          code: 'DECISION_SIGNATURE_INVALID',
-          keyId: artifact.keyId,
-          keys: source,
-          note: 'Canonical/envelope bytes changed after signing, or wrong key material for this kid — not an unpinned-signer class',
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(5);
+    return fail(5, {
+      ok: false,
+      error: 'signature_invalid',
+      code: 'DECISION_SIGNATURE_INVALID',
+      keyId: artifact.keyId,
+      artifactSchema: artifact.artifactSchema,
+      keys: source,
+      note: 'Canonical/envelope bytes changed after signing, or wrong key material for this kid — not an unpinned-signer class',
+    });
   }
 
-  // --- 3. Digest over transported canonical ---
   const recomputed = digestCanonical(artifact.canonical);
   if (recomputed !== artifact.digest) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: false,
-          error: 'digest_mismatch',
-          code: 'DECISION_COMMITMENT_DIGEST_MISMATCH',
-          digest: artifact.digest,
-          recomputedDigest: recomputed,
-          note: 'Verify against transported canonical string of the issued artifact — never a fresh /sentinel/verify',
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(4);
+    return fail(4, {
+      ok: false,
+      error: 'digest_mismatch',
+      code: 'DECISION_COMMITMENT_DIGEST_MISMATCH',
+      digest: artifact.digest,
+      recomputedDigest: recomputed,
+      artifactSchema: artifact.artifactSchema,
+      keyId: artifact.keyId,
+      note: 'Verify against transported canonical string of the issued artifact — never a fresh /sentinel/verify',
+    });
   }
 
-  // --- 4. validUntil ---
   if (fields.validUntil !== undefined && args.now > fields.validUntil) {
+    return fail(6, {
+      ok: false,
+      error: 'expired',
+      now: args.now,
+      validUntil: fields.validUntil,
+      keyId: artifact.keyId,
+      artifactSchema: artifact.artifactSchema,
+    });
+  }
+
+  return {
+    exitCode: 0,
+    body: {
+      ok: true,
+      artifactSchema: artifact.artifactSchema,
+      keyId: artifact.keyId,
+      keyStatus: entry.status || 'active',
+      verificationId: artifact.verificationId,
+      digest: artifact.digest,
+      recomputedDigest: recomputed,
+      signedAt: artifact.signedAt,
+      validUntil: fields.validUntil ?? null,
+      keys: source,
+      domain: DOMAIN,
+      envelopeAlg: artifact.alg,
+      jwkAlg: entry.alg || null,
+      verifyOrder: 'key_resolve → signature → digest → validUntil',
+      note: 'envelope alg Ed25519 ≠ JWK alg EdDSA — do not cross-compare',
+    },
+  };
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  if (!args.path) {
+    console.error(
+      'Usage: node scripts/verify-canonical-export.mjs <export.json> [--keys path|url] [--now unix] [--require-valid-until] [--allow-vector-only] [--schema v1|v2|all|auto] [--v2]',
+    );
+    process.exit(1);
+  }
+  const exp = JSON.parse(readFileSync(args.path, 'utf8'));
+  const selected = selectExports(exp, args.schema);
+  if (selected.error) {
+    console.log(JSON.stringify(selected.error, null, 2));
+    process.exit(selected.exitCode);
+  }
+
+  const { doc, source } = await loadKeys(args.keys);
+  const outcomes = selected.artifacts.map((artifact) => verifyOne(artifact, args, doc, source));
+  const verifiedSchemas = outcomes.filter((item) => item.body.ok).map((item) => item.body.artifactSchema);
+  const failed = outcomes.find((item) => !item.body.ok);
+
+  if (!failed && outcomes.length === 1) {
     console.log(
       JSON.stringify(
         {
-          ok: false,
-          error: 'expired',
-          now: args.now,
-          validUntil: fields.validUntil,
-          keyId: artifact.keyId,
+          ...outcomes[0].body,
+          verified_schemas: verifiedSchemas,
+          schema_selection: args.schema,
         },
         null,
         2,
       ),
     );
-    process.exit(6);
+    process.exit(0);
+  }
+  if (!failed) {
+    console.log(
+      JSON.stringify(
+        {
+          ok: true,
+          verified_schemas: verifiedSchemas,
+          schema_selection: args.schema,
+          results: outcomes.map((item) => item.body),
+          keys: source,
+          domain: DOMAIN,
+        },
+        null,
+        2,
+      ),
+    );
+    process.exit(0);
   }
 
   console.log(
     JSON.stringify(
       {
-        ok: true,
-        keyId: artifact.keyId,
-        keyStatus: entry.status || 'active',
-        verificationId: artifact.verificationId,
-        digest: artifact.digest,
-        recomputedDigest: recomputed,
-        signedAt: artifact.signedAt,
-        validUntil: fields.validUntil ?? null,
-        keys: source,
-        domain: DOMAIN,
-        envelopeAlg: artifact.alg,
-        jwkAlg: entry.alg || null,
-        verifyOrder: 'key_resolve → signature → digest → validUntil',
-        note: 'envelope alg Ed25519 ≠ JWK alg EdDSA — do not cross-compare',
+        ...failed.body,
+        verified_schemas: verifiedSchemas,
+        failed_schema: failed.body.artifactSchema ?? null,
+        schema_selection: args.schema,
+        results: outcomes.map((item) => item.body),
       },
       null,
       2,
     ),
   );
-  process.exit(0);
+  process.exit(failed.exitCode);
 }
 
 const isMain =

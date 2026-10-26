@@ -300,6 +300,8 @@ describe('receipt allowlist', () => {
     expect(Array.isArray(SUITE_RECEIPT_ALLOWLIST.promotion)).toBe(true);
     expect(SUITE_RECEIPT_ALLOWLIST.promotion).toContain('cascade_reason');
     expect(SUITE_RECEIPT_ALLOWLIST.meta).toContain('engine_budget');
+    expect(SUITE_RECEIPT_ALLOWLIST.meta).toContain('pot_cli');
+    expect(SUITE_RECEIPT_ALLOWLIST.receipt).not.toContain('signed_export_v2');
     expect(SUITE_RECEIPT_ALLOWLIST.objections).toContain('quote_match_mode');
     expect(SUITE_RECEIPT_ALLOWLIST.objections).not.toContain('quote');
     expect(SUITE_RECEIPT_ALLOWLIST.receipt).not.toContain('reasoning');
@@ -323,6 +325,23 @@ describe('receipt allowlist', () => {
       expect(bytes).not.toContain(secret);
     }
     expect(redacted.receipt.verdict).toBe('UNCERTAIN');
+  });
+
+  it('keeps a semver meta.pot_cli and drops free text, including signed_export_v2 canonical', () => {
+    const kept = redactSuiteReceipt({ meta: { pot_cli: '0.8.12' } });
+    expect(kept.receipt.meta.pot_cli).toBe('0.8.12');
+    const dropped = redactSuiteReceipt({
+      meta: { pot_cli: 'free-text-private-canary' },
+      signed_export_v2: {
+        canonical: 'free-text-private-canary',
+        digest: '0x' + '4'.repeat(64),
+        signature: '0x' + '5'.repeat(128),
+      },
+    });
+    expect(dropped.receipt.meta?.pot_cli).toBeUndefined();
+    expect(dropped.receipt).not.toHaveProperty('signed_export_v2');
+    expect(dropped.dropped_fields).toContain('meta.pot_cli');
+    expect(JSON.stringify(dropped)).not.toContain('free-text-private-canary');
   });
 
   it('omits quotes and rejects an object stuffed into an allowlisted scalar', () => {

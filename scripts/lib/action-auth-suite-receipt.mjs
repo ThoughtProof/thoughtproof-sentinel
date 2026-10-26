@@ -12,6 +12,13 @@ const number = (value) => typeof value === 'number' && Number.isFinite(value) &&
 const count = (value) => Number.isSafeInteger(value) && value >= 0;
 const unit = (value) => number(value) && value <= 1;
 const hash = matches(/^0x[a-f0-9]{64}$/);
+// Installed pot-cli semver. Already public on GET /sentinel/health. Not a
+// credential, filesystem path, or free-text field. Same predicate as
+// publishablePotCliVersion in src/runtime-versions.ts (max 64 chars).
+const potCliVersion = (value) =>
+  typeof value === 'string' &&
+  value.length <= 64 &&
+  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value);
 const receiptId = matches(/^sent_[a-f0-9]{16}$/);
 const verdict = oneOf('ALLOW', 'BLOCK', 'UNCERTAIN');
 const internalVerdict = oneOf('ALLOW', 'BLOCK', 'HOLD', 'CONDITIONAL_ALLOW', 'REVIEW', 'UNCERTAIN');
@@ -71,6 +78,7 @@ const evidenceBind = {
 const meta = {
   duration_ms: number, models_used: [oneOf('serv-nano', 'serv-swift', 'serv-pro')],
   verified_at: matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+  pot_cli: potCliVersion,
   promotion, engine_budget: engineBudget, objection_evidence_bind: evidenceBind,
   agent_context: null,
 };
