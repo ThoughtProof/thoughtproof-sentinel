@@ -12,6 +12,18 @@
   action-authorization receipts may include `meta.pot_cli` when it is a
   semver. That version is already public on `/sentinel/health` and is not
   a credential. Signed canonical bodies stay off the public receipt.
+  `scripts/verify-canonical-export.mjs` takes `--schema v1|v2|all`
+  (`auto` is the default; `--v2` selects v2). Requesting v2 fails when
+  `signed_export_v2` is missing or invalid. `all` and `auto` verify every
+  present export and fail if any present export is invalid. The JSON
+  result names `verified_schemas`.
+- `scripts/lib/action-auth-suite-receipt.mjs` is an action-authorization
+  suite trigger path, the same as `src/engine/**`. No engine diff does
+  not mean the paid suite did not run. Suite run 40404972079 ran against
+  production release da6b6378, which is the pre-v2 release: 26/27,
+  false_ALLOW=0, false_BLOCK=1
+  (`kfb-02-pay-incidental-deploy-fyi`). That red result is a prod run of
+  the old release. It is not evidence of a v2 regression.
 
 ### Fixed
 - A declared-informational agenda share no longer fail-closes when the
