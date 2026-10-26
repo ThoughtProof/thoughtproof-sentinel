@@ -36,6 +36,22 @@ function walkForPotCliPackageJson(startDir: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Semver safe to put on a public receipt and into canonical.v2.
+ * `unavailable`, paths, and free text are omitted. Keep the length cap and
+ * the pattern aligned with `pot_cli` in scripts/lib/action-auth-suite-receipt.mjs.
+ */
+const PUBLISHABLE_POT_CLI = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const PUBLISHABLE_POT_CLI_MAX_LEN = 64;
+
+export function publishablePotCliVersion(version: unknown): string | undefined {
+  if (typeof version !== 'string') return undefined;
+  const trimmed = version.trim();
+  if (trimmed.length === 0 || trimmed.length > PUBLISHABLE_POT_CLI_MAX_LEN) return undefined;
+  if (!PUBLISHABLE_POT_CLI.test(trimmed)) return undefined;
+  return trimmed;
+}
+
 /** Installed pot-cli semver, or `unavailable` if the package.json cannot be read. */
 export function getPotCliVersion(): string {
   // Prefer cwd so Vercel includeFiles (node_modules/pot-cli/package.json) is found.

@@ -1,5 +1,18 @@
 ## Unreleased
 
+### Added
+- Canonical verdict `sentinel.verdict.canonical.v2` (ADR-0022) is issued
+  beside the existing v1 `signed_export` as `signed_export_v2`. v2 is a
+  superset of v1 with optional `releaseId`, `policy`, and `potCli`
+  (promotion release/policy, and the installed pot-cli semver). v1 export
+  bytes and the committed M1 vectors are unchanged.
+  `verifySignedCanonicalExport` accepts both schemas. A failure while
+  building or signing v2 omits `signed_export_v2` only; the verdict,
+  promotion, and v1 export stay as they were. Public
+  action-authorization receipts may include `meta.pot_cli` when it is a
+  semver. That version is already public on `/sentinel/health` and is not
+  a credential. Signed canonical bodies stay off the public receipt.
+
 ### Fixed
 - A declared-informational agenda share no longer fail-closes when the
   action is `Post today's board agenda text to the internal Vorstand

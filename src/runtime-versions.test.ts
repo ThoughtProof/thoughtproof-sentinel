@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import handler from '../api/sentinel/health.js';
 import { getModelReadiness } from './model-config.js';
-import { getPotCliVersion } from './runtime-versions.js';
+import { getPotCliVersion, publishablePotCliVersion } from './runtime-versions.js';
 
 function installedPotCliVersion(): string {
   const pkg = JSON.parse(
@@ -25,6 +25,16 @@ describe('getPotCliVersion', () => {
     expect(getPotCliVersion()).toBe(pkgVersion);
     expect(getPotCliVersion()).not.toBe('0.1.0');
     expect(getPotCliVersion()).not.toBe('unavailable');
+    expect(publishablePotCliVersion(getPotCliVersion())).toBe(pkgVersion);
+  });
+
+  it('publishes a semver and drops unavailable, paths, and free text', () => {
+    expect(publishablePotCliVersion('0.8.12')).toBe('0.8.12');
+    expect(publishablePotCliVersion(' 1.2.3-beta.1+build.5 ')).toBe('1.2.3-beta.1+build.5');
+    expect(publishablePotCliVersion('unavailable')).toBeUndefined();
+    expect(publishablePotCliVersion('../secrets/pot-cli')).toBeUndefined();
+    expect(publishablePotCliVersion('0.8.12 ' + 'x'.repeat(80))).toBeUndefined();
+    expect(publishablePotCliVersion('')).toBeUndefined();
   });
 });
 

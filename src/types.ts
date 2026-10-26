@@ -388,6 +388,13 @@ export interface SentinelVerifyResponse {
       policy?: string;
     };
     /**
+     * Installed pot-cli semver, attached at the API edge (ADR-0022).
+     * Same class of value as GET /sentinel/health `pot_cli`. Omitted when
+     * the version cannot be read or is not a publishable semver. Not a credential.
+     * The engine does not set this field.
+     */
+    pot_cli?: string;
+    /**
      * Reliability Option 3 — engine budget / timeout trace.
      * Present when cascade hit ENGINE_BUDGET_MS (45s) before Vercel wall (60s).
      */

@@ -59,9 +59,13 @@ import canonicalize from 'canonicalize';
 import type { SentinelVerifyResponse } from './types.js';
 import {
   buildCanonicalSentinelVerdict,
+  buildCanonicalSentinelVerdictV2,
   hashCanonicalSentinelVerdict,
+  isCanonicalSentinelVerdictBody,
+  isAcceptedCanonicalVerdictSchema,
   serializeCanonicalSentinelVerdict,
-  type CanonicalSentinelVerdictBody,
+  type CanonicalSentinelVerdictArtifact,
+  type CanonicalVerdictSchema,
 } from './canonical-verdict.js';
 
 /** Domain tag for the export envelope (≠ canonical schema string). */
@@ -91,7 +95,7 @@ export const VECTOR_KEY_ID = 'tp-sentinel-export-ed25519-2026-09-vector';
 
 /** Fields covered by the envelope signature (JCS object inside signed_input). */
 export interface CanonicalExportSignedFields {
-  artifactSchema: CanonicalSentinelVerdictBody['artifactSchema'];
+  artifactSchema: CanonicalVerdictSchema;
   verificationId: string;
   /** Verbatim JCS string of the canonical body — opaque string, not nested object. */
   canonical: string;
@@ -127,6 +131,7 @@ export type ExportVerifyFailureCode =
   | 'digest_mismatch'
   | 'signature_invalid'
   | 'alg_unsupported'
+  | 'schema_unsupported'
   | 'expired'
   | 'not_yet_valid'
   | 'key_unusable';
@@ -553,12 +558,14 @@ function computeExportSignerReadiness(
 }
 
 /**
- * Issue a signed export from a canonical body (or response).
+ * Issue a signed export from a finished canonical body (v1 or v2) or a response.
+ * A response always projects to v1 so existing signed_export bytes stay stable.
+ * v2 is issued only when the caller passes a v2 body (see maybeIssueSignedExportV2).
  * Does not mutate the canonical body; validUntil is envelope-only.
  * Refuses VECTOR_KEY_ID — vector-only is fixture material only.
  */
 export function issueSignedCanonicalExport(
-  source: CanonicalSentinelVerdictBody | SentinelVerifyResponse,
+  source: CanonicalSentinelVerdictArtifact | SentinelVerifyResponse,
   options: IssueExportOptions,
 ): SignedCanonicalExport {
   const keyId = options.keyId ?? DEFAULT_KEY_ID;
@@ -568,10 +575,9 @@ export function issueSignedCanonicalExport(
     );
   }
 
-  const body: CanonicalSentinelVerdictBody =
-    'artifactSchema' in source && source.artifactSchema === 'sentinel.verdict.canonical.v1'
-      ? source
-      : buildCanonicalSentinelVerdict(source as SentinelVerifyResponse);
+  const body: CanonicalSentinelVerdictArtifact = isCanonicalSentinelVerdictBody(source)
+    ? source
+    : buildCanonicalSentinelVerdict(source as SentinelVerifyResponse);
 
   const canonical = serializeCanonicalSentinelVerdict(body);
   const digest = hashCanonicalSentinelVerdict(body);
@@ -631,12 +637,20 @@ export function verifySignedCanonicalExport(
   if (e.alg !== EXPORT_ALG) {
     return { ok: false, code: 'alg_unsupported', detail: String(e.alg), keyId: e.keyId };
   }
+  if (!isAcceptedCanonicalVerdictSchema(e.artifactSchema)) {
+    return {
+      ok: false,
+      code: 'schema_unsupported',
+      detail: String(e.artifactSchema),
+      keyId: e.keyId,
+    };
+  }
   if (!/^0x[0-9a-f]{64}$/.test(e.digest)) {
     return { ok: false, code: 'bad_digest_format', detail: e.digest, keyId: e.keyId };
   }
 
   const fields: CanonicalExportSignedFields = {
-    artifactSchema: e.artifactSchema as CanonicalSentinelVerdictBody['artifactSchema'],
+    artifactSchema: e.artifactSchema,
     verificationId: e.verificationId,
     canonical: e.canonical,
     digest: e.digest,
@@ -823,8 +837,9 @@ export function maybeIssueSignedExport(
   response: SentinelVerifyResponse,
   env: NodeJS.ProcessEnv = process.env,
   nowSeconds?: number,
+  load: LoadExportSignerOptions = {},
 ): SignedCanonicalExport | null {
-  const signer = loadExportSignerFromEnv(env, { nowSeconds });
+  const signer = loadExportSignerFromEnv(env, { ...load, nowSeconds });
   if (!signer) return null;
   try {
     return issueSignedCanonicalExport(response, {
@@ -837,6 +852,35 @@ export function maybeIssueSignedExport(
     console.error(
       '[canonical-export] issue failed (omitting signed_export):',
       err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
+/**
+ * Issue canonical.v2 when the signer is ready. Any error omits signed_export_v2
+ * and does not throw. Callers must still issue v1 separately; this function
+ * never changes a verdict, a promotion, or the v1 export.
+ */
+export function maybeIssueSignedExportV2(
+  response: SentinelVerifyResponse,
+  env: NodeJS.ProcessEnv = process.env,
+  nowSeconds?: number,
+  load: LoadExportSignerOptions = {},
+): SignedCanonicalExport | null {
+  try {
+    const signer = loadExportSignerFromEnv(env, { ...load, nowSeconds });
+    if (!signer) return null;
+    return issueSignedCanonicalExport(buildCanonicalSentinelVerdictV2(response), {
+      privateKey: signer.privateKey,
+      keyId: signer.keyId,
+      ttlSeconds: signer.ttlSeconds,
+      nowSeconds,
+    });
+  } catch (err) {
+    console.error(
+      '[canonical-export] v2 issue failed (omitting signed_export_v2):',
+      err instanceof Error ? err.message : 'unknown error',
     );
     return null;
   }

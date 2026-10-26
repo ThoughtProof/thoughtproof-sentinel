@@ -15,13 +15,14 @@
  * JWK alg = EdDSA (JOSE). Envelope alg = Ed25519. Do not cross-compare them.
  *
  * Verification order (PriorSeal §4):
- *   1. resolve keyId against key doc
+ *   1. artifactSchema is sentinel.verdict.canonical.v1 or .v2 (ADR-0022)
+ *   2. resolve keyId against key doc
  *        - notBefore/notAfter vs export **signedAt** (not verifier clock)
  *        - status=retired still verifies in-window historical sigs
  *        - vector-only needs --allow-vector-only
- *   2. Ed25519 verify domain||0x00||JCS(fields)  → DECISION_SIGNATURE_INVALID on fail
- *   3. sha256(UTF-8(transported canonical)) === digest → DECISION_COMMITMENT_DIGEST_MISMATCH
- *   4. optional validUntil vs verifier --now (freshness)
+ *   3. Ed25519 verify domain||0x00||JCS(fields)  → DECISION_SIGNATURE_INVALID on fail
+ *   4. sha256(UTF-8(transported canonical)) === digest → DECISION_COMMITMENT_DIGEST_MISMATCH
+ *   5. optional validUntil vs verifier --now (freshness)
  *
  * DECISION_SIGNER_UNTRUSTED is reserved for key_not_found / window / vector-only —
  * not for a broken signature on a known key.
@@ -35,6 +36,10 @@ import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 const DOMAIN = 'thoughtproof.sentinel.export.v1';
+const ACCEPTED_ARTIFACT_SCHEMAS = new Set([
+  'sentinel.verdict.canonical.v1',
+  'sentinel.verdict.canonical.v2',
+]);
 const DEFAULT_KEYS =
   process.env.THOUGHTPROOF_KEYS_URL ||
   'https://sentinel.thoughtproof.ai/.well-known/thoughtproof-keys.json';
@@ -194,6 +199,16 @@ async function main() {
   }
   if (artifact.alg !== 'Ed25519') {
     console.log(JSON.stringify({ ok: false, error: 'alg_unsupported', alg: artifact.alg }, null, 2));
+    process.exit(2);
+  }
+  if (!ACCEPTED_ARTIFACT_SCHEMAS.has(artifact.artifactSchema)) {
+    console.log(
+      JSON.stringify(
+        { ok: false, error: 'schema_unsupported', artifactSchema: artifact.artifactSchema },
+        null,
+        2,
+      ),
+    );
     process.exit(2);
   }
   if (!/^0x[0-9a-f]{64}$/.test(artifact.digest)) {

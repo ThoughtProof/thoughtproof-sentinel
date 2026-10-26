@@ -11,6 +11,7 @@
     "suite:action-auth": "node scripts/action-authorization-suite.mjs",
     "docs:sri": "node --experimental-strip-types --disable-warning=ExperimentalWarning scripts/verify-docs-cdn-sri.ts",
     "gen:m1-export-vectors": "node scripts/gen-m1-export-vectors.mjs",
+    "gen:m1-export-v2-vectors": "node scripts/gen-m1-export-v2-vectors.mjs",
     "verify:m1-export": "node scripts/verify-canonical-export.mjs"
   },
   "devDependencies": {

@@ -20,11 +20,21 @@ import {
   isModelConfigReady,
   modelConfigUnavailablePayload,
 } from '../../src/model-config.js';
-import { maybeIssueSignedExport } from '../../src/canonical-export.js';
+import { maybeIssueSignedExport, maybeIssueSignedExportV2 } from '../../src/canonical-export.js';
+import { getPotCliVersion, publishablePotCliVersion } from '../../src/runtime-versions.js';
 
 const VERSION = '0.1.0';
 const VALID_PLATFORMS: PaymentPlatform[] = ['openserv', 'acp', 'direct'];
 const MAX_BODY_SIZE = 1_000_000; // 1MB
+
+/** Public semver for meta.pot_cli. Lookup failures omit the field and do not change the verdict. */
+function readPublishablePotCli(): string | undefined {
+  try {
+    return publishablePotCliVersion(getPotCliVersion());
+  } catch {
+    return undefined;
+  }
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const requestId = `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -181,13 +191,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     // --- M1 signed canonical export (only when SENTINEL_EXPORT_PRIVATE_KEY set) ---
-    // Detached envelope over canonical.v1 — not EAS. Omitted when unset so
-    // pre-M1 response shape stays compatible. Never blocks verify on sign fail.
-    const signedExport = maybeIssueSignedExport(processedResponse);
+    // v1 envelope stays byte-compatible. v2 (ADR-0022) is additive provenance.
+    // A v2 failure omits signed_export_v2 only — never the verdict or v1.
+    // Omitted when the signer is unset so the pre-M1 response shape stays compatible.
+    const exportNowSeconds = Math.floor(Date.now() / 1000);
+    const signedExport = maybeIssueSignedExport(processedResponse, process.env, exportNowSeconds);
+    const signedExportV2 = maybeIssueSignedExportV2(processedResponse, process.env, exportNowSeconds);
+    const potCli = readPublishablePotCli();
 
     // --- Final response snapshot (sole return value) ---
     const finalResponse = {
       ...processedResponse,
+      meta: potCli
+        ? { ...processedResponse.meta, pot_cli: potCli }
+        : processedResponse.meta,
       attestation: {
         prepared: true,
         issued: !!attestationResult,
@@ -206,6 +223,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...(paymentResult.paymentMethod && { payment_method: paymentResult.paymentMethod }),
       },
       ...(signedExport ? { signed_export: signedExport } : {}),
+      ...(signedExportV2 ? { signed_export_v2: signedExportV2 } : {}),
     };
 
     // --- ADR-0020 shadow observability (flag default OFF; never mutates response) ---

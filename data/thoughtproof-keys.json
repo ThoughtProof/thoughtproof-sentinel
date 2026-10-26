@@ -13,7 +13,7 @@
       "status": "vector-only",
       "notBefore": "2026-07-01T00:00:00Z",
       "notAfter": null,
-      "usage": "Fixture / paired-vector signatures only. Private seed lives in scripts/gen-m1-export-vectors.mjs. NEVER used to sign production exports. Verifiers must reject this kid unless explicitly allowing vector-only keys."
+      "usage": "Fixture / paired-vector signatures only. Private seed lives in scripts/gen-m1-export-vectors.mjs and scripts/gen-m1-export-v2-vectors.mjs. NEVER used to sign production exports. Verifiers must reject this kid unless explicitly allowing vector-only keys."
     },
     {
       "kty": "OKP",
@@ -54,6 +54,7 @@
   "notes": [
     "status / notBefore / notAfter are ThoughtProof extensions on OKP key objects — allowed extras; this file is schema thoughtproof.keys.v1, not RFC 7517 JWKS.",
     "Prod notBefore = first production publish day; vector notBefore may differ (fixture signedAt).",
-    "EAS attester and API keys are different trust roots and must not be substituted for this export key."
+    "EAS attester and API keys are different trust roots and must not be substituted for this export key.",
+    "Inner artifact schemas sentinel.verdict.canonical.v1 and sentinel.verdict.canonical.v2 share this envelope domain (ADR-0022). v1 bytes stay stable; v2 adds optional releaseId, policy, and potCli."
   ]
 }

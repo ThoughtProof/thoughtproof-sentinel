@@ -8,14 +8,19 @@
  * byte-deterministic, not just structurally JSON.
  *
  * Design choices (mirrors thoughtproof-api-v2/verdict-canonical.ts):
- *  - Optional fields (gate, secondary model) are OMITTED when not present,
- *    never null — JCS treats absent vs null distinctly.
+ *  - Optional fields (gate, secondary model, v2 provenance) are OMITTED when
+ *    not present, never null — JCS treats absent vs null distinctly.
  *  - Canonical serialization via JCS (RFC 8785) so body bytes are stable.
- *  - The body is a strict projection of SentinelVerifyResponse — nothing
- *    added, nothing re-expressed.  "ThoughtProof said X" stays intact.
+ *  - v1 is a strict projection of SentinelVerifyResponse — nothing added,
+ *    nothing re-expressed.  "ThoughtProof said X" stays intact.
+ *  - v2 (ADR-0022) is that projection plus optional releaseId, policy, and
+ *    potCli. It does not change the verdict. Callers that cannot build v2
+ *    omit signed_export_v2.
  *
- * This module is PURE COMPUTATION — no I/O, no network, no anchoring.
- * The anchoring (EAS/Arweave/OTS) is the consumer's responsibility.
+ * v1 is pure computation. v2 may read the installed pot-cli version; a throw
+ * from that read propagates so the export issuer can omit signed_export_v2.
+ * No network and no anchoring. Anchoring (EAS/Arweave/OTS) is the consumer's
+ * responsibility.
  */
 import { createHash } from 'crypto';
 // `canonicalize` exposes a default export; the package ships no native ESM
@@ -25,6 +30,26 @@ import { createHash } from 'crypto';
 import canonicalize from 'canonicalize';
 import type { SentinelVerifyResponse } from './types.js';
 import { confidenceToPercent } from './confidence.js';
+import { getPotCliVersion, publishablePotCliVersion } from './runtime-versions.js';
+
+/** Pinned v1 schema. External verifiers and m1-export vectors depend on these bytes. */
+export const CANONICAL_VERDICT_SCHEMA_V1 = 'sentinel.verdict.canonical.v1' as const;
+
+/** Additive superset schema (ADR-0022). Does not replace v1 during the transition. */
+export const CANONICAL_VERDICT_SCHEMA_V2 = 'sentinel.verdict.canonical.v2' as const;
+
+export const ACCEPTED_CANONICAL_VERDICT_SCHEMAS = [
+  CANONICAL_VERDICT_SCHEMA_V1,
+  CANONICAL_VERDICT_SCHEMA_V2,
+] as const;
+
+export type CanonicalVerdictSchema = (typeof ACCEPTED_CANONICAL_VERDICT_SCHEMAS)[number];
+
+export function isAcceptedCanonicalVerdictSchema(
+  value: unknown,
+): value is CanonicalVerdictSchema {
+  return value === CANONICAL_VERDICT_SCHEMA_V1 || value === CANONICAL_VERDICT_SCHEMA_V2;
+}
 
 /**
  * The canonical body shape.  Tagged with `artifactSchema` so consumers can
@@ -32,7 +57,7 @@ import { confidenceToPercent } from './confidence.js';
  */
 export interface CanonicalSentinelVerdictBody {
   /** Schema identity — distinguishes from plv.verdict.canonical.v1 etc. */
-  artifactSchema: 'sentinel.verdict.canonical.v1';
+  artifactSchema: typeof CANONICAL_VERDICT_SCHEMA_V1;
   /** Stable verification id (matches response.id). */
   verificationId: string;
   /** API version (hardcoded for now; bump if the body shape changes). */
@@ -70,8 +95,49 @@ export interface CanonicalSentinelVerdictBody {
 }
 
 /**
- * Build the canonical (pre-serialization) body from a SentinelVerifyResponse.
- * Pure function — no I/O, no side effects.
+ * v2 body (ADR-0022): every v1 field, plus optional provenance.
+ * releaseId ← meta.promotion.release_id
+ * policy ← meta.promotion.policy
+ * potCli ← publishable pot-cli semver (getPotCliVersion, or an explicit override)
+ * Absent provenance is omitted, never null.
+ */
+export interface CanonicalSentinelVerdictBodyV2
+  extends Omit<CanonicalSentinelVerdictBody, 'artifactSchema'> {
+  artifactSchema: typeof CANONICAL_VERDICT_SCHEMA_V2;
+  /** Git commit SHA from meta.promotion.release_id. Omitted when absent. */
+  releaseId?: string;
+  /** Promotion policy id from meta.promotion.policy. Omitted when absent. */
+  policy?: string;
+  /** Installed pot-cli semver. Omitted when missing or not a publishable semver. */
+  potCli?: string;
+}
+
+export type CanonicalSentinelVerdictArtifact =
+  | CanonicalSentinelVerdictBody
+  | CanonicalSentinelVerdictBodyV2;
+
+export function isCanonicalSentinelVerdictBody(
+  value: unknown,
+): value is CanonicalSentinelVerdictArtifact {
+  if (!value || typeof value !== 'object') return false;
+  return isAcceptedCanonicalVerdictSchema(
+    (value as { artifactSchema?: unknown }).artifactSchema,
+  );
+}
+
+export interface BuildCanonicalSentinelVerdictV2Options {
+  /**
+   * pot-cli version to commit. When omitted, the builder calls
+   * getPotCliVersion() (a throw propagates). Non-semver values, including
+   * `unavailable`, are omitted from the body.
+   */
+  potCli?: string;
+}
+
+/**
+ * Build the canonical (pre-serialization) v1 body from a SentinelVerifyResponse.
+ * Pure function — no I/O, no side effects. Does not read promotion provenance
+ * or pot-cli; those belong to v2 only, so existing v1 bytes stay stable.
  */
 export function buildCanonicalSentinelVerdict(
   response: SentinelVerifyResponse,
@@ -90,7 +156,7 @@ export function buildCanonicalSentinelVerdict(
   }
 
   const body: CanonicalSentinelVerdictBody = {
-    artifactSchema: 'sentinel.verdict.canonical.v1',
+    artifactSchema: CANONICAL_VERDICT_SCHEMA_V1,
     verificationId: response.id,
     apiVersion: 'sentinel-api-0.1.0',
     tier: response.tier,
@@ -127,12 +193,44 @@ export function buildCanonicalSentinelVerdict(
   return body;
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * Build the v2 body. Starts from the v1 projection so shared fields cannot
+ * drift, then adds provenance. Does not mutate the v1 body.
+ * Throws if the pot-cli lookup throws — callers that issue signed_export_v2
+ * must catch and omit the export. Never used to decide a verdict.
+ */
+export function buildCanonicalSentinelVerdictV2(
+  response: SentinelVerifyResponse,
+  options: BuildCanonicalSentinelVerdictV2Options = {},
+): CanonicalSentinelVerdictBodyV2 {
+  const v1 = buildCanonicalSentinelVerdict(response);
+  const body: CanonicalSentinelVerdictBodyV2 = {
+    ...v1,
+    artifactSchema: CANONICAL_VERDICT_SCHEMA_V2,
+  };
+
+  const releaseId = nonEmptyString(response.meta.promotion?.release_id);
+  if (releaseId) body.releaseId = releaseId;
+  const policy = nonEmptyString(response.meta.promotion?.policy);
+  if (policy) body.policy = policy;
+
+  const potSource = options.potCli !== undefined ? options.potCli : getPotCliVersion();
+  const potCli = publishablePotCliVersion(potSource);
+  if (potCli) body.potCli = potCli;
+
+  return body;
+}
+
 /**
  * Serialize a canonical body to its JCS (RFC 8785) byte form.
  * This is what gets hashed for anchoring.
  */
 export function serializeCanonicalSentinelVerdict(
-  body: CanonicalSentinelVerdictBody,
+  body: CanonicalSentinelVerdictArtifact,
 ): string {
   const out = (canonicalize as unknown as (v: unknown) => string)(body);
   if (typeof out !== 'string') {
@@ -147,7 +245,7 @@ export function serializeCanonicalSentinelVerdict(
  * must equal this value.
  */
 export function hashCanonicalSentinelVerdict(
-  body: CanonicalSentinelVerdictBody,
+  body: CanonicalSentinelVerdictArtifact,
 ): string {
   const serialized = serializeCanonicalSentinelVerdict(body);
   return `0x${createHash('sha256').update(serialized).digest('hex')}`;
