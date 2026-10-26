@@ -13,10 +13,16 @@
   semver. That version is already public on `/sentinel/health` and is not
   a credential. Signed canonical bodies stay off the public receipt.
   `scripts/verify-canonical-export.mjs` takes `--schema v1|v2|all`
-  (`auto` is the default; `--v2` selects v2). Requesting v2 fails when
-  `signed_export_v2` is missing or invalid. `all` and `auto` verify every
-  present export and fail if any present export is invalid. The JSON
-  result names `verified_schemas`.
+  (`auto` is the default; `--v2` selects v2). A response field is
+  present when the key exists, including null. null, strings, arrays,
+  and other non-objects are `invalid_export`. `signed_export` must be
+  canonical v1 and `signed_export_v2` must be canonical v2
+  (`schema_field_mismatch` otherwise). A document that is both a
+  top-level envelope and a response is `ambiguous_input` and is not
+  verified. Requesting v2 fails when `signed_export_v2` is missing or
+  invalid, and does not accept a v1 body in that field. `all` and
+  `auto` verify every present export and fail if any present export is
+  invalid. The JSON result names `verified_schemas`.
 - `scripts/lib/action-auth-suite-receipt.mjs` is an action-authorization
   suite trigger path, the same as `src/engine/**`. No engine diff does
   not mean the paid suite did not run. Suite run 40404972079 ran against

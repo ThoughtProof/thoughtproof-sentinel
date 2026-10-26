@@ -14,6 +14,11 @@
  *   all  verify every present export; any present-but-invalid export fails
  *   auto same selection as all (bare envelope, or whichever response fields exist)
  * --v2 is shorthand for --schema v2.
+ * A response field counts as present when the key exists, including null.
+ * null, strings, arrays and other non-objects are invalid (invalid_export).
+ * signed_export must be canonical v1 and signed_export_v2 must be canonical v2
+ * (schema_field_mismatch otherwise). A document that is both a top-level
+ * envelope and a response (signed_export* keys) is ambiguous_input.
  * Result JSON includes verified_schemas (schemas that passed). A failure also
  * names failed_schema. A full API response is not "v1 only".
  *
@@ -199,94 +204,112 @@ function isEnvelope(value) {
   );
 }
 
+const EXPORT_FIELDS = [
+  { field: 'signed_export', schema: SCHEMA_V1 },
+  { field: 'signed_export_v2', schema: SCHEMA_V2 },
+];
+const ENVELOPE_MARKERS = ['artifactSchema', 'canonical', 'signature'];
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function selectionError(mode, body) {
+  return {
+    exitCode: 2,
+    error: {
+      ok: false,
+      verified_schemas: [],
+      schema_selection: mode,
+      ...body,
+    },
+  };
+}
+
 /**
  * Pick the envelope(s) to verify.
- * A bare envelope is that one artifact. A full API response is never reduced
- * to signed_export alone: auto/all take every present export, v1 requires
- * signed_export, v2 requires signed_export_v2.
+ * Key presence is hasOwnProperty, not truthiness. A present null, string,
+ * array or other non-object is invalid. signed_export is v1 only and
+ * signed_export_v2 is v2 only. Top-level envelope fields together with
+ * signed_export* keys are ambiguous and are not verified.
  */
 function selectExports(exp, mode) {
-  if (isEnvelope(exp)) {
+  if (!isPlainObject(exp)) {
+    return selectionError(mode, {
+      error: 'invalid_export',
+      detail: 'input must be a JSON object',
+    });
+  }
+
+  const exportKeys = EXPORT_FIELDS.filter(({ field }) => hasOwn(exp, field));
+  const envelopeMarkers = ENVELOPE_MARKERS.filter((key) => hasOwn(exp, key));
+  if (exportKeys.length > 0 && envelopeMarkers.length > 0) {
+    return selectionError(mode, {
+      error: 'ambiguous_input',
+      detail: 'input has both top-level envelope fields and signed_export* keys',
+      fields: exportKeys.map(({ field }) => field),
+    });
+  }
+
+  if (exportKeys.length === 0) {
+    if (!isEnvelope(exp)) {
+      return selectionError(mode, {
+        error: 'missing_fields',
+        field: 'signed_export',
+        detail: 'no signed_export or signed_export_v2 on response, and input is not an envelope',
+      });
+    }
     if (mode === 'v1' && exp.artifactSchema !== SCHEMA_V1) {
-      return {
-        exitCode: 2,
-        error: {
-          ok: false,
-          error: 'schema_unsupported',
-          artifactSchema: exp.artifactSchema,
-          detail: 'requested schema v1',
-          verified_schemas: [],
-          schema_selection: mode,
-        },
-      };
+      return selectionError(mode, {
+        error: 'schema_unsupported',
+        artifactSchema: exp.artifactSchema,
+        detail: 'requested schema v1',
+      });
     }
     if (mode === 'v2' && exp.artifactSchema !== SCHEMA_V2) {
-      return {
-        exitCode: 2,
-        error: {
-          ok: false,
-          error: 'schema_unsupported',
-          artifactSchema: exp.artifactSchema,
-          detail: 'requested schema v2',
-          verified_schemas: [],
-          schema_selection: mode,
-        },
-      };
+      return selectionError(mode, {
+        error: 'schema_unsupported',
+        artifactSchema: exp.artifactSchema,
+        detail: 'requested schema v2',
+      });
     }
     return { artifacts: [exp] };
   }
 
-  const present = [];
-  if (isPlainObject(exp.signed_export)) present.push(exp.signed_export);
-  if (isPlainObject(exp.signed_export_v2)) present.push(exp.signed_export_v2);
+  const wanted = EXPORT_FIELDS.filter(({ field }) => {
+    if (mode === 'v1') return field === 'signed_export';
+    if (mode === 'v2') return field === 'signed_export_v2';
+    return hasOwn(exp, field);
+  });
 
-  if (mode === 'v1') {
-    if (!isPlainObject(exp.signed_export)) {
-      return {
-        exitCode: 2,
-        error: {
-          ok: false,
-          error: 'missing_fields',
-          field: 'signed_export',
-          detail: 'requested schema v1',
-          verified_schemas: [],
-          schema_selection: mode,
-        },
-      };
-    }
-    return { artifacts: [exp.signed_export] };
-  }
-  if (mode === 'v2') {
-    if (!isPlainObject(exp.signed_export_v2)) {
-      return {
-        exitCode: 2,
-        error: {
-          ok: false,
-          error: 'missing_fields',
-          field: 'signed_export_v2',
-          detail: 'requested schema v2',
-          verified_schemas: [],
-          schema_selection: mode,
-        },
-      };
-    }
-    return { artifacts: [exp.signed_export_v2] };
-  }
-
-  if (present.length === 0) {
-    return {
-      exitCode: 2,
-      error: {
-        ok: false,
+  const artifacts = [];
+  for (const { field, schema } of wanted) {
+    if (!hasOwn(exp, field)) {
+      return selectionError(mode, {
         error: 'missing_fields',
-        field: 'signed_export',
-        detail: 'no signed_export or signed_export_v2 on response, and input is not an envelope',
-        verified_schemas: [],
-        schema_selection: mode,
-      },
-    };
+        field,
+        detail: `requested schema ${mode}`,
+      });
+    }
+    const value = exp[field];
+    if (!isPlainObject(value)) {
+      return selectionError(mode, {
+        error: 'invalid_export',
+        field,
+        detail: `${field} is present but not an object`,
+      });
+    }
+    if (value.artifactSchema !== schema) {
+      return selectionError(mode, {
+        error: 'schema_field_mismatch',
+        field,
+        artifactSchema: typeof value.artifactSchema === 'string' ? value.artifactSchema : null,
+        detail: `${field} must be ${schema}`,
+      });
+    }
+    artifacts.push(value);
   }
-  return { artifacts: present };
+  return { artifacts };
 }
 
 function fail(exitCode, body) {

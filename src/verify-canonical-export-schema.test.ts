@@ -119,6 +119,7 @@ describe('verify-canonical-export schema selection', () => {
       ok: boolean;
       error?: string;
       field?: string;
+      artifactSchema?: string | null;
       verified_schemas: string[];
       failed_schema?: string | null;
       results?: Array<{ ok: boolean; artifactSchema?: string; error?: string }>;
@@ -173,5 +174,106 @@ describe('verify-canonical-export schema selection', () => {
     expect(missingBody.error).toBe('missing_fields');
     expect(missingBody.field).toBe('signed_export_v2');
     expect(missingBody.verified_schemas).toEqual([]);
+  });
+
+  it('treats an omitted signed_export_v2 key as absent and still verifies v1', () => {
+    const file = writeJson('v1-key-absent.json', { signed_export: validV1, verdict: 'ALLOW' });
+    for (const args of [['--schema', 'all'], ['--schema', 'auto']]) {
+      const result = run(file, args);
+      const body = parsed(result);
+      expect(result.status).toBe(0);
+      expect(body.ok).toBe(true);
+      expect(body.verified_schemas).toEqual([SCHEMA_V1]);
+    }
+  });
+
+  it('rejects a present non-object signed_export_v2 instead of ignoring it', () => {
+    const badValues: unknown[] = [null, 'not-an-export', [], false, 0];
+    for (const bad of badValues) {
+      const label = Array.isArray(bad) ? 'array' : String(bad);
+      const file = writeJson(`bad-v2-${label}.json`, {
+        signed_export: validV1,
+        signed_export_v2: bad,
+      });
+      for (const args of [['--schema', 'all'], ['--schema', 'auto'], ['--schema', 'v2']]) {
+        const result = run(file, args);
+        const body = parsed(result);
+        expect(result.status).toBe(2);
+        expect(body.ok).toBe(false);
+        expect(body.error).toBe('invalid_export');
+        expect(body.field).toBe('signed_export_v2');
+        expect(body.verified_schemas).toEqual([]);
+      }
+    }
+  });
+
+  it('rejects a present non-object signed_export under auto', () => {
+    const file = writeJson('null-v1.json', { signed_export: null, signed_export_v2: validV2 });
+    const result = run(file, ['--schema', 'auto']);
+    const body = parsed(result);
+    expect(result.status).toBe(2);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('invalid_export');
+    expect(body.field).toBe('signed_export');
+    expect(body.verified_schemas).toEqual([]);
+  });
+
+  it('rejects a v1 envelope stored in the signed_export_v2 field', () => {
+    const file = writeJson('v1-in-v2-slot.json', {
+      signed_export: validV1,
+      signed_export_v2: validV1,
+    });
+    for (const args of [['--schema', 'all'], ['--schema', 'auto'], ['--schema', 'v2']]) {
+      const result = run(file, args);
+      const body = parsed(result);
+      expect(result.status).toBe(2);
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe('schema_field_mismatch');
+      expect(body.field).toBe('signed_export_v2');
+      expect(body.artifactSchema).toBe(SCHEMA_V1);
+      expect(body.verified_schemas).toEqual([]);
+    }
+  });
+
+  it('rejects a v2 envelope stored in the signed_export field', () => {
+    const file = writeJson('v2-in-v1-slot.json', {
+      signed_export: validV2,
+      signed_export_v2: validV2,
+    });
+    const result = run(file, ['--schema', 'auto']);
+    const body = parsed(result);
+    expect(result.status).toBe(2);
+    expect(body.ok).toBe(false);
+    expect(body.error).toBe('schema_field_mismatch');
+    expect(body.field).toBe('signed_export');
+    expect(body.artifactSchema).toBe(SCHEMA_V2);
+    expect(body.verified_schemas).toEqual([]);
+  });
+
+  it('rejects a top-level envelope that also carries a nested export', () => {
+    const file = writeJson('mixed-envelope.json', {
+      ...validV1,
+      signed_export_v2: tamperedV2,
+    });
+    for (const args of [['--schema', 'all'], ['--schema', 'auto'], ['--schema', 'v2']]) {
+      const result = run(file, args);
+      const body = parsed(result);
+      expect(result.status).toBe(2);
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe('ambiguous_input');
+      expect(body.verified_schemas).toEqual([]);
+    }
+  });
+
+  it('does not fail --schema v2 because a sibling signed_export is null', () => {
+    const file = writeJson('v2-ignores-null-v1.json', {
+      signed_export: null,
+      signed_export_v2: validV2,
+    });
+    const result = run(file, ['--schema', 'v2']);
+    const body = parsed(result);
+    expect(result.status).toBe(0);
+    expect(body.ok).toBe(true);
+    expect(body.verified_schemas).toEqual([SCHEMA_V2]);
   });
 });
