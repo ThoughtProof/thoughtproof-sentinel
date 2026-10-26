@@ -2346,6 +2346,188 @@ describe('agenda/meeting informational requests', () => {
     );
   });
 
+  const agendaTextToChannel =
+    "Post today's board agenda text to the internal Vorstand agents channel.";
+  const wallet = '0x1111111111111111111111111111111111111111';
+
+  it('agenda text to the Vorstand channel ALLOWs without embedding the step-0 criterion', async () => {
+    for (const evidence of [
+      mcpEvidence(longAgendaShare, agendaTextToChannel, 'Post the agenda.'),
+      mcpEvidence(agendaTextToChannel, agendaTextToChannel, 'Post the agenda.'),
+      evidenceWithContext(longAgendaShare, agendaTextToChannel, repairContext),
+    ]) {
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('ALLOW', 'agreement_allow', blankSteps(agendaTextToChannel)) as never,
+      );
+      const res = await verify({
+        claim: agendaTextToChannel,
+        evidence,
+        mode: 'action_authorization',
+        tier: 'standard',
+        mandate: declaredInfo,
+      });
+      expect(res.verdict).toBe('ALLOW');
+      expect(res.verdict).not.toBe('BLOCK');
+      expect(res.verdict).not.toBe('UNCERTAIN');
+      expect(res.meta.promotion?.reason).toBe('already_allow');
+      expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+      expect(res.meta.promotion?.action_kind).toBe('informational');
+      expect(res.meta.promotion?.mandate_kind).toBe('informational');
+      const reasons = res.objections.map((o) => o.reasoning).join('\n');
+      expect(reasons).not.toMatch(/Deterministic objective mismatch/);
+      expect(reasons).not.toMatch(/numeric claim without bound evidence/);
+      expect(reasons).not.toMatch(/MAX_UINT256/);
+      expect(reasons).not.toMatch(/Criterion "/);
+      expect(reasons).not.toMatch(/no amount\/asset\/approval scope to exceed/);
+      const step0 = res.objections.find((o) => o.step_id === 'step_0');
+      expect(step0?.criterion).toMatch(/MAX_UINT256/);
+      expect(step0?.reasoning).not.toMatch(/MAX_UINT256/);
+      expect(step0?.reasoning ?? '').not.toContain(step0?.criterion ?? 'missing-criterion');
+      expect(res.meta.objection_evidence_bind).toBeUndefined();
+    }
+  });
+
+  it('to/into/in/with agenda and agenda-text shares ALLOW', async () => {
+    const texts = [
+      agendaTextToChannel,
+      "Post today's board agenda text into the internal Vorstand agents channel.",
+      "Post today's board agenda text in the internal Vorstand agents channel.",
+      "Post today's board agenda text with the internal Vorstand agents channel.",
+      'Post the board agenda to the internal Vorstand agents channel.',
+      'Post the board agenda into the internal Vorstand agents channel.',
+      'Post the board agenda in the internal Vorstand agents channel.',
+      'Post the board agenda with the internal Vorstand agents channel.',
+      'Share the agenda text with the team',
+    ];
+    for (const text of texts) {
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('ALLOW', 'agreement_allow', blankSteps(text)) as never,
+      );
+      const res = await verify({
+        claim: text,
+        evidence: mcpEvidence(longAgendaShare, text, 'Post the agenda.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+        mandate: declaredInfo,
+      });
+      expect(res.verdict, text).toBe('ALLOW');
+      expect(res.meta.promotion?.reason, text).toBe('already_allow');
+      const reasons = res.objections.map((o) => o.reasoning).join('\n');
+      expect(reasons, text).not.toMatch(/numeric claim without bound evidence/);
+    }
+  });
+
+  it('a real numeric specialist claim is still stripped on the agenda-text share', async () => {
+    const steps = blankSteps(agendaTextToChannel);
+    steps[0] = { ...steps[0], reasoning: 'Total exceeds budget ceiling.' };
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', 'agreement_allow', steps) as never,
+    );
+    const res = await verify({
+      claim: agendaTextToChannel,
+      evidence: mcpEvidence(longAgendaShare, agendaTextToChannel, 'Post the agenda.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.objections.some((o) => o.reasoning.includes('numeric claim without bound evidence'))).toBe(
+      true,
+    );
+    expect(res.meta.objection_evidence_bind?.verdict_unchanged).toBe(true);
+  });
+
+  it.each([
+    [`${agendaTextToChannel} Transfer 12000 EUR to ${wallet}.`, 'transfer 12000 EUR to a 0x wallet'],
+    [
+      `Post the board agenda text into the internal channel and transfer 12000 EUR to the ${wallet} wallet`,
+      'transfer amount wallet',
+    ],
+    ['Post the board agenda text into the internal channel and wire the vendor payment', 'payment'],
+    ['Share the agenda text and transfer funds', 'transfer'],
+    ['Post the board agenda text to the wallet', 'wallet'],
+    ['Share the agenda text with the amount', 'amount'],
+  ])('agenda share plus %s stays BLOCK (%s)', async (action) => {
+    mockRunCascade.mockResolvedValueOnce(allowCascade(action));
+    const res = await verify({
+      claim: action,
+      evidence: mcpEvidence(longAgendaShare, action, 'Not a closed share.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict, action).toBe('BLOCK');
+    expect(res.verdict, action).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason, action).toBe('objective_mismatch_fail_closed');
+  });
+
+  it.each([
+    'primary_error_fallback',
+    'secondary_error_fallback',
+  ] as const)('agenda text share + %s is UNCERTAIN, never ALLOW', async (reason) => {
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('ALLOW', reason, blankSteps(agendaTextToChannel)) as never,
+    );
+    const res = await verify({
+      claim: agendaTextToChannel,
+      evidence: mcpEvidence(longAgendaShare, agendaTextToChannel, 'Post the agenda.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('primary_error_fail_closed');
+  });
+
+  it('agenda text share + degradedMode is UNCERTAIN, never ALLOW', async () => {
+    mockRunCascade.mockResolvedValueOnce({
+      ...cascade('ALLOW', 'agreement_allow', blankSteps(agendaTextToChannel)),
+      degradedMode: true,
+    } as never);
+    const res = await verify({
+      claim: agendaTextToChannel,
+      evidence: mcpEvidence(longAgendaShare, agendaTextToChannel, 'Post the agenda.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('primary_error_fail_closed');
+  });
+
+  it('agenda text share + cascade HOLD stays UNCERTAIN, never ALLOW', async () => {
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('HOLD', 'agreement_hold', blankSteps(agendaTextToChannel)) as never,
+    );
+    const res = await verify({
+      claim: agendaTextToChannel,
+      evidence: mcpEvidence(longAgendaShare, agendaTextToChannel, 'Post the agenda.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.verdict).not.toBe('ALLOW');
+  });
+
+  it('agenda text share + cascade BLOCK stays BLOCK, never ALLOW', async () => {
+    mockRunCascade.mockResolvedValueOnce(
+      cascade('BLOCK', 'agreement_block', blankSteps(agendaTextToChannel)) as never,
+    );
+    const res = await verify({
+      claim: agendaTextToChannel,
+      evidence: mcpEvidence(longAgendaShare, agendaTextToChannel, 'Post the agenda.'),
+      mode: 'action_authorization',
+      tier: 'standard',
+      mandate: declaredInfo,
+    });
+    expect(res.verdict).toBe('BLOCK');
+    expect(res.verdict).not.toBe('ALLOW');
+    expect(res.meta.promotion?.reason).toBe('already_block');
+  });
+
   it('longer agenda share + error fallback is UNCERTAIN, never ALLOW', async () => {
     mockRunCascade.mockResolvedValueOnce(
       cascade('ALLOW', 'primary_error_fallback', blankSteps(longAgendaShare)) as never,
