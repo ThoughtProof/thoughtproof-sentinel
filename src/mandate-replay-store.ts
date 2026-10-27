@@ -4,13 +4,15 @@
  * There is no in-memory fallback. A store miss or error is HTTP 503,
  * never ALLOW.
  *
- * The expiry check runs inside the Redis script, using Redis TIME unless
- * a test passes nowSeconds into that same script. The pure window helper
- * is not consulted and does not consume a nonce.
+ * Expiry uses Redis TIME inside the script. Callers cannot supply a clock.
+ * The pure window helper is not consulted and does not consume a nonce.
+ * The replay client is separate from the rate-limit client and does not
+ * retry a lost transport response.
  */
 
 import { createHash } from 'node:crypto';
-import { getSharedUpstashRedis } from './upstash-config.js';
+import { Redis } from '@upstash/redis';
+import { resolveUpstashConfig } from './upstash-env.js';
 
 /** Same product decision as the proof window. Not a tunable default. */
 export const MANDATE_REPLAY_SKEW_SECONDS = 30;
@@ -32,11 +34,8 @@ local function intstr(s)
 end
 local iat = intstr(ARGV[1])
 local exp = intstr(ARGV[2])
-local now = intstr(ARGV[3])
-if now == nil then
-  local t = redis.call('TIME')
-  now = tonumber(t[1])
-end
+local t = redis.call('TIME')
+local now = tonumber(t[1])
 if iat == nil or exp == nil or now == nil then
   return 'block:non_positive_window'
 end
@@ -68,11 +67,6 @@ export interface MandateReplayConsumeInput {
   nonce: string;
   iat: number;
   exp: number;
-  /**
-   * Test clock, in unix seconds, applied inside the script.
-   * Omit it so the script reads Redis TIME.
-   */
-  nowSeconds?: number;
 }
 
 export type MandateReplayConsumeResult =
@@ -94,9 +88,21 @@ function unavailable(code: 'ACCOUNT_UNAVAILABLE' | 'REPLAY_STORE_UNAVAILABLE'): 
   return { ok: false, httpStatus: 503, code };
 }
 
-function commandFromSharedClient(): MandateReplayCommand | null {
-  const redis = getSharedUpstashRedis();
-  if (!redis) return null;
+/**
+ * Dedicated Upstash client for nonce consumption.
+ * `retry: false` still performs two attempts in @upstash/redis 1.38
+ * (`attempts: 1` and a loop of `i <= attempts`). `retries: 0` is one attempt.
+ * The shared rate-limit client is not modified.
+ */
+export function createMandateReplayClient(url: string, token: string): Redis {
+  return new Redis({
+    url,
+    token,
+    retry: { retries: 0 },
+  });
+}
+
+export function mandateReplayCommand(redis: Redis): MandateReplayCommand {
   return {
     eval(script, keys, args) {
       return redis.createScript<string>(script).eval(keys, args);
@@ -105,6 +111,20 @@ function commandFromSharedClient(): MandateReplayCommand | null {
       return redis.pttl(key);
     },
   };
+}
+
+let replayClient: Redis | null = null;
+let replayClientKey: string | null = null;
+
+function commandFromDedicatedClient(): MandateReplayCommand | null {
+  const cfg = resolveUpstashConfig();
+  if (cfg.status !== 'configured') return null;
+  const key = `${cfg.url}\0${cfg.token.length}`;
+  if (!replayClient || replayClientKey !== key) {
+    replayClient = createMandateReplayClient(cfg.url, cfg.token);
+    replayClientKey = key;
+  }
+  return mandateReplayCommand(replayClient);
 }
 
 function parseReply(raw: string, exp: number): MandateReplayConsumeResult {
@@ -127,7 +147,8 @@ function parseReply(raw: string, exp: number): MandateReplayConsumeResult {
 
 /**
  * Consume a nonce once, or reject it. Pass `command` in tests.
- * Omit `command` to use the shared Upstash client. There is no memory store.
+ * Omit `command` to use the dedicated no-retry Upstash client.
+ * There is no memory store and no caller clock.
  */
 export async function consumeMandateNonce(
   input: MandateReplayConsumeInput,
@@ -139,18 +160,16 @@ export async function consumeMandateNonce(
 
   let redis: MandateReplayCommand | null;
   try {
-    redis = command === undefined ? commandFromSharedClient() : command;
+    redis = command === undefined ? commandFromDedicatedClient() : command;
   } catch {
     return unavailable('REPLAY_STORE_UNAVAILABLE');
   }
   if (!redis) return unavailable('REPLAY_STORE_UNAVAILABLE');
 
-  const nowArg = input.nowSeconds === undefined ? '' : String(input.nowSeconds);
   try {
     const raw = await redis.eval(MANDATE_REPLAY_CONSUME_SCRIPT, [mandateReplayKey(input.accountId, input.nonce)], [
       String(input.iat),
       String(input.exp),
-      nowArg,
     ]);
     if (typeof raw !== 'string') return unavailable('REPLAY_STORE_UNAVAILABLE');
     return parseReply(raw, input.exp);

@@ -5,10 +5,12 @@
  * No model calls, no provider keys, no shared Upstash writes.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createServer, type Socket } from 'node:net';
+import { createServer as createNetServer, type Socket } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import { connect as netConnect } from 'node:net';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { Redis } from '@upstash/redis';
 import { checkWindowThenConsume } from './mandate-proof-window.js';
 import { MANDATE_PROOF_SKEW_SECONDS } from './mandate-proof-window.js';
 import { isUpstashConfigured } from './upstash-env.js';
@@ -16,8 +18,11 @@ import {
   MANDATE_REPLAY_CONSUME_SCRIPT,
   MANDATE_REPLAY_SKEW_SECONDS,
   consumeMandateNonce,
+  createMandateReplayClient,
+  mandateReplayCommand,
   mandateReplayKey,
   type MandateReplayCommand,
+  type MandateReplayConsumeInput,
 } from './mandate-replay-store.js';
 
 const REDIS_BIN = '/usr/bin/redis-server';
@@ -141,7 +146,7 @@ class LocalRedis {
 
 async function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
-    const server = createServer();
+    const server = createNetServer();
     server.once('error', reject);
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
@@ -183,9 +188,13 @@ describe('mandate replay store without a server', () => {
     expect(MANDATE_REPLAY_SKEW_SECONDS).toBe(MANDATE_PROOF_SKEW_SECONDS);
     expect(MANDATE_REPLAY_CONSUME_SCRIPT).toContain('redis.call(\'TIME\'');
     expect(MANDATE_REPLAY_CONSUME_SCRIPT).toContain('NX');
+    expect(MANDATE_REPLAY_CONSUME_SCRIPT).not.toContain('ARGV[3]');
     const source = readFileSync(new URL('./mandate-replay-store.ts', import.meta.url), 'utf8');
     expect(source).not.toContain('checkWindowThenConsume');
     expect(source).not.toContain('mandate-proof-window');
+    expect(source).not.toContain('nowSeconds');
+    expect(source).not.toContain('getSharedUpstashRedis');
+    expect(source).toContain('retries: 0');
     const verify = readFileSync(new URL('../api/sentinel/verify.ts', import.meta.url), 'utf8');
     expect(verify).not.toContain('mandate-replay-store');
   });
@@ -237,7 +246,7 @@ describe('mandate replay store without a server', () => {
       },
     };
     const result = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce: 'nonce-a', iat: NOW, exp: NOW + 60, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce: 'nonce-a', iat: NOW, exp: NOW + 60 },
       command,
     );
     expect(result).toEqual({ ok: false, httpStatus: 503, code: 'REPLAY_STORE_UNAVAILABLE' });
@@ -263,11 +272,26 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
     return LocalRedis.connect(port);
   }
 
+  async function redisNow(redis: LocalRedis): Promise<number> {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const clock = await redis.call(['TIME']);
+      if (!Array.isArray(clock)) throw new Error('redis TIME failed');
+      const seconds = Number(clock[0]);
+      const micros = Number(clock[1]);
+      if (Number.isFinite(seconds) && micros < 250_000) return seconds;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+    const clock = await redis.call(['TIME']);
+    if (!Array.isArray(clock)) throw new Error('redis TIME failed');
+    return Number(clock[0]);
+  }
+
   it('rejects exp == iat inside the script and does not store the nonce', async () => {
     const redis = await open();
+    const now = await redisNow(redis);
     const nonce = 'nonce-equal-window';
     const result = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce, iat: NOW, exp: NOW, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce, iat: now, exp: now },
       redis.command(),
     );
     expect(result).toEqual({ ok: false, verdict: 'BLOCK', reason: 'non_positive_window' });
@@ -277,13 +301,13 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
 
   it('rejects the expiry boundary and the seconds on either side', async () => {
     const redis = await open();
+    const now = await redisNow(redis);
     const exactly = await consumeMandateNonce(
       {
         accountId: 'acct-one',
         nonce: 'nonce-exact',
-        iat: NOW - 120,
-        exp: NOW - MANDATE_REPLAY_SKEW_SECONDS,
-        nowSeconds: NOW,
+        iat: now - 120,
+        exp: now - MANDATE_REPLAY_SKEW_SECONDS,
       },
       redis.command(),
     );
@@ -291,19 +315,19 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
       {
         accountId: 'acct-one',
         nonce: 'nonce-earlier',
-        iat: NOW - 120,
-        exp: NOW - MANDATE_REPLAY_SKEW_SECONDS - 1,
-        nowSeconds: NOW,
+        iat: now - 120,
+        exp: now - MANDATE_REPLAY_SKEW_SECONDS - 1,
       },
       redis.command(),
     );
+    const fresh = await redisNow(redis);
+    const laterExp = fresh - MANDATE_REPLAY_SKEW_SECONDS + 1;
     const later = await consumeMandateNonce(
       {
         accountId: 'acct-one',
         nonce: 'nonce-later',
-        iat: NOW - 120,
-        exp: NOW - MANDATE_REPLAY_SKEW_SECONDS + 1,
-        nowSeconds: NOW,
+        iat: fresh - 120,
+        exp: laterExp,
       },
       redis.command(),
     );
@@ -312,17 +336,19 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
     expect(later).toEqual({
       ok: true,
       consumed: true,
-      retainUntil: NOW - MANDATE_REPLAY_SKEW_SECONDS + 1 + MANDATE_REPLAY_SKEW_SECONDS,
+      retainUntil: laterExp + MANDATE_REPLAY_SKEW_SECONDS,
     });
     expect(await redis.command().pttl(mandateReplayKey('acct-one', 'nonce-exact'))).toBe(-2);
     expect(await redis.command().pttl(mandateReplayKey('acct-one', 'nonce-earlier'))).toBe(-2);
     const kept = await redis.command().pttl(mandateReplayKey('acct-one', 'nonce-later'));
-    const minimumMs = (later.ok ? later.retainUntil - NOW : 0) * 1000;
-    expect(kept).toBeGreaterThanOrEqual(minimumMs);
+    expect(kept).toBeGreaterThan(0);
     redis.close();
   });
 
   it('lets exactly one concurrent consume of the same nonce succeed', async () => {
+    const clock = await open();
+    const now = await redisNow(clock);
+    clock.close();
     const nonce = 'nonce-concurrent';
     const attempts = await Promise.all(
       Array.from({ length: 8 }, async () => {
@@ -332,9 +358,8 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
             {
               accountId: 'acct-one',
               nonce,
-              iat: NOW - 10,
-              exp: NOW + 60,
-              nowSeconds: NOW,
+              iat: now - 10,
+              exp: now + 120,
             },
             redis.command(),
           );
@@ -347,22 +372,28 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
     const replayed = attempts.filter((result) => !result.ok && 'verdict' in result && result.reason === 'replay');
     expect(consumed).toHaveLength(1);
     expect(replayed).toHaveLength(7);
-    expect(attempts.every((result) => !('verdict' in result && result.verdict === 'ALLOW'))).toBe(true);
+    const outcomes = attempts.map((result) => {
+      if (result.ok) return 'consumed';
+      if ('verdict' in result) return result.verdict;
+      return 'unavailable';
+    });
+    expect(outcomes).not.toContain('unavailable');
   });
 
   it('scopes one nonce to each server account id', async () => {
     const redis = await open();
+    const now = await redisNow(redis);
     const nonce = 'nonce-shared-text';
     const first = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce, iat: NOW - 10, exp: NOW + 60, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce, iat: now - 10, exp: now + 120 },
       redis.command(),
     );
     const second = await consumeMandateNonce(
-      { accountId: 'acct-two', nonce, iat: NOW - 10, exp: NOW + 60, nowSeconds: NOW },
+      { accountId: 'acct-two', nonce, iat: now - 10, exp: now + 120 },
       redis.command(),
     );
     const again = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce, iat: NOW - 10, exp: NOW + 60, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce, iat: now - 10, exp: now + 120 },
       redis.command(),
     );
     expect(first.ok).toBe(true);
@@ -373,29 +404,51 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
 
   it('keeps a consumed nonce at least until exp + skew', async () => {
     const redis = await open();
+    const now = await redisNow(redis);
     const nonce = 'nonce-retain';
-    const exp = NOW + 60;
+    const exp = now + 60;
     const result = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce, iat: NOW - 10, exp, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce, iat: now - 10, exp },
       redis.command(),
     );
     expect(result).toEqual({ ok: true, consumed: true, retainUntil: exp + MANDATE_REPLAY_SKEW_SECONDS });
     const pttl = await redis.command().pttl(mandateReplayKey('acct-one', nonce));
-    expect(pttl).toBeGreaterThanOrEqual((exp + MANDATE_REPLAY_SKEW_SECONDS - NOW) * 1000);
+    expect(pttl).toBeGreaterThanOrEqual((exp + MANDATE_REPLAY_SKEW_SECONDS - now - 2) * 1000);
     redis.close();
   });
 
   it('does not treat checkWindowThenConsume as consumption', async () => {
     const redis = await open();
+    const now = await redisNow(redis);
     const nonce = 'nonce-pure-helper';
-    const times = { iat: NOW - 10, exp: NOW + 60 };
-    expect(checkWindowThenConsume(times, NOW, NOW)).toEqual({ ok: true });
+    const times = { iat: now - 10, exp: now + 120 };
+    expect(checkWindowThenConsume(times, now, now)).toEqual({ ok: true });
     expect(await redis.command().pttl(mandateReplayKey('acct-one', nonce))).toBe(-2);
     const stored = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce, ...times, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce, ...times },
       redis.command(),
     );
     expect(stored.ok).toBe(true);
+    redis.close();
+  });
+
+  it('rejects an expired proof even when a stale caller clock is attached', async () => {
+    const redis = await open();
+    const now = await redisNow(redis);
+    const stale = now - 10_000;
+    const nonce = 'nonce-stale-clock';
+    const forged = {
+      accountId: 'acct-one',
+      nonce,
+      iat: stale,
+      exp: stale + 60,
+      nowSeconds: stale,
+    } as MandateReplayConsumeInput;
+    const result = await consumeMandateNonce(forged, redis.command());
+    expect(result).toEqual({ ok: false, verdict: 'BLOCK', reason: 'expired' });
+    expect(await redis.command().pttl(mandateReplayKey('acct-one', nonce))).toBe(-2);
+    const again = await consumeMandateNonce(forged, redis.command());
+    expect(again).toEqual({ ok: false, verdict: 'BLOCK', reason: 'expired' });
     redis.close();
   });
 
@@ -422,7 +475,7 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
       pttl: async () => -2,
     };
     const result = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce: 'nonce-error', iat: NOW, exp: NOW + 60, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce: 'nonce-error', iat: NOW, exp: NOW + 60 },
       command,
     );
     expect(result).toEqual({ ok: false, httpStatus: 503, code: 'REPLAY_STORE_UNAVAILABLE' });
@@ -442,10 +495,89 @@ describe.skipIf(!hasRedisServer)('mandate replay store on local redis-server', (
       pttl: async () => -2,
     };
     const result = await consumeMandateNonce(
-      { accountId: 'acct-one', nonce: 'nonce-closed', iat: NOW, exp: NOW + 60, nowSeconds: NOW },
+      { accountId: 'acct-one', nonce: 'nonce-closed', iat: NOW, exp: NOW + 60 },
       command,
     );
     expect(result).toEqual({ ok: false, httpStatus: 503, code: 'REPLAY_STORE_UNAVAILABLE' });
     closed.destroy();
+  });
+
+  async function lostResponseServer(redis: LocalRedis): Promise<{ httpPort: number; hits: () => number; close: () => Promise<void> }> {
+    let hits = 0;
+    const server = createHttpServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        hits += 1;
+        const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+        const command = Array.isArray(parsed) && Array.isArray(parsed[0]) ? parsed[0] : parsed;
+        const parts = Array.isArray(command) ? command.map((part) => String(part)) : [];
+        if (hits === 1) {
+          void redis.call(parts).then(() => {
+            req.socket.destroy();
+          }).catch(() => {
+            req.socket.destroy();
+          });
+          return;
+        }
+        const encoded = Buffer.from('block:replay', 'utf8').toString('base64');
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify([{ result: encoded }]));
+      });
+    });
+    server.on('clientError', () => {});
+    const httpPort = await new Promise<number>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        resolve(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
+    return {
+      httpPort,
+      hits: () => hits,
+      close: () => new Promise((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  it('returns 503 when the success response is lost and does not retry into a replay', async () => {
+    const redis = await open();
+    const now = await redisNow(redis);
+    const nonce = 'nonce-lost-response';
+    const gateway = await lostResponseServer(redis);
+    const client = createMandateReplayClient(`http://127.0.0.1:${gateway.httpPort}`, 'replay-test-token');
+    const result = await consumeMandateNonce(
+      { accountId: 'acct-one', nonce, iat: now - 10, exp: now + 120 },
+      mandateReplayCommand(client),
+    );
+    expect(gateway.hits()).toBe(1);
+    expect(result).toEqual({ ok: false, httpStatus: 503, code: 'REPLAY_STORE_UNAVAILABLE' });
+    const stored = await consumeMandateNonce(
+      { accountId: 'acct-one', nonce, iat: now - 10, exp: now + 120 },
+      redis.command(),
+    );
+    expect(stored).toEqual({ ok: false, verdict: 'BLOCK', reason: 'replay' });
+    await gateway.close();
+    redis.close();
+  });
+
+  it('shows the SDK default retry can turn that lost success into replay', async () => {
+    const redis = await open();
+    const now = await redisNow(redis);
+    const nonce = 'nonce-retry-control';
+    const gateway = await lostResponseServer(redis);
+    const client = new Redis({
+      url: `http://127.0.0.1:${gateway.httpPort}`,
+      token: 'replay-test-token',
+      retry: { retries: 1 },
+    });
+    const result = await consumeMandateNonce(
+      { accountId: 'acct-one', nonce, iat: now - 10, exp: now + 120 },
+      mandateReplayCommand(client),
+    );
+    expect(gateway.hits()).toBe(2);
+    expect(result).toEqual({ ok: false, verdict: 'BLOCK', reason: 'replay' });
+    await gateway.close();
+    redis.close();
   });
 });
