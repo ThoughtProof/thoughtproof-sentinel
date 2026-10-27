@@ -54,6 +54,30 @@ function escapeRe(s: string): string {
 }
 
 /**
+ * Earliest `labels` hit that is preceded by whitespace. A single
+ * case-insensitive literal search per label — no `\s+` in front of the
+ * label. `(?:\n|\s+)LABEL` backtracks on a long space run because `\n`
+ * is already whitespace and the label fails at each offset.
+ * The returned index is the label, not the whitespace; callers trim.
+ */
+function earliestWhitespacePrefixedLabel(haystack: string, labels: readonly string[]): number {
+  let best = -1;
+  for (const label of labels) {
+    if (!label) continue;
+    const re = new RegExp(escapeRe(label), 'gi');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(haystack)) !== null) {
+      const idx = m.index;
+      if (idx > 0 && /\s/.test(haystack.charAt(idx - 1))) {
+        if (best < 0 || idx < best) best = idx;
+        break;
+      }
+    }
+  }
+  return best;
+}
+
+/**
  * Slice the text after `label` up to the next sibling label.
  * Accepts newline-separated MCP blocks and same-line suite one-liners.
  * Empty `nextLabels` means "rest of evidence".
@@ -68,10 +92,8 @@ export function extractLabeledSection(
   const m = evidence.match(labelRe);
   if (!m || m.index === undefined) return null;
   const after = evidence.slice(m.index + m[0].length);
-  const next = nextLabels.map(escapeRe).filter(Boolean).join('|');
-  const cut = next
-    ? after.search(new RegExp(`(?:\\n|\\s+)(?:${next})`, 'i'))
-    : -1;
+  const labels = nextLabels.filter((item) => item.length > 0);
+  const cut = labels.length > 0 ? earliestWhitespacePrefixedLabel(after, labels) : -1;
   const raw = (cut === -1 ? after : after.slice(0, cut)).trim();
   return raw || '';
 }
