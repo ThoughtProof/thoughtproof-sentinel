@@ -16,6 +16,7 @@
  */
 
 import type { PaymentPlatform } from './types.js';
+import { parseSentinelApiKeyRecords } from './server-account.js';
 import { Ratelimit } from '@upstash/ratelimit';
 import {
   getSharedUpstashRedis,
@@ -200,10 +201,14 @@ function checkRateLimitInMemory(
  *
  * Phase 0: If SENTINEL_AUTH_REQUIRED is not set or "false", all requests pass.
  * Phase 1: Validates against SENTINEL_API_KEYS (comma-separated in env).
+ * When the key record has an account field, the result includes that
+ * accountId. Pass/fail, platform, and agent_id are unchanged. This
+ * function does not read the request body or X-Sentinel-Agent-Id.
+ * Missing account data stays omitted here; resolveServerAccountId fails closed.
  */
 export function validateApiKey(
   headerValue: string | undefined,
-): { valid: boolean; error?: string; platform?: PaymentPlatform; agent_id?: string } {
+): { valid: boolean; error?: string; platform?: PaymentPlatform; agent_id?: string; accountId?: string } {
   const authRequired = process.env.SENTINEL_AUTH_REQUIRED === 'true';
 
   if (!authRequired) {
@@ -215,10 +220,7 @@ export function validateApiKey(
   }
 
   const keysRaw = process.env.SENTINEL_API_KEYS ?? '';
-  const keyConfigs = keysRaw.split(',').filter(Boolean).map((entry) => {
-    const [key, platform, agent_id] = entry.trim().split(':');
-    return { key, platform: (platform as PaymentPlatform) ?? 'direct', agent_id };
-  });
+  const keyConfigs = parseSentinelApiKeyRecords(keysRaw) ?? [];
 
   const matched = keyConfigs.find((k) => k.key === headerValue);
   if (!matched) {
@@ -227,8 +229,9 @@ export function validateApiKey(
 
   return {
     valid: true,
-    platform: matched.platform,
+    platform: (matched.platform as PaymentPlatform) ?? 'direct',
     agent_id: matched.agent_id,
+    ...(matched.accountId ? { accountId: matched.accountId } : {}),
   };
 }
 
