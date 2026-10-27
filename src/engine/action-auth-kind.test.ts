@@ -2250,10 +2250,15 @@ describe('agenda/meeting informational terms', () => {
       expect(prose.prose_action_kind, text).not.toBe('informational');
       expect(prose.action_kind, text).toBe(kind);
       expect(prose.mandate_kind, text).toBe(kind);
-      expect(allowlistFrom(prose), text).toBe(false);
+      // Unknown stays off the allowlist. A value_transfer sentence paired
+      // with itself is the existing financial kind match, not an agenda share.
+      if (kind === 'unknown') expect(allowlistFrom(prose), text).toBe(false);
 
-      const underShare = classifyActionAuthKind(text, mcpEvidence(share, text, 'Share mandate, other action.'));
-      expect(underShare.prose_action_kind, text).not.toBe('informational');
+      const underShare = classifyActionAuthKind(
+        text,
+        mcpEvidence(share, text, 'Share mandate, other action.'),
+      );
+      expect(underShare.prose_action_kind, text).toBe(kind);
       expect(underShare.action_kind, text).not.toBe('informational');
       expect(allowlistFrom(underShare), text).toBe(false);
     }
