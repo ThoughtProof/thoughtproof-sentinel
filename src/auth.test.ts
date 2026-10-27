@@ -88,6 +88,67 @@ describe('validateApiKey', () => {
     expect(result.platform).toBe('acp');
     expect(result.agent_id).toBe('0xABC');
   });
+
+  it('keeps the existing success shape when the record has no account id', () => {
+    process.env.SENTINEL_AUTH_REQUIRED = 'true';
+    process.env.SENTINEL_API_KEYS = 'sk_key_one:openserv:agent42,sk_key_two:acp:0xABC';
+    expect(validateApiKey('sk_key_one')).toEqual({
+      valid: true,
+      platform: 'openserv',
+      agent_id: 'agent42',
+    });
+    expect(validateApiKey('sk_key_two')).toEqual({
+      valid: true,
+      platform: 'acp',
+      agent_id: '0xABC',
+    });
+  });
+
+  it('returns the record account id and ignores request account and agent header values', () => {
+    process.env.SENTINEL_AUTH_REQUIRED = 'true';
+    process.env.SENTINEL_API_KEYS = 'sk_key_one:openserv:agent42:acct-from-record';
+    const requestAccountId = 'spoofed-account';
+    const agentHeader = 'spoofed-agent';
+    const result = validateApiKey('sk_key_one');
+    expect(result).toEqual({
+      valid: true,
+      platform: 'openserv',
+      agent_id: 'agent42',
+      accountId: 'acct-from-record',
+    });
+    expect(result.accountId).not.toBe(requestAccountId);
+    expect(result.agent_id).not.toBe(agentHeader);
+  });
+
+  it('returns the same account id for the same key and different ids for different keys', () => {
+    process.env.SENTINEL_AUTH_REQUIRED = 'true';
+    process.env.SENTINEL_API_KEYS = 'sk_key_one:openserv:agent42:acct-one,sk_key_two:acp:0xABC:acct-two';
+    const first = validateApiKey('sk_key_one');
+    const second = validateApiKey('sk_key_one');
+    const other = validateApiKey('sk_key_two');
+    expect(first.accountId).toBe('acct-one');
+    expect(second.accountId).toBe(first.accountId);
+    expect(other.accountId).toBe('acct-two');
+    expect(other.accountId).not.toBe(first.accountId);
+    expect(first.platform).toBe('openserv');
+    expect(other.platform).toBe('acp');
+  });
+
+  it('returns no account id when auth is not required', () => {
+    delete process.env.SENTINEL_AUTH_REQUIRED;
+    process.env.SENTINEL_API_KEYS = 'sk_key_one:openserv:agent42:acct-from-record';
+    expect(validateApiKey('sk_key_one')).toEqual({ valid: true });
+    expect(validateApiKey(undefined)).toEqual({ valid: true });
+  });
+
+  it('does not use the record agent id as an account id', () => {
+    process.env.SENTINEL_AUTH_REQUIRED = 'true';
+    process.env.SENTINEL_API_KEYS = 'sk_key_one:openserv:agent42';
+    const result = validateApiKey('sk_key_one');
+    expect(result.valid).toBe(true);
+    expect(result.agent_id).toBe('agent42');
+    expect(result.accountId).toBeUndefined();
+  });
 });
 
 describe('checkRateLimit — in-memory fallback', () => {
