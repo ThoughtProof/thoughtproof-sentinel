@@ -1,6 +1,17 @@
 ## Unreleased
 
 ### Added
+- `gate.checked` and `gate.skipped` on canonical verdict v2 only (ADR-0022
+  P3 addendum). `runAuthorizationGate` reports which of the three checks
+  ran and which were skipped because an input was missing or unparseable.
+  The arrays are a partition of `amount_overshoot`, `recipient_mismatch`,
+  and `unlimited_approval`. They are not inputs to the verdict, the
+  promotion, or the fail-safe. v1 export bytes and the committed M1
+  vectors are unchanged. A malformed report is omitted from v2 rather
+  than failing the export. The public action-authorization receipt
+  allowlist is unchanged (`gate` is not a receipt field). The portable
+  verifier accepts a v2 body that carries a well-typed report and fails
+  closed on invalid types (`gate_report_invalid`).
 - Salted `mandateDigest` and `actionDigest` on canonical verdict v2 only
   (ADR-0022 addendum). Each digest is `sha256:` + hex of
   `SHA-256(salt || UTF-8(JCS(value)))`, using the same JCS path as the

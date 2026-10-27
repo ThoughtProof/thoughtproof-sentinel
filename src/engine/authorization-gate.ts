@@ -27,6 +27,11 @@
  * never false-ALLOW — and shadow-mode calibration measures exactly that before
  * it is allowed to gate.
  *
+ * REPORT (P3): `checked` and `skipped` name which of the three checks ran and
+ * which were skipped because an input was missing or unparseable. They are
+ * not inputs to wouldBlock, enforcedVerdict, promotion, or ALLOW. Canonical
+ * v2 projects them; v1 does not.
+ *
  * ROLLOUT (ADR-0019, shadow-mode-rollout skill): ships behind `gateMode`,
  * default `'shadow'` (computes + logs, does NOT gate). Only `'enforce'` lets a
  * gate BLOCK override the verdict. Tolerances are INITIAL / UNCALIBRATED until
@@ -93,14 +98,40 @@ export interface AuthorizationMandate {
   };
 }
 
-export type GateViolationKind =
-  | 'amount_overshoot'
-  | 'recipient_mismatch'
-  | 'unlimited_approval';
+export const GATE_VIOLATION_KINDS = [
+  'amount_overshoot',
+  'recipient_mismatch',
+  'unlimited_approval',
+] as const;
+
+export type GateViolationKind = (typeof GATE_VIOLATION_KINDS)[number];
+
+/**
+ * Why a check did not run. Closed set. `gate_error` is only used when the
+ * gate itself throws and returns silent; that result is not projected.
+ */
+export const GATE_SKIP_REASONS = [
+  'missing_granted_amount',
+  'missing_action_amount',
+  'amount_not_finite',
+  'missing_granted_recipient',
+  'missing_action_recipient',
+  'missing_allowance',
+  'allowance_unparseable',
+  'gate_error',
+] as const;
+
+export type GateSkipReason = (typeof GATE_SKIP_REASONS)[number];
 
 export interface GateViolation {
   kind: GateViolationKind;
   detail: string;
+}
+
+/** One check that did not run. Report-only. */
+export interface GateCheckSkip {
+  kind: GateViolationKind;
+  reason: GateSkipReason;
 }
 
 export interface AuthorizationGateResult {
@@ -113,8 +144,28 @@ export interface AuthorizationGateResult {
   enforcedVerdict: SentinelVerdict | null;
   /** All hard violations detected (binary, unfixable). */
   violations: GateViolation[];
+  /**
+   * Checks whose inputs were present and were evaluated.
+   * Report-only: never an input to wouldBlock or enforcedVerdict.
+   */
+  checked: GateViolationKind[];
+  /**
+   * Checks that did not run because an input was missing or unparseable.
+   * Report-only: never an input to wouldBlock or enforcedVerdict.
+   */
+  skipped: GateCheckSkip[];
   /** True when the gate had no machine-readable mandate to act on (silent). */
   silent: boolean;
+}
+
+/**
+ * The only verdict effect of the gate. Reads `enforcedVerdict` and nothing
+ * from `checked` or `skipped`. Never returns ALLOW.
+ */
+export function gateEnforcedVerdict(
+  result: Pick<AuthorizationGateResult, 'enforcedVerdict'> | null | undefined,
+): 'BLOCK' | null {
+  return result?.enforcedVerdict === 'BLOCK' ? 'BLOCK' : null;
 }
 
 /** Parse an allowance value into a finite number, or detect the unlimited
@@ -162,6 +213,41 @@ function normId(x: string | undefined): string | null {
   return s.length > 0 ? s : null;
 }
 
+function amountSkipReason(
+  granted: AuthorizationMandate['granted'],
+  action: AuthorizationMandate['action'],
+): GateSkipReason {
+  const grantedAmount = granted?.maxAmount;
+  const actionAmount = action?.amount;
+  if (typeof grantedAmount !== 'number') return 'missing_granted_amount';
+  if (!Number.isFinite(grantedAmount)) return 'amount_not_finite';
+  if (typeof actionAmount !== 'number') return 'missing_action_amount';
+  return 'amount_not_finite';
+}
+
+function silentSkips(
+  granted: AuthorizationMandate['granted'],
+  action: AuthorizationMandate['action'],
+): GateCheckSkip[] {
+  const grantedRecipient = normId(granted?.recipient);
+  const actionRecipient = normId(action?.recipient);
+  const recipientReason: GateSkipReason =
+    grantedRecipient === null
+      ? 'missing_granted_recipient'
+      : actionRecipient === null
+        ? 'missing_action_recipient'
+        : 'missing_granted_recipient';
+  return [
+    { kind: 'amount_overshoot', reason: amountSkipReason(granted, action) },
+    { kind: 'recipient_mismatch', reason: recipientReason },
+    { kind: 'unlimited_approval', reason: 'missing_allowance' },
+  ];
+}
+
+function gateErrorSkips(): GateCheckSkip[] {
+  return GATE_VIOLATION_KINDS.map((kind) => ({ kind, reason: 'gate_error' }));
+}
+
 /**
  * Run the deterministic authorization gate. Pure function: mandate + mode in,
  * structured result out. NEVER throws — on any internal issue it returns a
@@ -173,6 +259,8 @@ export function runAuthorizationGate(
   mode: GateMode,
 ): AuthorizationGateResult {
   const violations: GateViolation[] = [];
+  const checked: GateViolationKind[] = [];
+  const skipped: GateCheckSkip[] = [];
   try {
     const granted = mandate?.granted;
     const action = mandate?.action;
@@ -196,7 +284,15 @@ export function runAuthorizationGate(
         (typeof action.asset === 'string' && action.asset.trim() !== ''))
     );
     if (!hasFinancialGranted && !hasFinancialAction) {
-      return { mode, wouldBlock: false, enforcedVerdict: null, violations: [], silent: true };
+      return {
+        mode,
+        wouldBlock: false,
+        enforcedVerdict: null,
+        violations: [],
+        silent: true,
+        checked: [],
+        skipped: silentSkips(granted, action),
+      };
     }
 
     // ── 1. Amount overshoot (binary, unfixable) ──
@@ -209,6 +305,7 @@ export function runAuthorizationGate(
       typeof action.amount === 'number' &&
       Number.isFinite(action.amount)
     ) {
+      checked.push('amount_overshoot');
       const ceiling = granted.maxAmount * (1 + AMOUNT_OVERSHOOT_TOLERANCE);
       if (action.amount > ceiling) {
         violations.push({
@@ -220,6 +317,8 @@ export function runAuthorizationGate(
             `. The principal did not authorize this magnitude.`,
         });
       }
+    } else {
+      skipped.push({ kind: 'amount_overshoot', reason: amountSkipReason(granted, action) });
     }
 
     // ── 2. Recipient mismatch (binary, unfixable) ──
@@ -227,40 +326,77 @@ export function runAuthorizationGate(
     if (granted && action) {
       const g = normId(granted.recipient);
       const a = normId(action.recipient);
-      if (g !== null && a !== null && g !== a) {
-        violations.push({
+      if (g !== null && a !== null) {
+        checked.push('recipient_mismatch');
+        if (g !== a) {
+          violations.push({
+            kind: 'recipient_mismatch',
+            detail:
+              `Action recipient "${action.recipient}" does not match the ` +
+              `authorized recipient "${granted.recipient}". The principal did not ` +
+              `authorize this counterparty.`,
+          });
+        }
+      } else {
+        skipped.push({
           kind: 'recipient_mismatch',
-          detail:
-            `Action recipient "${action.recipient}" does not match the ` +
-            `authorized recipient "${granted.recipient}". The principal did not ` +
-            `authorize this counterparty.`,
+          reason: g === null ? 'missing_granted_recipient' : 'missing_action_recipient',
         });
       }
+    } else {
+      const g = normId(granted?.recipient);
+      skipped.push({
+        kind: 'recipient_mismatch',
+        reason: g === null ? 'missing_granted_recipient' : 'missing_action_recipient',
+      });
     }
 
     // ── 3. Unlimited approval not explicitly granted (binary, unfixable) ──
     if (action) {
-      const allowance = parseAllowance(action.allowance);
-      const isUnlimited = allowance !== null && allowance >= UNLIMITED_ALLOWANCE_THRESHOLD;
-      const grantedUnlimited = granted?.allowUnlimited === true;
-      if (isUnlimited && !grantedUnlimited) {
-        violations.push({
-          kind: 'unlimited_approval',
-          detail:
-            `Action sets an unlimited / effectively-unbounded approval ` +
-            `(${String(action.allowance)}) but the principal did not grant ` +
-            `unlimited approval. Least-privilege requires an exact-amount allowance.`,
-        });
+      const rawAllowance = action.allowance;
+      const allowanceMissing =
+        rawAllowance === undefined ||
+        rawAllowance === null ||
+        (typeof rawAllowance === 'string' && rawAllowance.trim() === '');
+      const allowance = parseAllowance(rawAllowance);
+      if (allowanceMissing) {
+        skipped.push({ kind: 'unlimited_approval', reason: 'missing_allowance' });
+      } else if (allowance === null) {
+        skipped.push({ kind: 'unlimited_approval', reason: 'allowance_unparseable' });
+      } else {
+        checked.push('unlimited_approval');
+        const isUnlimited = allowance >= UNLIMITED_ALLOWANCE_THRESHOLD;
+        const grantedUnlimited = granted?.allowUnlimited === true;
+        if (isUnlimited && !grantedUnlimited) {
+          violations.push({
+            kind: 'unlimited_approval',
+            detail:
+              `Action sets an unlimited / effectively-unbounded approval ` +
+              `(${String(action.allowance)}) but the principal did not grant ` +
+              `unlimited approval. Least-privilege requires an exact-amount allowance.`,
+          });
+        }
       }
+    } else {
+      skipped.push({ kind: 'unlimited_approval', reason: 'missing_allowance' });
     }
 
     const wouldBlock = violations.length > 0;
     const enforcedVerdict: SentinelVerdict | null =
       mode === 'enforce' && wouldBlock ? 'BLOCK' : null;
 
-    return { mode, wouldBlock, enforcedVerdict, violations, silent: false };
+    return { mode, wouldBlock, enforcedVerdict, violations, silent: false, checked, skipped };
   } catch {
     // Any parse/runtime issue → silence. Never block on a gate bug.
-    return { mode, wouldBlock: false, enforcedVerdict: null, violations: [], silent: true };
+    // The report is not consulted; enforcedVerdict stays null.
+    return {
+      mode,
+      wouldBlock: false,
+      enforcedVerdict: null,
+      violations: [],
+      silent: true,
+      checked: [],
+      skipped: gateErrorSkips(),
+    };
   }
 }

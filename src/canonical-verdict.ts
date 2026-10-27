@@ -14,9 +14,11 @@
  *  - v1 is a strict projection of SentinelVerifyResponse — nothing added,
  *    nothing re-expressed.  "ThoughtProof said X" stays intact.
  *  - v2 (ADR-0022) is that projection plus optional releaseId, policy, and
- *    potCli, and optional salted mandateDigest / actionDigest. It does not
- *    change the verdict. Callers that cannot build v2 omit signed_export_v2.
- *    The commitment salt is not a v2 field.
+ *    potCli, optional salted mandateDigest / actionDigest, and optional
+ *    gate.checked / gate.skipped. It does not change the verdict. Callers
+ *    that cannot build v2 omit signed_export_v2. The commitment salt is
+ *    not a v2 field. gate.checked and gate.skipped are report-only and are
+ *    omitted from v1.
  *
  * v1 is pure computation. v2 may read the installed pot-cli version; a throw
  * from that read propagates so the export issuer can omit signed_export_v2.
@@ -32,6 +34,13 @@ import canonicalize from 'canonicalize';
 import type { SentinelVerifyResponse } from './types.js';
 import { confidenceToPercent } from './confidence.js';
 import { getPotCliVersion, publishablePotCliVersion } from './runtime-versions.js';
+import {
+  GATE_SKIP_REASONS,
+  GATE_VIOLATION_KINDS,
+  type GateCheckSkip,
+  type GateSkipReason,
+  type GateViolationKind,
+} from './engine/authorization-gate.js';
 
 /** Pinned v1 schema. External verifiers and m1-export vectors depend on these bytes. */
 export const CANONICAL_VERDICT_SCHEMA_V1 = 'sentinel.verdict.canonical.v1' as const;
@@ -104,9 +113,25 @@ export interface CanonicalSentinelVerdictBody {
  * mandateDigest / actionDigest ← sha256(salt || JCS(...)), caller-supplied
  * Absent fields are omitted, never null.
  */
+/**
+ * v2 gate. The v1 fields stay. `checked` and `skipped` are present together
+ * or not at all. They do not change wouldBlock, enforced, or the verdict.
+ */
+export interface CanonicalSentinelVerdictGateV2 {
+  mode: string;
+  wouldBlock: boolean;
+  enforced: boolean;
+  violations: string[];
+  /** Kinds that were evaluated. Omitted when the report is absent or invalid. */
+  checked?: GateViolationKind[];
+  /** Kinds that did not run, with a closed reason. Omitted with `checked`. */
+  skipped?: GateCheckSkip[];
+}
+
 export interface CanonicalSentinelVerdictBodyV2
-  extends Omit<CanonicalSentinelVerdictBody, 'artifactSchema'> {
+  extends Omit<CanonicalSentinelVerdictBody, 'artifactSchema' | 'gate'> {
   artifactSchema: typeof CANONICAL_VERDICT_SCHEMA_V2;
+  gate?: CanonicalSentinelVerdictGateV2;
   /** Git commit SHA from meta.promotion.release_id. Omitted when absent. */
   releaseId?: string;
   /** Promotion policy id from meta.promotion.policy. Omitted when absent. */
@@ -203,6 +228,7 @@ export function buildCanonicalSentinelVerdict(
 
   // gate is optional — only present for action_authorization with a mandate.
   // Omit entirely (not null) when absent, for JCS determinism.
+  // checked/skipped are v2-only. This projection never copies them.
   if (response.gate) {
     body.gate = {
       mode: response.gate.mode,
@@ -253,7 +279,68 @@ export function buildCanonicalSentinelVerdictV2(
     body.actionDigest = options.actionDigest;
   }
 
+  // Report-only. A malformed report is omitted. It is never a reason to throw
+  // or to drop releaseId, policy, potCli, or the v1 gate fields.
+  if (body.gate) {
+    const report = projectGateReport(response.gate);
+    if (report) {
+      body.gate = {
+        mode: body.gate.mode,
+        wouldBlock: body.gate.wouldBlock,
+        enforced: body.gate.enforced,
+        violations: body.gate.violations,
+        checked: report.checked,
+        skipped: report.skipped,
+      };
+    }
+  }
+
   return body;
+}
+
+const GATE_KIND_SET = new Set<string>(GATE_VIOLATION_KINDS);
+const GATE_SKIP_SET = new Set<string>(GATE_SKIP_REASONS);
+
+/**
+ * Copy a well-typed partition of the three check kinds. Returns null when
+ * the report is absent or not a partition, so the caller omits the fields.
+ * Does not throw. Does not read wouldBlock or violations.
+ */
+export function projectGateReport(
+  gate: SentinelVerifyResponse['gate'] | undefined,
+): { checked: GateViolationKind[]; skipped: GateCheckSkip[] } | null {
+  if (!gate || !Array.isArray(gate.checked) || !Array.isArray(gate.skipped)) return null;
+  const seen = new Set<string>();
+  for (const kind of gate.checked) {
+    if (typeof kind !== 'string' || !GATE_KIND_SET.has(kind) || seen.has(kind)) return null;
+    seen.add(kind);
+  }
+  const skipByKind = new Map<GateViolationKind, GateCheckSkip>();
+  for (const item of gate.skipped) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const record = item as unknown as Record<string, unknown>;
+    const keys = Object.keys(record);
+    if (keys.length !== 2 || !Object.prototype.hasOwnProperty.call(record, 'kind') ||
+        !Object.prototype.hasOwnProperty.call(record, 'reason')) {
+      return null;
+    }
+    if (typeof record.kind !== 'string' || !GATE_KIND_SET.has(record.kind) || seen.has(record.kind)) {
+      return null;
+    }
+    if (typeof record.reason !== 'string' || !GATE_SKIP_SET.has(record.reason)) return null;
+    seen.add(record.kind);
+    skipByKind.set(record.kind as GateViolationKind, {
+      kind: record.kind as GateViolationKind,
+      reason: record.reason as GateSkipReason,
+    });
+  }
+  if (seen.size !== GATE_VIOLATION_KINDS.length) return null;
+  return {
+    checked: GATE_VIOLATION_KINDS.filter((kind) => (gate.checked ?? []).includes(kind)),
+    skipped: GATE_VIOLATION_KINDS.filter((kind) => skipByKind.has(kind)).map(
+      (kind) => skipByKind.get(kind) as GateCheckSkip,
+    ),
+  };
 }
 
 /**

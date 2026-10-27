@@ -26,7 +26,7 @@ import {
   resolveActionAuthPromotion,
   decisionBasisForPromotionReason,
 } from './verdict.js';
-import { runAuthorizationGate, type GateMode } from './authorization-gate.js';
+import { gateEnforcedVerdict, runAuthorizationGate, type GateMode } from './authorization-gate.js';
 import {
   classifyActionAuthKind,
   OBJECTIVE_MISMATCH_BLOCK_REASON,
@@ -97,12 +97,16 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         wouldBlock: gateResult.wouldBlock,
         enforced: gateResult.enforcedVerdict !== null,
         violations: gateResult.violations,
+        // Report-only. Not read by the short-circuit or by promotion.
+        checked: gateResult.checked,
+        skipped: gateResult.skipped,
       }
     : undefined;
 
   // 0b. Enforce-mode short-circuit: a hard violation BLOCKs without spending the
   //     cascade (cb4a structural pre-check pattern). Shadow mode never gates here.
-  if (gateResult && gateResult.enforcedVerdict === 'BLOCK') {
+  //     checked/skipped are not inputs. The override is BLOCK or nothing.
+  if (gateEnforcedVerdict(gateResult) === 'BLOCK' && gateResult) {
     const reason =
       'Deterministic authorization gate: ' +
       gateResult.violations.map((v) => v.detail).join(' ');

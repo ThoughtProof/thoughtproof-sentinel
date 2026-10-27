@@ -1589,6 +1589,9 @@ describe('action_authorization suite fixtures — financial PASS hint (#55)', ()
     expect(res.verdict).not.toBe('ALLOW');
     expect(res.gate?.enforced).toBe(true);
     expect(res.gate?.violations.some((v) => v.kind === 'amount_overshoot')).toBe(true);
+    expect(res.gate?.checked).toContain('amount_overshoot');
+    expect(res.gate?.checked).toContain('recipient_mismatch');
+    expect(res.meta.promotion).toBeUndefined();
     expect(mockRunCascade).not.toHaveBeenCalled();
   });
 
