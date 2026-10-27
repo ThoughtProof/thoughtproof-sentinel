@@ -4,7 +4,7 @@
 **Decider:** Founder
 **Depends on:** canonical v2 (ADR-0022), salted mandate digest ([#99](https://github.com/ThoughtProof/thoughtproof-sentinel/pull/99)), `gate.checked` ([#100](https://github.com/ThoughtProof/thoughtproof-sentinel/pull/100))
 
-This ADR records proposed decisions. It implies no implementation GO and no suite GO. It does not change the API, the engine, the verifier, or any workflow.
+This ADR records proposed decisions. It implies no implementation GO and no suite GO. It does not change the API, the engine, the verifier, or any workflow. The request format, the account-id equality check, the receipt-time and replay rules, and the suite path list below are prerequisites for a later implementation GO. They are not that GO.
 
 ## Context
 
@@ -48,7 +48,7 @@ Registration is separately authorized. The principal generates the key pair and 
 
 ## Account binding
 
-A trustworthy key-to-manifest mapping is a prerequisite. `validateApiKey` today returns `platform` and `agent_id`, not a stable account id. The manifest is loaded for the account that mapping identifies. A request field must not name the account. `X-Sentinel-Agent-Id` must not name it either.
+A trustworthy key-to-manifest mapping is a prerequisite. `validateApiKey` today returns `platform` and `agent_id`, not a stable account id. The manifest is loaded for the account that mapping identifies. The request must not select the account. A signed account id may be included in `mandate_proof`, and it must exactly equal the server-side authenticated account id. A mismatch gives BLOCK. `X-Sentinel-Agent-Id` must not select the account either.
 
 ## Envelope
 
@@ -62,21 +62,78 @@ Transport and verify the same fields. The signed message is JCS of a versioned o
 - target environment
 - purpose
 
-Purpose and schema version are audience binding. Evidence types keep their own validation rules. A mandate signature is not an evidence signature and is not an export signature.
+Purpose and schema version are audience binding. Evidence types keep their own validation rules. A mandate signature is not an evidence signature and is not an export signature. The signature is not part of the signed bytes.
 
-`mandate_sig` and `principal_kid` are the additive request fields. On success, v2 carries `mandate_source: principal_signed`, bound to the mandate that verified. v1 bytes do not gain the field. The signature bytes and the mandate plaintext are not v2 fields.
+### Request format
 
-MCP `verify_before_action` and OpenAPI gain the same optional request fields and document `mandate_source` on the v2 body. Optional in the schema means non-migrated clients can omit them. It does not override an account policy that requires the signature. v1 `signed_export` is unchanged.
+The envelope travels as one additive object, `mandate_proof`, beside the existing `mandate`. It is not two loose fields `mandate_sig` and `principal_kid`. `mandate` stays the mandate. `mandate_proof` carries the envelope and the signature. The signature is over the JCS bytes of the normalized mandate plus every `mandate_proof` field except `signature`.
+
+| Field | Role |
+|---|---|
+| `schema_version` | Audience and representation version. |
+| `nonce` | Single-use CSPRNG value. |
+| `iat`, `exp` | Unix seconds. Checked against server receipt time as below. |
+| `account_id` | Must equal the authenticated account id. It does not select the account. |
+| `environment` | Target environment. |
+| `purpose` | Purpose string. `action_authorization` for this path. |
+| `principal_kid` | Kid in the server-pinned manifest. |
+| `signature` | Ed25519 over the signed message, hex. |
+
+Placeholder example only. These values are not a vector and not a key.
+
+```json
+{
+  "mandate": {
+    "kind": "value_transfer",
+    "granted": {
+      "maxAmount": 1,
+      "asset": "PLACEHOLDER_ASSET",
+      "recipient": "placeholder-recipient"
+    },
+    "action": {
+      "kind": "value_transfer",
+      "amount": 1,
+      "asset": "PLACEHOLDER_ASSET",
+      "recipient": "placeholder-recipient"
+    }
+  },
+  "mandate_proof": {
+    "schema_version": "sentinel.mandate-proof.v1",
+    "nonce": "placeholder-nonce",
+    "iat": 1780000000,
+    "exp": 1780000300,
+    "account_id": "placeholder-account",
+    "environment": "placeholder-env",
+    "purpose": "action_authorization",
+    "principal_kid": "placeholder-kid",
+    "signature": "placeholder-signature"
+  }
+}
+```
+
+On success, v2 carries `mandate_source: principal_signed`, bound to the mandate that verified. v1 bytes do not gain the field. The signature bytes and the mandate plaintext are not v2 fields.
+
+MCP `verify_before_action` and OpenAPI gain optional `mandate_proof` and document `mandate_source` on the v2 body. Optional in the schema means non-migrated clients can omit the object. It does not override an account policy that requires it. v1 `signed_export` is unchanged.
 
 ## Replay and rotation
 
+Let `now` be the server receipt time in unix seconds. Skew is 30 seconds. Accept the times only when all of these hold:
+
+- `iat <= now + 30`
+- `exp > now - 30`
+- `exp - iat <= 300`
+
+The key must be `active` at receipt time: `now` inside `notBefore` / `notAfter`. `iat` does not choose that window. A signer-chosen `iat` does not make a retired or not-yet-valid key active.
+
 After the signature verifies, consume the nonce in the shared store atomically, before any paid call or other relevant side effect. Two parallel requests with the same nonce must not both pass. Do not retry a proof from the start. A lost response needs a new proof.
+
+A consumed nonce is retained at least until `exp + skew`. No replay entry may expire while the proof could still be accepted. If the replay store or the key store is unavailable, the result is UNCERTAIN / HTTP 503, not a pass and not a local fallback.
 
 The manifest may hold more than one kid so a replacement key can be registered before the old one is retired. Rotation and revocation are account actions outside `POST /sentinel/verify`. The verify caller cannot add, retire, or revoke a kid.
 
 | Status | New authorization request |
 |---|---|
-| `active` | Verify. `iat` must sit inside `notBefore` / `notAfter`, within the 30-second skew. `exp` must fall inside the 5-minute validity. |
+| `active` | Verify. The key window is receipt time (`now`), not `iat`. The time checks above must hold. |
 | `retired` | BLOCK for a new authorization request. An `iat` the signer chose does not prove the proof was made while the key was active. |
 | `revoked` | BLOCK, including inside any old window. |
 
@@ -94,7 +151,7 @@ The later offline vectors cover aliases, unknown fields, and `__proto__`.
 
 A failed principal check must not become ALLOW, including when v2 issuance fails and `signed_export_v2` is omitted. `principal_signed` is set only for the mandate that verified. An existing BLOCK must not be weakened to UNCERTAIN.
 
-`principal_kid` is not automatically archived in public. A stable kid can link accounts or persons. Public material, when a surface is explicitly chosen later, is limited to kid and status, and only on that surface. The mandate plaintext, `mandate_sig`, the salt, and the digest preimage stay off the public receipt allowlist. `signed_export_v2.canonical` stays off that allowlist. `mandate_source` is an enum on v2. It is not a reason to publish the mandate.
+`principal_kid` is not automatically archived in public. A stable kid can link accounts or persons. Public material, when a surface is explicitly chosen later, is limited to kid and status, and only on that surface. The mandate plaintext, `mandate_proof.signature`, the salt, and the digest preimage stay off the public receipt allowlist. `signed_export_v2.canonical` stays off that allowlist. `mandate_source` is an enum on v2. It is not a reason to publish the mandate.
 
 ## Invariants
 
@@ -121,6 +178,6 @@ Only after a separate implementation GO, and not as part of accepting this ADR:
 
 - Crypto vectors for a valid signature, a wrong key, a tampered byte, expiry, skew, replay, and a domain separator that does not verify as an export or as evidence.
 - Offline normalization vectors for aliases, unknown fields, and `__proto__`, showing the signer, the gate, and the digest see the same representation.
-- Negative matrix: protection on and the mandate omitted, one of `mandate_sig` / `principal_kid` missing, unknown kid, revoked kid, retired kid presented as a new request, replay store down, two parallel uses of one nonce. Known-invalid cases are BLOCK. Store-down is UNCERTAIN or 503. None is ALLOW, and none turns a BLOCK into UNCERTAIN.
+- Negative matrix: protection on and `mandate_proof` omitted, a required `mandate_proof` field missing, `account_id` not equal to the authenticated account, unknown kid, revoked kid, retired kid presented as a new request, replay store down, two parallel uses of one nonce, and a nonce entry dropped before `exp + skew`. Known-invalid cases are BLOCK. Store-down is UNCERTAIN or 503. None is ALLOW, and none turns a BLOCK into UNCERTAIN.
 - Verdict invariance across the P3 gate matrix with `mandate_source` varied, including a valid signature on a case that is already BLOCK or UNCERTAIN.
-- A paid suite only on a later PR that touches `src/engine/**`. This ADR does not authorize that run.
+- The paid live suite is the `pull_request` path filter in `.github/workflows/action-authorization-suite.yml`. A later PR that changes any of these paths starts that workflow: `scenarios/action-authorization-suite.json`, `scripts/action-authorization-suite.mjs`, `scripts/lib/action-auth-suite-metrics.mjs`, `scripts/lib/action-auth-suite-receipt.mjs`, `.github/workflows/action-authorization-suite.yml`, and `src/engine/**`. This ADR does not change those paths and does not authorize that run.
