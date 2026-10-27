@@ -1,4 +1,10 @@
-import type { AuthorizationMandate, GateMode, GateViolation } from './engine/authorization-gate.js';
+import type {
+  AuthorizationMandate,
+  GateCheckSkip,
+  GateMode,
+  GateViolation,
+  GateViolationKind,
+} from './engine/authorization-gate.js';
 import type { RateLimitBackend } from './upstash-env.js';
 
 export type { RateLimitBackend };
@@ -302,6 +308,13 @@ export interface SentinelVerifyResponse {
     wouldBlock: boolean;
     enforced: boolean;
     violations: GateViolation[];
+    /**
+     * Checks that ran. Report-only (P3). Canonical v2 may sign these.
+     * They are not an input to the verdict or the promotion.
+     */
+    checked?: GateViolationKind[];
+    /** Checks skipped for a missing or unparseable input. Report-only. */
+    skipped?: GateCheckSkip[];
   };
   meta: {
     duration_ms: number;

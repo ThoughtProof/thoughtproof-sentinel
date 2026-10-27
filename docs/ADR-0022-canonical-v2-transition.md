@@ -27,9 +27,10 @@
 
 ## Non-goals
 
-- No `checks_performed` / `gate.checked` (that would touch `src/engine/**`).
 - No principal-signed mandate and no public copy of `canonical`, `signature`, or `keyId`.
 - No new path that upgrades a verdict to ALLOW.
+
+`checks_performed` / `gate.checked` was a non-goal of the original decision. The P3 addendum below lifts that for a report-only v2 projection. It still does not touch the public receipt allowlist.
 
 ## Addendum (P1): salted mandate and action commitments
 
@@ -46,3 +47,19 @@ A mandate is low-entropy: amount, recipient, asset, and kind. `sha256(JCS(mandat
 9. **Public receipt.** `meta.digest_salt`, `mandateDigest`, and `actionDigest` are not on the action-authorization receipt allowlist. `scripts/lib/action-auth-suite-receipt.mjs` is unchanged. Unknown keys are dropped, and `signed_export_v2` is already not a receipt field, so the signed canonical (which holds the digests) stays off the public receipt. `signed_export.canonical` stays null on that allowlist.
 10. **Fail-safe.** No mandate omits `mandateDigest`. No action omits `actionDigest`. A hash failure omits that field and does not throw into the verify handler. If neither digest is produced, `meta.digest_salt` is omitted. The verdict, the promotion, and the v1 export do not change. A missing digest is not an ALLOW.
 11. **Verifier.** `scripts/verify-canonical-export.mjs` takes optional `--mandate`, `--action`, and `--digest-salt`. If any of them is set, the check is mandatory and fails closed: incomplete input, a salt that is not 32 bytes, a v1-only document, a missing digest, or a mismatch. The mandate, the action, and the salt are not printed. Without the flags, verification is unchanged. The caller passes the same JSON that was committed (the validated mandate and its action), plus the salt from `meta.digest_salt`.
+
+## Addendum (P3): gate.checked and gate.skipped
+
+**Status:** Proposed (2026-10-27). Do not merge without Raul GO. Touches `src/engine/**` (paid suite trigger).
+
+### Context
+
+`runAuthorizationGate` reports violations and stays silent when a field is missing. An ALLOW therefore does not say which of the three checks ran. Signing that list belongs on canonical v2. It must not become an input to the verdict, the promotion, or the fail-safe.
+
+### Decision
+
+12. **Report-only, on the gate result.** `runAuthorizationGate` also returns `checked: GateViolationKind[]` and `skipped: {kind, reason}[]`. `checked` lists the checks whose inputs were present and evaluated (`amount_overshoot`, `recipient_mismatch`, `unlimited_approval`). `skipped` lists the others. Reasons are a closed set: `missing_granted_amount`, `missing_action_amount`, `amount_not_finite`, `missing_granted_recipient`, `missing_action_recipient`, `missing_allowance`, `allowance_unparseable`, and `gate_error` (internal throw only; that result stays silent and is not projected). The two arrays are a partition of the three kinds. They are not read by `wouldBlock`, `enforcedVerdict`, or `resolveActionAuthPromotion`.
+13. **v2 only.** When the response gate is present and the report is a well-typed partition, `buildCanonicalSentinelVerdictV2` sets `gate.checked` and `gate.skipped`. v1 `buildCanonicalSentinelVerdict` does not copy them. Existing M1 v1 vectors are not regenerated. A pre-P3 v2 body with no `gate.checked` key stays valid. A malformed report is omitted; the rest of the v2 body, including the v1 gate fields, is unchanged. Omission is not an ALLOW.
+14. **Engine wiring.** The non-silent response `gate` carries `checked` and `skipped` so the v2 builder can read them. The enforce short-circuit still keys only off `enforcedVerdict === 'BLOCK'`. Shadow mode still does not override. A thrown gate stays silent (`enforcedVerdict` null). UNCERTAIN, evaluator error, HTTP 401, 429, and 5xx are unchanged and are not turned into ALLOW by this report.
+15. **Public receipt.** `scripts/lib/action-auth-suite-receipt.mjs` is unchanged. `gate` is not a receipt field, so the report is dropped with the rest of that object. `signed_export_v2` stays off the allowlist. The enum arrays are not added.
+16. **Verifier.** After the signature and the digest match, `scripts/verify-canonical-export.mjs` type-checks a v2 canonical. Missing `gate`, or a `gate` object with neither new key, verifies. If either key is present, both must be present, `checked` must be an array of the three kinds, and `skipped` must be an array of `{kind, reason}` with only those two fields and a closed reason. The two arrays must be disjoint and cover each kind once. Anything else is `gate_report_invalid` (fail closed, exit 2). The invalid value is not printed. v1 canonical bytes are not inspected for these keys.

@@ -168,6 +168,74 @@ describe('canonical verdict v2', () => {
     expect(v2.artifactSchema).toBe('sentinel.verdict.canonical.v2');
     expect(v2.releaseId).toBe(RELEASE_ID);
     expect(v2.gate.violations).toEqual(['recipient mismatch']);
+    expect(v2.gate).not.toHaveProperty('checked');
+    expect(v2.gate).not.toHaveProperty('skipped');
+  });
+
+  it('puts gate.checked and gate.skipped on v2 only, and omits a malformed report', () => {
+    const response = fixtureResponse(promotion());
+    response.verdict = 'ALLOW';
+    response.gate = {
+      mode: 'shadow',
+      wouldBlock: false,
+      enforced: false,
+      violations: [],
+      checked: ['unlimited_approval', 'amount_overshoot', 'recipient_mismatch'],
+      skipped: [],
+    };
+    const withoutReport = fixtureResponse(promotion());
+    withoutReport.gate = {
+      mode: 'shadow',
+      wouldBlock: false,
+      enforced: false,
+      violations: [],
+    };
+    const v1With = serializeCanonicalSentinelVerdict(buildCanonicalSentinelVerdict(response));
+    const v1Without = serializeCanonicalSentinelVerdict(buildCanonicalSentinelVerdict(withoutReport));
+    expect(v1With).toBe(v1Without);
+    expect(v1With).not.toContain('"checked"');
+    expect(v1With).not.toContain('"skipped"');
+    expect(JSON.parse(v1With).artifactSchema).toBe('sentinel.verdict.canonical.v1');
+
+    const v2 = JSON.parse(
+      serializeCanonicalSentinelVerdict(
+        buildCanonicalSentinelVerdictV2(response, { potCli: POT_CLI }),
+      ),
+    ) as {
+      verdict: string;
+      artifactSchema: string;
+      gate: { checked: string[]; skipped: unknown[]; wouldBlock: boolean };
+    };
+    expect(v2.artifactSchema).toBe('sentinel.verdict.canonical.v2');
+    expect(v2.verdict).toBe('ALLOW');
+    expect(v2.gate.wouldBlock).toBe(false);
+    expect(v2.gate.checked).toEqual([
+      'amount_overshoot',
+      'recipient_mismatch',
+      'unlimited_approval',
+    ]);
+    expect(v2.gate.skipped).toEqual([]);
+
+    const malformed = fixtureResponse(promotion());
+    malformed.verdict = 'UNCERTAIN';
+    malformed.gate = {
+      mode: 'enforce',
+      wouldBlock: false,
+      enforced: false,
+      violations: [],
+      checked: ['not-a-kind' as 'amount_overshoot'],
+      skipped: [],
+    };
+    const v2Malformed = JSON.parse(
+      serializeCanonicalSentinelVerdict(
+        buildCanonicalSentinelVerdictV2(malformed, { potCli: POT_CLI }),
+      ),
+    ) as { verdict: string; gate: Record<string, unknown> };
+    expect(v2Malformed.verdict).toBe('UNCERTAIN');
+    expect(v2Malformed.gate).not.toHaveProperty('checked');
+    expect(v2Malformed.gate).not.toHaveProperty('skipped');
+    expect(v2Malformed.gate.wouldBlock).toBe(false);
+    expect(v2Malformed.gate.violations).toEqual([]);
   });
 });
 

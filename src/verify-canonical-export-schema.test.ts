@@ -276,4 +276,84 @@ describe('verify-canonical-export schema selection', () => {
     expect(body.ok).toBe(true);
     expect(body.verified_schemas).toEqual([SCHEMA_V2]);
   });
+
+  it('verifies v2 when gate.checked and gate.skipped are a typed partition', () => {
+    const canonical = JSON.stringify({
+      artifactSchema: SCHEMA_V2,
+      verdict: 'ALLOW',
+      gate: {
+        mode: 'shadow',
+        wouldBlock: false,
+        enforced: false,
+        violations: [],
+        checked: ['recipient_mismatch', 'amount_overshoot'],
+        skipped: [{ kind: 'unlimited_approval', reason: 'missing_allowance' }],
+      },
+    });
+    const file = writeJson('v2-gate-report.json', envelope(SCHEMA_V2, canonical, privateKey));
+    const result = run(file, ['--schema', 'v2']);
+    const body = parsed(result);
+    expect(result.status).toBe(0);
+    expect(body.ok).toBe(true);
+    expect(body.verified_schemas).toEqual([SCHEMA_V2]);
+  });
+
+  it('still verifies a v2 gate that has no checked or skipped keys', () => {
+    const canonical = JSON.stringify({
+      artifactSchema: SCHEMA_V2,
+      verdict: 'BLOCK',
+      gate: { mode: 'enforce', wouldBlock: true, enforced: true, violations: ['overshoot'] },
+    });
+    const file = writeJson('v2-gate-legacy.json', envelope(SCHEMA_V2, canonical, privateKey));
+    const result = run(file, ['--schema', 'v2']);
+    expect(result.status).toBe(0);
+    expect(parsed(result).ok).toBe(true);
+  });
+
+  it('does not apply the gate report check to v1', () => {
+    const canonical = JSON.stringify({
+      artifactSchema: SCHEMA_V1,
+      verdict: 'ALLOW',
+      gate: { checked: 'not-an-array', skipped: null },
+    });
+    const file = writeJson('v1-ignores-gate-report.json', envelope(SCHEMA_V1, canonical, privateKey));
+    const result = run(file, ['--schema', 'v1']);
+    expect(result.status).toBe(0);
+    expect(parsed(result).verified_schemas).toEqual([SCHEMA_V1]);
+  });
+
+  it('fails closed when v2 gate.checked or gate.skipped has an invalid type', () => {
+    const badGates: unknown[] = [
+      { checked: 'amount_overshoot', skipped: [] },
+      { checked: null, skipped: [] },
+      { checked: ['nope'], skipped: [] },
+      { checked: ['amount_overshoot', 'amount_overshoot'], skipped: [] },
+      { checked: ['amount_overshoot'], skipped: 'missing' },
+      { checked: ['amount_overshoot'], skipped: [{ kind: 'recipient_mismatch' }] },
+      {
+        checked: ['amount_overshoot'],
+        skipped: [{ kind: 'recipient_mismatch', reason: 'because the caller said so' }],
+      },
+      {
+        checked: ['amount_overshoot'],
+        skipped: [{ kind: 'recipient_mismatch', reason: 'missing_action_recipient', detail: 'secret' }],
+      },
+      { checked: ['amount_overshoot'], skipped: [{ kind: 'amount_overshoot', reason: 'missing_granted_amount' }] },
+      [],
+      null,
+      'shadow',
+    ];
+    for (const [index, gate] of badGates.entries()) {
+      const canonical = JSON.stringify({ artifactSchema: SCHEMA_V2, verdict: 'ALLOW', gate });
+      const file = writeJson(`v2-bad-gate-${index}.json`, envelope(SCHEMA_V2, canonical, privateKey));
+      const result = run(file, ['--schema', 'v2']);
+      const body = parsed(result) as { ok: boolean; error?: string; code?: string; detail?: string };
+      expect(result.status).not.toBe(0);
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe('gate_report_invalid');
+      expect(body.code).toBe('GATE_REPORT_INVALID');
+      expect(body.detail ?? '').not.toContain('secret');
+      expect(JSON.stringify(body)).not.toContain('because the caller said so');
+    }
+  });
 });

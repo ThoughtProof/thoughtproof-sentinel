@@ -42,6 +42,14 @@
  * DECISION_SIGNER_UNTRUSTED is reserved for key_not_found / window / vector-only —
  * not for a broken signature on a known key.
  *
+ * v2 gate report (ADR-0022 P3 addendum), after the digest matches:
+ *   gate.checked and gate.skipped are optional together. Absent on a v2
+ *   body is valid (pre-P3 exports). When either key is present, both must
+ *   be a partition of amount_overshoot, recipient_mismatch, and
+ *   unlimited_approval. skipped[].reason is a closed enum. Invalid types
+ *   fail closed (gate_report_invalid). v1 is not inspected. Values are
+ *   not echoed.
+ *
  * Optional salted-commitment recompute (ADR-0022 addendum), v2 only:
  *   --mandate <json>  --action <json>  --digest-salt <64 hex chars>
  * When any of those flags is set the check is mandatory and fails closed.
@@ -272,6 +280,100 @@ function matchCommitment(field, actual, value, salt) {
       error: 'commitment_mismatch',
       field,
       code: 'DECISION_COMMITMENT_DIGEST_MISMATCH',
+    };
+  }
+  return { ok: true };
+}
+
+export const GATE_REPORT_KINDS = Object.freeze([
+  'amount_overshoot',
+  'recipient_mismatch',
+  'unlimited_approval',
+]);
+
+export const GATE_REPORT_SKIP_REASONS = Object.freeze([
+  'missing_granted_amount',
+  'missing_action_amount',
+  'amount_not_finite',
+  'missing_granted_recipient',
+  'missing_action_recipient',
+  'missing_allowance',
+  'allowance_unparseable',
+  'gate_error',
+]);
+
+const GATE_KIND_SET = new Set(GATE_REPORT_KINDS);
+const GATE_SKIP_SET = new Set(GATE_REPORT_SKIP_REASONS);
+
+/**
+ * Type-check v2 gate.checked / gate.skipped.
+ * null = not v2, caller skips the check.
+ * Does not echo the canonical or the invalid value.
+ */
+export function checkCanonicalGateReport(artifactSchema, canonical) {
+  if (artifactSchema !== SCHEMA_V2) return null;
+  let body;
+  try {
+    body = JSON.parse(canonical);
+  } catch {
+    return { ok: false, error: 'gate_report_invalid', detail: 'v2 canonical is not JSON' };
+  }
+  if (!isPlainObject(body)) {
+    return { ok: false, error: 'gate_report_invalid', detail: 'v2 canonical is not an object' };
+  }
+  if (!hasOwn(body, 'gate')) return { ok: true };
+  const gate = body.gate;
+  if (!isPlainObject(gate)) {
+    return { ok: false, error: 'gate_report_invalid', detail: 'gate must be an object' };
+  }
+  const hasChecked = hasOwn(gate, 'checked');
+  const hasSkipped = hasOwn(gate, 'skipped');
+  if (!hasChecked && !hasSkipped) return { ok: true };
+  if (hasChecked !== hasSkipped) {
+    return {
+      ok: false,
+      error: 'gate_report_invalid',
+      detail: 'gate.checked and gate.skipped must both be present',
+    };
+  }
+  if (!Array.isArray(gate.checked)) {
+    return { ok: false, error: 'gate_report_invalid', detail: 'gate.checked must be an array' };
+  }
+  if (!Array.isArray(gate.skipped)) {
+    return { ok: false, error: 'gate_report_invalid', detail: 'gate.skipped must be an array' };
+  }
+  const seen = new Set();
+  for (const kind of gate.checked) {
+    if (typeof kind !== 'string' || !GATE_KIND_SET.has(kind) || seen.has(kind)) {
+      return { ok: false, error: 'gate_report_invalid', detail: 'gate.checked has an invalid kind' };
+    }
+    seen.add(kind);
+  }
+  for (const item of gate.skipped) {
+    if (!isPlainObject(item)) {
+      return { ok: false, error: 'gate_report_invalid', detail: 'gate.skipped item must be an object' };
+    }
+    const keys = Object.keys(item);
+    if (keys.length !== 2 || !hasOwn(item, 'kind') || !hasOwn(item, 'reason')) {
+      return {
+        ok: false,
+        error: 'gate_report_invalid',
+        detail: 'gate.skipped item must have kind and reason only',
+      };
+    }
+    if (typeof item.kind !== 'string' || !GATE_KIND_SET.has(item.kind) || seen.has(item.kind)) {
+      return { ok: false, error: 'gate_report_invalid', detail: 'gate.skipped has an invalid kind' };
+    }
+    if (typeof item.reason !== 'string' || !GATE_SKIP_SET.has(item.reason)) {
+      return { ok: false, error: 'gate_report_invalid', detail: 'gate.skipped has an invalid reason' };
+    }
+    seen.add(item.kind);
+  }
+  if (seen.size !== GATE_REPORT_KINDS.length) {
+    return {
+      ok: false,
+      error: 'gate_report_invalid',
+      detail: 'gate report must cover every check kind once',
     };
   }
   return { ok: true };
@@ -666,6 +768,18 @@ function verifyOne(artifact, args, doc, source) {
     });
   }
 
+  const gateReport = checkCanonicalGateReport(artifact.artifactSchema, artifact.canonical);
+  if (gateReport && gateReport.ok === false) {
+    return fail(2, {
+      ok: false,
+      error: gateReport.error,
+      detail: gateReport.detail,
+      code: 'GATE_REPORT_INVALID',
+      artifactSchema: artifact.artifactSchema,
+      keyId: artifact.keyId,
+    });
+  }
+
   if (fields.validUntil !== undefined && args.now > fields.validUntil) {
     return fail(6, {
       ok: false,
@@ -693,7 +807,7 @@ function verifyOne(artifact, args, doc, source) {
       domain: DOMAIN,
       envelopeAlg: artifact.alg,
       jwkAlg: entry.alg || null,
-      verifyOrder: 'key_resolve → signature → digest → validUntil',
+      verifyOrder: 'key_resolve → signature → digest → gate_report → validUntil',
       note: 'envelope alg Ed25519 ≠ JWK alg EdDSA — do not cross-compare',
     },
   };

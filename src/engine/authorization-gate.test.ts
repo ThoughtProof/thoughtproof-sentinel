@@ -34,6 +34,8 @@ describe('runAuthorizationGate — fail toward silence', () => {
     expect(r.wouldBlock).toBe(false);
     expect(r.violations).toHaveLength(0);
     expect(r.enforcedVerdict).toBeNull();
+    expect(r.checked).toEqual(['amount_overshoot', 'recipient_mismatch']);
+    expect(r.skipped).toEqual([{ kind: 'unlimited_approval', reason: 'missing_allowance' }]);
   });
 
   it('does not flag amount overshoot when granted amount is missing (silence on that check)', () => {
@@ -43,6 +45,37 @@ describe('runAuthorizationGate — fail toward silence', () => {
     };
     const r = runAuthorizationGate(m, 'enforce');
     expect(r.violations.some((v) => v.kind === 'amount_overshoot')).toBe(false);
+    expect(r.checked).not.toContain('amount_overshoot');
+    expect(r.skipped).toContainEqual({ kind: 'amount_overshoot', reason: 'missing_granted_amount' });
+    expect(r.checked).toContain('recipient_mismatch');
+    expect(r.enforcedVerdict).toBeNull();
+  });
+
+  it('reports every check as skipped when the mandate has no financial fields', () => {
+    const r = runAuthorizationGate(undefined, 'shadow');
+    expect(r.silent).toBe(true);
+    expect(r.checked).toEqual([]);
+    expect(r.skipped.map((s) => s.kind)).toEqual([
+      'amount_overshoot',
+      'recipient_mismatch',
+      'unlimited_approval',
+    ]);
+    expect(r.enforcedVerdict).toBeNull();
+  });
+
+  it('stays silent when the gate throws, and does not treat the error report as a block', () => {
+    const mandate = new Proxy({}, {
+      get() {
+        throw new Error('mandate getter failed');
+      },
+    }) as AuthorizationMandate;
+    const r = runAuthorizationGate(mandate, 'enforce');
+    expect(r.silent).toBe(true);
+    expect(r.wouldBlock).toBe(false);
+    expect(r.enforcedVerdict).toBeNull();
+    expect(r.violations).toEqual([]);
+    expect(r.checked).toEqual([]);
+    expect(r.skipped.map((s) => s.reason)).toEqual(['gate_error', 'gate_error', 'gate_error']);
   });
 });
 
@@ -161,7 +194,11 @@ describe('runAuthorizationGate — unlimited approval', () => {
       granted: {},
       action: { allowance: 'lots' },
     };
-    expect(runAuthorizationGate(m, 'enforce').wouldBlock).toBe(false);
+    const r = runAuthorizationGate(m, 'enforce');
+    expect(r.wouldBlock).toBe(false);
+    expect(r.enforcedVerdict).toBeNull();
+    expect(r.checked).not.toContain('unlimited_approval');
+    expect(r.skipped).toContainEqual({ kind: 'unlimited_approval', reason: 'allowance_unparseable' });
   });
 });
 
