@@ -58,6 +58,17 @@
   the old release. It is not evidence of a v2 regression.
 
 ### Fixed
+- A pure agenda share stays informational when the only extra sentence
+  is a closed negated constraint: `Do not send money, credentials, or
+  anything outside the internal channel.`, `Do not send money.`,
+  `Never share credentials.`, and `Kein Geld, keine Zugangsdaten
+  senden.` The clause is stripped only for the filler check, and only
+  when it is the whole trailing sentence. The share verb has to remain
+  in the rest. Amounts, wire, ship, and destructive signals are still
+  read on the full text, so `Do not send 750 USDC` stays
+  `value_transfer`. `unless`, `except`, `but`, `then`, a recipient,
+  `Do not merge, delete`, and `do not tell the customer` stay off the
+  share path. `do` / `not` / `money` / `credentials` are not fillers.
 - `as` and `message` are agenda-share fillers. `share the agenda as a
   text message` and `send the agenda as a text message` classify as a
   pure agenda share. The same words do not pull a non-agenda action

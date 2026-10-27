@@ -70,7 +70,13 @@
  * `sende` / `schick` / `schicke` / `teile` / `post` / `poste` /
  * `posten` / `posting`, optionally "with the team" / "an das Team" /
  * "in den Gruppenchat" / "to the Vorstand chat") with no other action
- * verb. Anything else stays
+ * verb. A trailing sentence that is only a closed negated constraint
+ * ("Do not send money, credentials, or anything outside the internal
+ * channel.", "Never share credentials.", "Kein Geld, keine
+ * Zugangsdaten senden.") is removed before the filler check. The share
+ * verb must still be in what remains. Amounts, wire, ship, and
+ * destructive signals are read on the full text first. Those constraint
+ * words are not fillers. Anything else stays
  * `unknown` (text-only UNCERTAIN; declared informational still
  * fail-closes). A pure agenda-share *mandate* does not unlock the
  * #38/#47 informational allow path for a different action: the action
@@ -337,6 +343,47 @@ const AGENDA_SHARE_FILLER = new Set([
 ]);
 
 /**
+ * Trailing negated constraint, removed only before the filler check.
+ * Closed shape, and only when that shape is the entire trailing
+ * sentence or clause. `unless` / `except` / `but` / `then` / a
+ * recipient / an amount keeps the clause. Joiners are comma, `/`,
+ * and/or (und/oder). Operative signals still see the full text.
+ * `do` / `not` / `money` / `credentials` are not fillers.
+ *
+ * "Do not send money, credentials, or anything outside the internal channel."
+ * "Never share credentials."
+ * "Kein Geld, keine Zugangsdaten senden."
+ */
+const AGENDA_CONSTRAINT_VERB =
+  '(?:send|share|post|transfer|pay|disclose|senden|teilen)';
+const AGENDA_CONSTRAINT_OBJECT =
+  '(?:anything\\s+outside\\s+the\\s+internal\\s+(?:channel|chat)|bank\\s+details|credentials|passwords?|payments?|secrets|money|funds|keys|geld|zugangsdaten|passwörter|passwoerter)';
+const AGENDA_CONSTRAINT_JOIN =
+  '(?:\\s*,?\\s+(?:or|and|oder|und)\\s+|\\s*/\\s*|\\s*,\\s*)';
+const AGENDA_CONSTRAINT_OBJECTS =
+  `\\b${AGENDA_CONSTRAINT_OBJECT}\\b(?:${AGENDA_CONSTRAINT_JOIN}\\b${AGENDA_CONSTRAINT_OBJECT}\\b)*`;
+const AGENDA_CONSTRAINT_EN =
+  `(?:\\bdo\\s+not\\b|\\bdon['’]t\\b|\\bnever\\b|\\bnicht\\b)\\s+(?:\\b${AGENDA_CONSTRAINT_VERB}\\b\\s+)?${AGENDA_CONSTRAINT_OBJECTS}(?:\\s+\\b${AGENDA_CONSTRAINT_VERB}\\b)?`;
+const AGENDA_CONSTRAINT_DE =
+  `(?:\\bkein(?:e)?\\b\\s+\\b${AGENDA_CONSTRAINT_OBJECT}\\b)(?:${AGENDA_CONSTRAINT_JOIN}\\bkein(?:e)?\\b\\s+\\b${AGENDA_CONSTRAINT_OBJECT}\\b)*(?:\\s+\\b${AGENDA_CONSTRAINT_VERB}\\b)?`;
+const AGENDA_TRAILING_CONSTRAINT_RE = new RegExp(
+  `(^|[.!?;\\n])\\s*(?:${AGENDA_CONSTRAINT_EN}|${AGENDA_CONSTRAINT_DE})[.!?]*\\s*$`,
+  'i',
+);
+
+/** Drop up to four closed trailing constraint sentences. Idempotent. */
+function withoutTrailingAgendaConstraints(text: string): string {
+  let current = text.trimEnd();
+  for (let i = 0; i < 4; i++) {
+    const match = new RegExp(AGENDA_TRAILING_CONSTRAINT_RE.source, 'i').exec(current);
+    if (!match) return current;
+    const boundary = match[1] ?? '';
+    current = (current.slice(0, match.index) + boundary).trimEnd();
+  }
+  return current;
+}
+
+/**
  * Known operative signals that BLOCK an agenda sentence (not an
  * allowlist). They do not make every other verb informational.
  * merge / delete / rm -rf, and wire / payment when VALUE_RE does not
@@ -518,18 +565,20 @@ function agendaOperativeKind(text: string): ActionKind | null {
 }
 
 /**
- * Tokens left after stripping agenda nouns, the share verb, and one
- * closed destination ("to/into/in/im/with … channel"). Apostrophes are
- * removed first so "today's" is the token "todays". Operative signals
- * are not stripped here; the caller rejects those before the filler check.
+ * Tokens left after stripping a closed trailing constraint, agenda
+ * nouns, the share verb, and one closed destination ("to/into/in/im/with
+ * … channel"). Apostrophes are removed first so "today's" is the token
+ * "todays". Operative signals are not stripped here; the caller rejects
+ * those on the full text before the filler check.
  */
 export function agendaShareResidualTokens(text: string): string[] {
   if (!text) return [];
+  const shareText = withoutTrailingAgendaConstraints(text);
   const agendaWord = new RegExp(
     `(?:^|${AGENDA_EDGE})(?:${EN_AGENDA_ANY}|${DE_AGENDA_ANY})(?=$|${AGENDA_EDGE})`,
     'gi',
   );
-  const residual = text
+  const residual = shareText
     .replace(agendaWord, ' ')
     .replace(new RegExp(AGENDA_SHARE_VERB_RE.source, 'gi'), ' ')
     .replace(new RegExp(AGENDA_CHANNEL_DEST_RE.source, 'gi'), ' ')
@@ -541,11 +590,35 @@ export function agendaShareResidualTokens(text: string): string[] {
 /**
  * True only for a pure agenda share. Closed filler list: when in doubt,
  * unknown. Does not treat "schick" as covering "schicken".
+ * Operative signals are decided on the full text. A closed trailing
+ * constraint is ignored only after that, and the share verb has to
+ * remain after that clause is removed.
  */
 function isAgendaShareRequest(text: string): boolean {
-  if (!text || !AGENDA_ANY_RE.test(text) || !AGENDA_SHARE_VERB_RE.test(text)) return false;
+  if (!text || !AGENDA_ANY_RE.test(text)) return false;
   if (textHasAgendaOperativeSignal(text)) return false;
+  const shareText = withoutTrailingAgendaConstraints(text);
+  if (!AGENDA_ANY_RE.test(shareText) || !AGENDA_SHARE_VERB_RE.test(shareText)) return false;
   return agendaShareResidualTokens(text).every((token) => AGENDA_SHARE_FILLER.has(token));
+}
+
+/**
+ * Info cue for kind selection. Without an agenda word, any INFO_ANY hit
+ * counts. With an agenda word, a cue inside the ship-negation window
+ * ("do not tell") does not count, so that sentence is not informational
+ * unless the rest is a pure agenda share.
+ */
+function hasAgendaAwareInfoCue(text: string): boolean {
+  if (!text || !INFO_ANY_RE.test(text)) return false;
+  if (!AGENDA_ANY_RE.test(text)) return true;
+  const re = new RegExp(INFO_ANY_RE.source, 'gi');
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const before = text.slice(Math.max(0, m.index - 48), m.index);
+    if (SHIP_NEGATION_BEFORE_RE.test(before)) continue;
+    return true;
+  }
+  return false;
 }
 
 function classifyBlob(text: string): ActionKind {
@@ -555,8 +628,9 @@ function classifyBlob(text: string): ActionKind {
   if (hasValueTransfer(text)) return 'value_transfer';
   // Positive ship only — "kein Deploy" / "no deploy" must not win over FYI.
   // Agenda/meeting words are not in INFO_ANY_RE, so they do not suppress ship.
-  if (hasPositiveShipInstruction(text) && !INFO_ANY_RE.test(text)) return 'deploy_ship';
-  if (INFO_ANY_RE.test(text) && !hasValueTransfer(text) && !hasPermissionGrant(text)) {
+  // A negated tell/notify on an agenda sentence is not that FYI cue.
+  if (hasPositiveShipInstruction(text) && !hasAgendaAwareInfoCue(text)) return 'deploy_ship';
+  if (hasAgendaAwareInfoCue(text) && !hasValueTransfer(text) && !hasPermissionGrant(text)) {
     return 'informational';
   }
   if (hasPositiveShipInstruction(text)) return 'deploy_ship';

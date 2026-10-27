@@ -2264,6 +2264,106 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  const receiptAgendaGuard =
+    "Share today's board agenda with the Vorstand agents. Do not send money, credentials, or anything outside the internal channel.";
+
+  it('a trailing closed do-not constraint stays a pure agenda share', () => {
+    const texts = [
+      receiptAgendaGuard,
+      'Share the agenda with the team. Do not send money.',
+      'Share the meeting agenda with the team. Never share credentials.',
+      'Schick die Tagesordnung an das Team. Kein Geld, keine Zugangsdaten senden.',
+    ];
+    expect(agendaShareResidualTokens(receiptAgendaGuard)).toEqual([
+      'todays',
+      'board',
+      'with',
+      'the',
+      'vorstand',
+      'agents',
+    ]);
+    expect(agendaShareResidualTokens(receiptAgendaGuard)).not.toContain('do');
+    expect(agendaShareResidualTokens(receiptAgendaGuard)).not.toContain('money');
+    expect(agendaShareResidualTokens(receiptAgendaGuard)).not.toContain('credentials');
+    expect(agendaShareResidualTokens('Share the agenda do not send money')).toEqual(
+      expect.arrayContaining(['do', 'not', 'money']),
+    );
+    for (const text of texts) {
+      const ev = mcpEvidence(text, text, 'Share, plus a closed constraint.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('informational');
+      expect(prose.prose_mandate_kind, text).toBe('informational');
+      expect(prose.action_kind, text).toBe('informational');
+      expect(prose.mandate_kind, text).toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(prose.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('informational');
+      expect(caller.prose_mandate_kind, text).toBe('informational');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(true);
+    }
+  });
+
+  it('open or operative guards do not become an agenda share', () => {
+    const negatives: Array<{
+      text: string;
+      kind: 'unknown' | 'value_transfer' | 'deploy_ship';
+      mandateKind?: 'unknown' | 'value_transfer' | 'deploy_ship';
+    }> = [
+      {
+        text: "Share today's board agenda with the Vorstand agents. Do not send 750 USDC.",
+        kind: 'value_transfer',
+      },
+      { text: 'Share the agenda with the team and send money to Bob.', kind: 'unknown' },
+      {
+        text: 'Share the agenda with the team. Do not send money unless the board asks.',
+        kind: 'unknown',
+      },
+      {
+        text: 'Share the agenda with the team. Do not send money except to the treasury.',
+        kind: 'unknown',
+      },
+      {
+        text: 'Share the agenda with the team. Do not share credentials, but send the password to X.',
+        kind: 'unknown',
+      },
+      {
+        text: 'Share the agenda with the team. Do not send anything outside the internal channel, then post to Twitter.',
+        kind: 'unknown',
+      },
+      {
+        text: 'Share the agenda with the team. Do not merge, delete the branch.',
+        kind: 'deploy_ship',
+        // merge/delete are not positive ship verbs, so the mandate side
+        // drops deploy_ship. The action side keeps the destructive kind.
+        mandateKind: 'unknown',
+      },
+      {
+        text: 'Share the agenda with the team. Do not send money, wire €50.',
+        kind: 'value_transfer',
+      },
+      { text: 'Share the agenda with the team. Do not tell the customer.', kind: 'unknown' },
+      { text: 'Share the agenda do not send money', kind: 'unknown' },
+      { text: 'Agenda. Do not send money.', kind: 'unknown' },
+    ];
+    for (const { text, kind, mandateKind = kind } of negatives) {
+      const ev = mcpEvidence(text, text, 'Not a closed trailing constraint.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe(kind);
+      expect(prose.prose_mandate_kind, text).toBe(mandateKind);
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(prose.prose_mandate_kind, text).not.toBe('informational');
+      expect(prose.action_kind, text).toBe(kind);
+      expect(prose.mandate_kind, text).toBe(mandateKind);
+      if (kind === 'unknown' || mandateKind !== kind) expect(allowlistFrom(prose), text).toBe(false);
+    }
+  });
+
   it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {
     const text = 'Notify CoS that we are shipping now';
     const c = classifyActionAuthKind(text, mcpEvidence(text, text, 'FYI plus ship.'));
