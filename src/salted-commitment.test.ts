@@ -195,6 +195,34 @@ describe('salted mandate and action commitments', () => {
     );
   });
 
+  it('binds an own __proto__ JSON key instead of treating it as a prototype setter', () => {
+    const original = JSON.parse(
+      '{"kind":"permission","action":{"kind":"permission","allowance":{"__proto__":{"limit":200},"limit":1}}}',
+    );
+    const changed = JSON.parse(JSON.stringify(original));
+    changed.action.allowance.__proto__.limit = 999;
+    const first = computeMandateActionCommitments(original, SALT)!;
+    const second = computeMandateActionCommitments(changed, SALT)!;
+
+    expect(first.mandateDigest).toBe(portableSaltedCommitmentDigest(original, SALT));
+    expect(first.actionDigest).toBe(portableSaltedCommitmentDigest(original.action, SALT));
+    expect(second.mandateDigest).not.toBe(first.mandateDigest);
+    expect(second.actionDigest).not.toBe(first.actionDigest);
+    expect(Object.hasOwn(original.action.allowance, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(original.action.allowance)).toBe(Object.prototype);
+  });
+
+  it('matches portable JCS for nested reserved keys and undefined values', () => {
+    const values = [
+      JSON.parse('{"__proto__":null,"constructor":{"prototype":{"x":1}},"toJSON":"data"}'),
+      JSON.parse('[{"__proto__":0},{"nested":{"__proto__":{"x":1}}}]'),
+      { absent: undefined, nested: { absent: undefined, kept: true }, list: [undefined, null, 1] },
+    ];
+    for (const value of values) {
+      expect(saltedCommitmentDigest(value, SALT)).toBe(portableSaltedCommitmentDigest(value, SALT));
+    }
+  });
+
   it('keeps the verdict, the promotion, and v1 bytes unchanged', () => {
     const current = response();
     const before = structuredClone(current);

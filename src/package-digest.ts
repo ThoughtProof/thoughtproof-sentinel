@@ -72,7 +72,9 @@ const COMMITMENT_SALT_HEX = /^[0-9a-f]{64}$/;
 
 /**
  * sha256(salt || UTF-8(JCS(value))), as `sha256:` + lowercase hex.
- * JCS matches computePackageDigest: drop undefined fields, then canonicalize.
+ * Canonicalize the JSON value directly, matching the portable verifier.
+ * canonicalize already omits undefined object fields; the legacy package-digest
+ * cleanup assigns into {}, which would lose an own JSON key named __proto__.
  * An unsalted hash of a mandate is dictionary-reversible (amount, recipient, kind).
  * The salt is not part of the hashed value and must stay off the public receipt.
  */
@@ -80,9 +82,7 @@ export function saltedCommitmentDigest(value: unknown, salt: Buffer): string {
   if (!Buffer.isBuffer(salt) || salt.length !== COMMITMENT_SALT_BYTES) {
     throw new Error('commitment salt must be 32 bytes');
   }
-  const canonical = (canonicalize as unknown as (v: unknown) => string)(
-    removeUndefinedFields(value),
-  );
+  const canonical = (canonicalize as unknown as (v: unknown) => string)(value);
   if (typeof canonical !== 'string') {
     throw new Error('canonicalize() did not return a string');
   }
