@@ -353,32 +353,270 @@ const AGENDA_SHARE_FILLER = new Set([
  * "Do not send money, credentials, or anything outside the internal channel."
  * "Never share credentials."
  * "Kein Geld, keine Zugangsdaten senden."
+ *
+ * Scanned in one pass. A regex here had overlapping whitespace
+ * quantifiers (`\s*,?\s+`) and backtracked for seconds on a long run of
+ * spaces before a final non-match. No quantifiers over whitespace.
  */
-const AGENDA_CONSTRAINT_VERB =
-  '(?:send|share|post|transfer|pay|disclose|senden|teilen)';
-const AGENDA_CONSTRAINT_OBJECT =
-  '(?:anything\\s+outside\\s+the\\s+internal\\s+(?:channel|chat)|bank\\s+details|credentials|passwords?|payments?|secrets|money|funds|keys|geld|zugangsdaten|passwörter|passwoerter)';
-const AGENDA_CONSTRAINT_JOIN =
-  '(?:\\s*,?\\s+(?:or|and|oder|und)\\s+|\\s*/\\s*|\\s*,\\s*)';
-const AGENDA_CONSTRAINT_OBJECTS =
-  `\\b${AGENDA_CONSTRAINT_OBJECT}\\b(?:${AGENDA_CONSTRAINT_JOIN}\\b${AGENDA_CONSTRAINT_OBJECT}\\b)*`;
-const AGENDA_CONSTRAINT_EN =
-  `(?:\\bdo\\s+not\\b|\\bdon['’]t\\b|\\bnever\\b|\\bnicht\\b)\\s+(?:\\b${AGENDA_CONSTRAINT_VERB}\\b\\s+)?${AGENDA_CONSTRAINT_OBJECTS}(?:\\s+\\b${AGENDA_CONSTRAINT_VERB}\\b)?`;
-const AGENDA_CONSTRAINT_DE =
-  `(?:\\bkein(?:e)?\\b\\s+\\b${AGENDA_CONSTRAINT_OBJECT}\\b)(?:${AGENDA_CONSTRAINT_JOIN}\\bkein(?:e)?\\b\\s+\\b${AGENDA_CONSTRAINT_OBJECT}\\b)*(?:\\s+\\b${AGENDA_CONSTRAINT_VERB}\\b)?`;
-const AGENDA_TRAILING_CONSTRAINT_RE = new RegExp(
-  `(^|[.!?;\\n])\\s*(?:${AGENDA_CONSTRAINT_EN}|${AGENDA_CONSTRAINT_DE})[.!?]*\\s*$`,
-  'i',
-);
+const AGENDA_CONSTRAINT_VERBS = new Set([
+  'send',
+  'share',
+  'post',
+  'transfer',
+  'pay',
+  'disclose',
+  'senden',
+  'teilen',
+]);
+const AGENDA_CONSTRAINT_JOIN_WORDS = new Set(['or', 'and', 'oder', 'und']);
+const AGENDA_CONSTRAINT_OBJECTS = new Set([
+  'credentials',
+  'password',
+  'passwords',
+  'payment',
+  'payments',
+  'secrets',
+  'money',
+  'funds',
+  'keys',
+  'geld',
+  'zugangsdaten',
+  'passwörter',
+  'passwoerter',
+]);
+
+/** Same set as JS `\s` (no `u` flag). One code-point check, no quantifier. */
+function isJsWhitespace(c: string): boolean {
+  const code = c.charCodeAt(0);
+  return (
+    code === 0x20 ||
+    code === 0x09 ||
+    code === 0x0a ||
+    code === 0x0b ||
+    code === 0x0c ||
+    code === 0x0d ||
+    code === 0xa0 ||
+    code === 0x1680 ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000 ||
+    code === 0xfeff ||
+    (code >= 0x2000 && code <= 0x200a)
+  );
+}
+
+interface AgendaConstraintTok {
+  text: string;
+  index: number;
+  /** Whitespace between this token and the previous one. */
+  gapBefore: boolean;
+}
+
+function lexAgendaConstraint(text: string, start: number, end: number): AgendaConstraintTok[] {
+  const out: AgendaConstraintTok[] = [];
+  let i = start;
+  let gap = false;
+  while (i < end) {
+    const ch = text[i] ?? '';
+    if (isJsWhitespace(ch)) {
+      gap = true;
+      i++;
+      continue;
+    }
+    if (ch === ',' || ch === '/') {
+      out.push({ text: ch, index: i, gapBefore: gap });
+      gap = false;
+      i++;
+      continue;
+    }
+    const wordStart = i;
+    while (i < end) {
+      const next = text[i] ?? '';
+      if (isJsWhitespace(next) || next === ',' || next === '/') break;
+      i++;
+    }
+    out.push({
+      text: text.slice(wordStart, i).toLowerCase(),
+      index: wordStart,
+      gapBefore: gap,
+    });
+    gap = false;
+  }
+  return out;
+}
+
+/** Object ending at `end` (exclusive). Longest phrase first. */
+function agendaObjectEnd(toks: readonly AgendaConstraintTok[], end: number): number {
+  if (end <= 0) return -1;
+  const last = toks[end - 1]?.text ?? '';
+  if (end >= 5) {
+    const a = toks[end - 5];
+    const b = toks[end - 4];
+    const c = toks[end - 3];
+    const d = toks[end - 2];
+    const e = toks[end - 1];
+    if (
+      a?.text === 'anything' &&
+      b?.text === 'outside' &&
+      b.gapBefore &&
+      c?.text === 'the' &&
+      c.gapBefore &&
+      d?.text === 'internal' &&
+      d.gapBefore &&
+      (e?.text === 'channel' || e?.text === 'chat') &&
+      e.gapBefore
+    ) {
+      return end - 5;
+    }
+  }
+  if (
+    end >= 2 &&
+    toks[end - 2]?.text === 'bank' &&
+    last === 'details' &&
+    toks[end - 1]?.gapBefore
+  ) {
+    return end - 2;
+  }
+  if (AGENDA_CONSTRAINT_OBJECTS.has(last)) return end - 1;
+  return -1;
+}
+
+/**
+ * Joiner ending at `end`. A word joiner (`or` / `and` / `oder` / `und`)
+ * needs whitespace before the word, and may take one comma before that.
+ * A bare comma or slash does not need whitespace (`money,credentials`).
+ * `money,or` has no whitespace before `or`, so it is not a word joiner.
+ */
+function agendaJoinEnd(toks: readonly AgendaConstraintTok[], end: number): number {
+  if (end <= 0) return -1;
+  const last = toks[end - 1];
+  if (!last) return -1;
+  if (AGENDA_CONSTRAINT_JOIN_WORDS.has(last.text)) {
+    if (!last.gapBefore) return -1;
+    if (end >= 2 && toks[end - 2]?.text === ',') return end - 2;
+    return end - 1;
+  }
+  if (last.text === '/' || last.text === ',') return end - 1;
+  return -1;
+}
+
+function parseAgendaEn(toks: readonly AgendaConstraintTok[], end: number, trailing: boolean): number {
+  let i = end;
+  if (trailing) {
+    const verb = toks[i - 1];
+    if (!verb || !AGENDA_CONSTRAINT_VERBS.has(verb.text) || !verb.gapBefore) return -1;
+    i -= 1;
+  }
+  const obj = agendaObjectEnd(toks, i);
+  if (obj < 0) return -1;
+  i = obj;
+  while (true) {
+    const joinAt = agendaJoinEnd(toks, i);
+    if (joinAt < 0) break;
+    const prev = agendaObjectEnd(toks, joinAt);
+    if (prev < 0) break;
+    i = prev;
+  }
+  const preVerb = toks[i - 1];
+  if (preVerb && AGENDA_CONSTRAINT_VERBS.has(preVerb.text) && preVerb.gapBefore) i -= 1;
+  const notTok = toks[i - 1];
+  const doTok = toks[i - 2];
+  if (notTok?.text === 'not' && notTok.gapBefore && doTok?.text === 'do') return i - 2;
+  const neg = notTok?.text;
+  if (neg === "don't" || neg === 'don’t' || neg === 'never' || neg === 'nicht') return i - 1;
+  return -1;
+}
+
+function agendaKeinObjectEnd(toks: readonly AgendaConstraintTok[], end: number): number {
+  const obj = agendaObjectEnd(toks, end);
+  if (obj <= 0) return -1;
+  const kein = toks[obj - 1];
+  const objectTok = toks[obj];
+  if ((kein?.text === 'kein' || kein?.text === 'keine') && objectTok?.gapBefore) return obj - 1;
+  return -1;
+}
+
+function parseAgendaDe(toks: readonly AgendaConstraintTok[], end: number, trailing: boolean): number {
+  let i = end;
+  if (trailing) {
+    const verb = toks[i - 1];
+    if (!verb || !AGENDA_CONSTRAINT_VERBS.has(verb.text) || !verb.gapBefore) return -1;
+    i -= 1;
+  }
+  const first = agendaKeinObjectEnd(toks, i);
+  if (first < 0) return -1;
+  i = first;
+  while (true) {
+    const joinAt = agendaJoinEnd(toks, i);
+    if (joinAt < 0) break;
+    const prev = agendaKeinObjectEnd(toks, joinAt);
+    if (prev < 0) break;
+    i = prev;
+  }
+  return i;
+}
+
+function agendaConstraintStart(toks: readonly AgendaConstraintTok[]): number {
+  if (toks.length === 0) return -1;
+  const last = toks[toks.length - 1];
+  const trailing = !!last && AGENDA_CONSTRAINT_VERBS.has(last.text) && last.gapBefore;
+  const en = parseAgendaEn(toks, toks.length, trailing);
+  const de = parseAgendaDe(toks, toks.length, trailing);
+  if (en < 0) return de;
+  if (de < 0) return en;
+  return Math.min(en, de);
+}
+
+/**
+ * Boundary is start-of-text, `.!?;`, or a newline in the whitespace
+ * before the clause. Other whitespace is not a boundary (`do not send`
+ * in the same sentence stays).
+ */
+function hasAgendaConstraintBoundary(text: string, tokenStart: number): boolean {
+  let i = tokenStart;
+  let sawNewline = false;
+  while (i > 0 && isJsWhitespace(text[i - 1] ?? '')) {
+    if (text[i - 1] === '\n') sawNewline = true;
+    i--;
+  }
+  if (i === 0) return true;
+  const c = text[i - 1];
+  if (c === '.' || c === '!' || c === '?' || c === ';') return true;
+  return sawNewline;
+}
+
+function stripOneTrailingAgendaConstraint(current: string): string | null {
+  let end = current.length;
+  while (end > 0) {
+    const c = current[end - 1];
+    if (c === '.' || c === '!' || c === '?') end--;
+    else break;
+  }
+  let regionStart = 0;
+  for (let k = end - 1; k >= 0; k--) {
+    const c = current[k];
+    if (c === '.' || c === '!' || c === '?' || c === ';') {
+      regionStart = k + 1;
+      break;
+    }
+  }
+  const toks = lexAgendaConstraint(current, regionStart, end);
+  const startTok = agendaConstraintStart(toks);
+  if (startTok < 0) return null;
+  const tokenStart = toks[startTok]?.index;
+  if (tokenStart === undefined || !hasAgendaConstraintBoundary(current, tokenStart)) return null;
+  return current.slice(0, tokenStart).trimEnd();
+}
 
 /** Drop up to four closed trailing constraint sentences. Idempotent. */
 function withoutTrailingAgendaConstraints(text: string): string {
   let current = text.trimEnd();
-  for (let i = 0; i < 4; i++) {
-    const match = new RegExp(AGENDA_TRAILING_CONSTRAINT_RE.source, 'i').exec(current);
-    if (!match) return current;
-    const boundary = match[1] ?? '';
-    current = (current.slice(0, match.index) + boundary).trimEnd();
+  for (let n = 0; n < 4; n++) {
+    const next = stripOneTrailingAgendaConstraint(current);
+    if (next == null || next === current) return current;
+    current = next;
   }
   return current;
 }
@@ -709,18 +947,37 @@ function parseNotionalToken(raw: string): number | null {
 }
 
 /**
+ * Labels that end the mandate spend span (#66). Case-insensitive, no
+ * word boundary — same as the previous split. Matched literally so a
+ * long run of spaces cannot backtrack. `\n?\s*` before these labels
+ * overlapped (`\n` is already `\s`) and was quadratic on spaces.
+ */
+const MANDATE_SPEND_LABELS = [
+  'agent proposed action:',
+  'proposed action:',
+  'agent reasoning:',
+] as const;
+
+function mandateSpendCut(text: string): number {
+  const lower = text.toLowerCase();
+  let cut = text.length;
+  for (const label of MANDATE_SPEND_LABELS) {
+    const idx = lower.indexOf(label);
+    if (idx >= 0 && idx < cut) cut = idx;
+  }
+  return cut;
+}
+
+/**
  * Drop wallet-balance and trailing proposed-action / reasoning so one-liners
  * and pasted MCP blobs do not inflate the mandate notional or authorize a
  * recipient that only appears in the action (#66 spend-span).
+ * Whitespace before the label is dropped by `trim`, which is what the
+ * old `\s*` consumed.
  */
 function mandateSpendSpan(text: string): string {
-  return (
-    text
-      .replace(/WALLET BALANCE:[^\n]*/gi, ' ')
-      .split(
-        /\n?\s*(?:AGENT PROPOSED ACTION:|Proposed action:|AGENT REASONING:|Agent reasoning:)/i,
-      )[0] ?? text
-  ).trim();
+  const redacted = text.replace(/WALLET BALANCE:[^\n]*/gi, ' ');
+  return redacted.slice(0, mandateSpendCut(redacted)).trim();
 }
 
 function firstSpendNotional(text: string): number | null {

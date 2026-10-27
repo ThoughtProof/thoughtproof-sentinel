@@ -58,6 +58,14 @@
   the old release. It is not evidence of a v2 regression.
 
 ### Fixed
+- A near-miss after a negated agenda guard no longer stalls classification.
+  `Do not send money` plus a long run of spaces (inside the request size)
+  used to backtrack on overlapping whitespace in the guard pattern, the
+  mandate spend-span cut (`\n?\s*`), and the evidence label cut
+  (`(?:\n|\s+)Proposed action:`). Those scans are linear now. Closed
+  guards are still stripped. Amounts, wire, ship, and destructive
+  signals are still read on the full text, so a prohibition is not
+  turned into an allow.
 - A pure agenda share stays informational when the only extra sentence
   is a closed negated constraint: `Do not send money, credentials, or
   anything outside the internal channel.`, `Do not send money.`,
