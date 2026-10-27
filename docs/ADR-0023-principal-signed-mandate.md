@@ -32,7 +32,7 @@ Once protection is enabled for an account, the signature is mandatory. The requi
 
 ### 4. Replay parameters
 
-One shared atomic replay store serves every instance. There is no local fallback. Validity is 5 minutes. Clock skew is at most 30 seconds. Nonces come from a CSPRNG. These are product decisions, not tunable defaults.
+One shared atomic replay store serves every instance. There is no local fallback. Validity is 5 minutes, and the window must be strictly positive (`exp > iat`). Clock skew is at most 30 seconds. Nonces come from a CSPRNG. These are product decisions, not tunable defaults. The atomic consume step re-checks expiry against server time before the nonce is spent.
 
 ### 5. What the signature covers
 
@@ -119,13 +119,14 @@ MCP `verify_before_action` and OpenAPI gain optional `mandate_proof` and documen
 
 Let `now` be the server receipt time in unix seconds. Skew is 30 seconds. Accept the times only when all of these hold:
 
+- `exp > iat` (strictly positive window; `iat == exp` is rejected, as is `exp < iat`)
 - `iat <= now + 30`
 - `exp > now - 30`
 - `exp - iat <= 300`
 
 The key must be `active` at receipt time: `now` inside `notBefore` / `notAfter`. `iat` does not choose that window. A signer-chosen `iat` does not make a retired or not-yet-valid key active.
 
-After the signature verifies, consume the nonce in the shared store atomically, before any paid call or other relevant side effect. Two parallel requests with the same nonce must not both pass. Do not retry a proof from the start. A lost response needs a new proof.
+After the signature verifies, consume the nonce in the shared store atomically, before any paid call or other relevant side effect. That step re-checks expiry against server time with the same 30-second skew (`exp > now - 30`). A proof that expired between validation and consumption is BLOCK. It is never ALLOW. Two parallel requests with the same nonce must not both pass. Do not retry a proof from the start. A lost response needs a new proof.
 
 A consumed nonce is retained at least until `exp + skew`. No replay entry may expire while the proof could still be accepted. If the replay store or the key store is unavailable, the result is UNCERTAIN / HTTP 503, not a pass and not a local fallback.
 
