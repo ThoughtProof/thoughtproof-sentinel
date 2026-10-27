@@ -116,7 +116,7 @@ async function check(options: {
   store?: PrincipalManifestStore | null;
   requestBodyKeyManifest?: unknown;
   onLoad?: (accountId: string) => void;
-}): Promise<PrincipalMandateResult> {
+} = {}): Promise<PrincipalMandateResult> {
   const store = options.store === undefined
     ? {
         async load(accountId: string) {

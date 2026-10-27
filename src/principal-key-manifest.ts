@@ -199,6 +199,10 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
+function isUnixSeconds(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 function unixFromIso(iso: string): number | null {
   if (!ISO_SECOND.test(iso)) return null;
   const ms = Date.parse(iso);
@@ -296,7 +300,7 @@ function parseProof(
     return { ok: false, result: block('malformed_proof') };
   }
   if (!isNonEmptyString(accountId)) return { ok: false, result: block('malformed_proof') };
-  if (!Number.isSafeInteger(iat) || !Number.isSafeInteger(exp) || iat < 0 || exp < 0) {
+  if (!isUnixSeconds(iat) || !isUnixSeconds(exp)) {
     return { ok: false, result: block('malformed_proof') };
   }
   if (typeof signature !== 'string') return { ok: false, result: block('malformed_proof') };
