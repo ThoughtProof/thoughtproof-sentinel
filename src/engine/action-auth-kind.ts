@@ -952,20 +952,15 @@ function parseNotionalToken(raw: string): number | null {
  * long run of spaces cannot backtrack. `\n?\s*` before these labels
  * overlapped (`\n` is already `\s`) and was quadratic on spaces.
  */
-const MANDATE_SPEND_LABELS = [
-  'agent proposed action:',
-  'proposed action:',
-  'agent reasoning:',
-] as const;
+const MANDATE_SPEND_LABEL_RE =
+  /agent proposed action:|proposed action:|agent reasoning:/i;
 
 function mandateSpendCut(text: string): number {
-  const lower = text.toLowerCase();
-  let cut = text.length;
-  for (const label of MANDATE_SPEND_LABELS) {
-    const idx = lower.indexOf(label);
-    if (idx >= 0 && idx < cut) cut = idx;
-  }
-  return cut;
+  // Keep offsets in the original string: Unicode lowercasing can expand
+  // code points (e.g. U+0130), moving a cut into action/reasoning content.
+  // These fixed literal alternatives have no whitespace quantifiers.
+  const cut = text.search(MANDATE_SPEND_LABEL_RE);
+  return cut < 0 ? text.length : cut;
 }
 
 /**
