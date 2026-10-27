@@ -861,22 +861,30 @@ export function maybeIssueSignedExport(
  * Issue canonical.v2 when the signer is ready. Any error omits signed_export_v2
  * and does not throw. Callers must still issue v1 separately; this function
  * never changes a verdict, a promotion, or the v1 export.
+ * Optional mandateDigest/actionDigest are copied onto the v2 body only.
  */
 export function maybeIssueSignedExportV2(
   response: SentinelVerifyResponse,
   env: NodeJS.ProcessEnv = process.env,
   nowSeconds?: number,
   load: LoadExportSignerOptions = {},
+  supplements: { mandateDigest?: string; actionDigest?: string } = {},
 ): SignedCanonicalExport | null {
   try {
     const signer = loadExportSignerFromEnv(env, { ...load, nowSeconds });
     if (!signer) return null;
-    return issueSignedCanonicalExport(buildCanonicalSentinelVerdictV2(response), {
-      privateKey: signer.privateKey,
-      keyId: signer.keyId,
-      ttlSeconds: signer.ttlSeconds,
-      nowSeconds,
-    });
+    return issueSignedCanonicalExport(
+      buildCanonicalSentinelVerdictV2(response, {
+        mandateDigest: supplements.mandateDigest,
+        actionDigest: supplements.actionDigest,
+      }),
+      {
+        privateKey: signer.privateKey,
+        keyId: signer.keyId,
+        ttlSeconds: signer.ttlSeconds,
+        nowSeconds,
+      },
+    );
   } catch (err) {
     console.error(
       '[canonical-export] v2 issue failed (omitting signed_export_v2):',

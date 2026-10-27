@@ -21,6 +21,10 @@ import {
   modelConfigUnavailablePayload,
 } from '../../src/model-config.js';
 import { maybeIssueSignedExport, maybeIssueSignedExportV2 } from '../../src/canonical-export.js';
+import {
+  prepareV2CommitmentSupplements,
+  responseDigestSalt,
+} from '../../src/package-digest.js';
 import { getPotCliVersion, publishablePotCliVersion } from '../../src/runtime-versions.js';
 
 const VERSION = '0.1.0';
@@ -196,15 +200,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Omitted when the signer is unset so the pre-M1 response shape stays compatible.
     const exportNowSeconds = Math.floor(Date.now() / 1000);
     const signedExport = maybeIssueSignedExport(processedResponse, process.env, exportNowSeconds);
-    const signedExportV2 = maybeIssueSignedExportV2(processedResponse, process.env, exportNowSeconds);
+    // Salted v2 commitments. A failure omits the digests and the salt.
+    // It does not change the verdict, the promotion, or signed_export (v1).
+    const commitment = prepareV2CommitmentSupplements(result.data.mandate);
+    const signedExportV2 = maybeIssueSignedExportV2(
+      processedResponse,
+      process.env,
+      exportNowSeconds,
+      {},
+      commitment,
+    );
     const potCli = readPublishablePotCli();
+    const digestSalt = responseDigestSalt(signedExportV2, commitment.digestSaltCandidate);
 
     // --- Final response snapshot (sole return value) ---
+    const meta =
+      potCli || digestSalt
+        ? {
+            ...processedResponse.meta,
+            ...(potCli ? { pot_cli: potCli } : {}),
+            ...(digestSalt ? { digest_salt: digestSalt } : {}),
+          }
+        : processedResponse.meta;
     const finalResponse = {
       ...processedResponse,
-      meta: potCli
-        ? { ...processedResponse.meta, pot_cli: potCli }
-        : processedResponse.meta,
+      meta,
       attestation: {
         prepared: true,
         issued: !!attestationResult,

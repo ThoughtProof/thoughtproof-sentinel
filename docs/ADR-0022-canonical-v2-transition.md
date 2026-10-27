@@ -27,7 +27,22 @@
 
 ## Non-goals
 
-- No salted mandate or action digests.
 - No `checks_performed` / `gate.checked` (that would touch `src/engine/**`).
 - No principal-signed mandate and no public copy of `canonical`, `signature`, or `keyId`.
 - No new path that upgrades a verdict to ALLOW.
+
+## Addendum (P1): salted mandate and action commitments
+
+**Status:** Proposed (2026-10-26). Do not merge without Raul GO.
+
+### Context
+
+A mandate is low-entropy: amount, recipient, asset, and kind. `sha256(JCS(mandate))` with no salt is a dictionary. Someone who sees that digest can recover the mandate by hashing plausible values. The same is true of the action object. The commitment still has to be inside the signed v2 body so the caller can show that this signature covers this mandate and this action.
+
+### Decision
+
+7. **v2 only.** `mandateDigest` and `actionDigest` are optional fields on `sentinel.verdict.canonical.v2`. v1 bytes and the committed M1 vectors are unchanged. Each digest is `sha256:` plus lowercase hex of `SHA-256(salt || UTF-8(JCS(value)))`. JCS uses `canonicalize` directly, matching the portable verifier and preserving every own JSON key (including `__proto__`). Undefined object fields are omitted by `canonicalize` itself; the existing `computePackageDigest` path is unchanged. `mandateDigest` commits the validated mandate object. `actionDigest` commits `mandate.action` when that value is present.
+8. **Salt.** 32 crypto-random bytes, generated per request. The salt is not a field of the signed body and not a sidecar on `signed_export_v2`. That object is the shareable artifact; putting the salt on it would publish the dictionary key next to the digest. The verify response returns the salt as `meta.digest_salt` (lowercase hex, 64 characters) only when `signed_export_v2` was issued and its canonical body contains at least one of the digests.
+9. **Public receipt.** `meta.digest_salt`, `mandateDigest`, and `actionDigest` are not on the action-authorization receipt allowlist. `scripts/lib/action-auth-suite-receipt.mjs` is unchanged. Unknown keys are dropped, and `signed_export_v2` is already not a receipt field, so the signed canonical (which holds the digests) stays off the public receipt. `signed_export.canonical` stays null on that allowlist.
+10. **Fail-safe.** No mandate omits `mandateDigest`. No action omits `actionDigest`. A hash failure omits that field and does not throw into the verify handler. If neither digest is produced, `meta.digest_salt` is omitted. The verdict, the promotion, and the v1 export do not change. A missing digest is not an ALLOW.
+11. **Verifier.** `scripts/verify-canonical-export.mjs` takes optional `--mandate`, `--action`, and `--digest-salt`. If any of them is set, the check is mandatory and fails closed: incomplete input, a salt that is not 32 bytes, a v1-only document, a missing digest, or a mismatch. The mandate, the action, and the salt are not printed. Without the flags, verification is unchanged. The caller passes the same JSON that was committed (the validated mandate and its action), plus the salt from `meta.digest_salt`.

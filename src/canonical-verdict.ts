@@ -14,8 +14,9 @@
  *  - v1 is a strict projection of SentinelVerifyResponse — nothing added,
  *    nothing re-expressed.  "ThoughtProof said X" stays intact.
  *  - v2 (ADR-0022) is that projection plus optional releaseId, policy, and
- *    potCli. It does not change the verdict. Callers that cannot build v2
- *    omit signed_export_v2.
+ *    potCli, and optional salted mandateDigest / actionDigest. It does not
+ *    change the verdict. Callers that cannot build v2 omit signed_export_v2.
+ *    The commitment salt is not a v2 field.
  *
  * v1 is pure computation. v2 may read the installed pot-cli version; a throw
  * from that read propagates so the export issuer can omit signed_export_v2.
@@ -95,11 +96,13 @@ export interface CanonicalSentinelVerdictBody {
 }
 
 /**
- * v2 body (ADR-0022): every v1 field, plus optional provenance.
+ * v2 body (ADR-0022): every v1 field, plus optional provenance and
+ * optional salted commitments. The salt itself is not in this body.
  * releaseId ← meta.promotion.release_id
  * policy ← meta.promotion.policy
  * potCli ← publishable pot-cli semver (getPotCliVersion, or an explicit override)
- * Absent provenance is omitted, never null.
+ * mandateDigest / actionDigest ← sha256(salt || JCS(...)), caller-supplied
+ * Absent fields are omitted, never null.
  */
 export interface CanonicalSentinelVerdictBodyV2
   extends Omit<CanonicalSentinelVerdictBody, 'artifactSchema'> {
@@ -110,6 +113,16 @@ export interface CanonicalSentinelVerdictBodyV2
   policy?: string;
   /** Installed pot-cli semver. Omitted when missing or not a publishable semver. */
   potCli?: string;
+  /**
+   * sha256(salt || JCS(mandate)), `sha256:` + lowercase hex.
+   * Omitted when the mandate is absent or hashing fails. Not a verdict input.
+   */
+  mandateDigest?: string;
+  /**
+   * sha256(salt || JCS(action)), same encoding as mandateDigest.
+   * Omitted when the action is absent or hashing fails.
+   */
+  actionDigest?: string;
 }
 
 export type CanonicalSentinelVerdictArtifact =
@@ -125,6 +138,8 @@ export function isCanonicalSentinelVerdictBody(
   );
 }
 
+const COMMITMENT_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
 export interface BuildCanonicalSentinelVerdictV2Options {
   /**
    * pot-cli version to commit. When omitted, the builder calls
@@ -132,6 +147,13 @@ export interface BuildCanonicalSentinelVerdictV2Options {
    * `unavailable`, are omitted from the body.
    */
   potCli?: string;
+  /**
+   * Precomputed salted mandate commitment. A value that is not
+   * `sha256:` + 64 lowercase hex chars is omitted. Never throws.
+   */
+  mandateDigest?: string;
+  /** Precomputed salted action commitment. Same acceptance rule as mandateDigest. */
+  actionDigest?: string;
 }
 
 /**
@@ -221,6 +243,15 @@ export function buildCanonicalSentinelVerdictV2(
   const potSource = options.potCli !== undefined ? options.potCli : getPotCliVersion();
   const potCli = publishablePotCliVersion(potSource);
   if (potCli) body.potCli = potCli;
+
+  // Commitments are copied, not computed here. A bad string is omitted so a
+  // digest failure cannot drop releaseId/policy/potCli or change the verdict.
+  if (typeof options.mandateDigest === 'string' && COMMITMENT_DIGEST.test(options.mandateDigest)) {
+    body.mandateDigest = options.mandateDigest;
+  }
+  if (typeof options.actionDigest === 'string' && COMMITMENT_DIGEST.test(options.actionDigest)) {
+    body.actionDigest = options.actionDigest;
+  }
 
   return body;
 }

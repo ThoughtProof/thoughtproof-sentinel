@@ -1,6 +1,21 @@
 ## Unreleased
 
 ### Added
+- Salted `mandateDigest` and `actionDigest` on canonical verdict v2 only
+  (ADR-0022 addendum). Each digest is `sha256:` + hex of
+  `SHA-256(salt || UTF-8(JCS(value)))`, using the same JCS path as the
+  package digest. The salt is 32 crypto-random bytes per request and is
+  returned to the caller as `meta.digest_salt`. It is not part of the
+  signed body. The salt and both digests stay off the public
+  action-authorization receipt allowlist
+  (`scripts/lib/action-auth-suite-receipt.mjs` is unchanged). If the
+  mandate or the action is absent, or hashing fails, that field is
+  omitted and the salt is omitted when neither digest was signed. The
+  verdict, the promotion, and v1 export bytes stay as they were.
+  `scripts/verify-canonical-export.mjs` can recompute the digests when
+  given `--mandate`, `--action`, and `--digest-salt`, and fails closed
+  on a mismatch. An unsalted hash of a mandate is dictionary-reversible;
+  the salt is what blocks that. v1 vectors are not regenerated.
 - Canonical verdict `sentinel.verdict.canonical.v2` (ADR-0022) is issued
   beside the existing v1 `signed_export` as `signed_export_v2`. v2 is a
   superset of v1 with optional `releaseId`, `policy`, and `potCli`

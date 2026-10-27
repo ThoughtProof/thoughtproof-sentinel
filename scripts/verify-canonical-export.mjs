@@ -6,7 +6,8 @@
  *
  *   node scripts/verify-canonical-export.mjs <export.json> \
  *     [--keys path-or-url] [--now unix] [--require-valid-until] \
- *     [--allow-vector-only] [--schema v1|v2|all|auto] [--v2]
+ *     [--allow-vector-only] [--schema v1|v2|all|auto] [--v2] \
+ *     [--mandate file.json] [--action file.json] [--digest-salt hex]
  *
  * --schema (default auto):
  *   v1   verify signed_export / a v1 envelope only; fail if it is missing or invalid
@@ -40,6 +41,15 @@
  *
  * DECISION_SIGNER_UNTRUSTED is reserved for key_not_found / window / vector-only —
  * not for a broken signature on a known key.
+ *
+ * Optional salted-commitment recompute (ADR-0022 addendum), v2 only:
+ *   --mandate <json>  --action <json>  --digest-salt <64 hex chars>
+ * When any of those flags is set the check is mandatory and fails closed.
+ * Digest is sha256(raw salt bytes || UTF-8(JCS(value))), encoded
+ * `sha256:` + lowercase hex. JCS matches the canonicalize package used by
+ * src/package-digest.ts. Without the flags, verification is unchanged.
+ * The salt is required: an unsalted sha256 of a low-entropy mandate is
+ * dictionary-reversible. This script does not fetch a mandate or a salt.
  */
 import {
   createPublicKey,
@@ -94,6 +104,177 @@ function buildSignedInput(fields) {
 
 function digestCanonical(canonical) {
   return '0x' + createHash('sha256').update(canonical, 'utf8').digest('hex');
+}
+
+/**
+ * JCS (RFC 8785) via the same algorithm as the `canonicalize` package
+ * (src/package-digest.ts). JSON inputs have no undefined, NaN, or cycles.
+ * A non-JSON value throws so the commitment check fails closed.
+ */
+export function jcsCanonicalize(object, seen = new Set()) {
+  if (typeof object === 'number' && Number.isNaN(object)) {
+    throw new Error('NaN is not allowed');
+  }
+  if (typeof object === 'number' && !Number.isFinite(object)) {
+    throw new Error('Infinity is not allowed');
+  }
+  if (object === null || typeof object !== 'object') {
+    return JSON.stringify(object);
+  }
+  if (typeof object.toJSON === 'function') {
+    if (seen.has(object)) throw new Error('Circular reference detected');
+    seen.add(object);
+    const result = jcsCanonicalize(object.toJSON(), seen);
+    seen.delete(object);
+    return result;
+  }
+  if (seen.has(object)) throw new Error('Circular reference detected');
+  seen.add(object);
+  let result;
+  if (Array.isArray(object)) {
+    const values = object.map((item) => {
+      const value = item === undefined || typeof item === 'symbol' ? null : item;
+      return jcsCanonicalize(value, seen);
+    });
+    result = `[${values.join(',')}]`;
+  } else {
+    const parts = [];
+    for (const key of Object.keys(object).sort()) {
+      if (object[key] === undefined || typeof object[key] === 'symbol') continue;
+      parts.push(`${jcsCanonicalize(key)}:${jcsCanonicalize(object[key], seen)}`);
+    }
+    result = `{${parts.join(',')}}`;
+  }
+  seen.delete(object);
+  return result;
+}
+
+/** sha256(salt || UTF-8(JCS(value))) as `sha256:` + lowercase hex. */
+export function portableSaltedCommitmentDigest(value, salt) {
+  if (!Buffer.isBuffer(salt) || salt.length !== 32) {
+    throw new Error('commitment salt must be 32 bytes');
+  }
+  const canonical = jcsCanonicalize(value);
+  if (typeof canonical !== 'string') {
+    throw new Error('JCS did not return a string');
+  }
+  return `sha256:${createHash('sha256').update(salt).update(canonical, 'utf8').digest('hex')}`;
+}
+
+function parseCommitmentSalt(hex) {
+  if (typeof hex !== 'string' || hex.length === 0) {
+    return { error: 'commitment_salt_invalid', detail: 'digest salt must be 64 hex characters (32 bytes)' };
+  }
+  const bare = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex;
+  if (!/^[0-9a-fA-F]{64}$/.test(bare)) {
+    return { error: 'commitment_salt_invalid', detail: 'digest salt must be 64 hex characters (32 bytes)' };
+  }
+  return { salt: Buffer.from(bare, 'hex') };
+}
+
+function readCommitmentJson(filePath, label) {
+  let text;
+  try {
+    text = readFileSync(filePath, 'utf8');
+  } catch {
+    return { error: 'commitment_input_invalid', detail: `${label} JSON could not be read` };
+  }
+  try {
+    return { value: JSON.parse(text) };
+  } catch {
+    return { error: 'commitment_input_invalid', detail: `${label} JSON could not be parsed` };
+  }
+}
+
+/**
+ * Optional recompute. null = not requested.
+ * Any supplied flag makes the check mandatory. Fail closed on incomplete
+ * input, a missing digest, a bad salt, or a mismatch. Does not echo the
+ * mandate, the action, or the salt.
+ */
+export function checkSaltedCommitments(artifacts, args) {
+  const requested = Boolean(args.mandateFlag || args.actionFlag || args.digestSaltFlag);
+  if (!requested) return null;
+  if (!args.digestSalt || (!args.mandateFlag && !args.actionFlag) ||
+      (args.mandateFlag && !args.mandatePath) || (args.actionFlag && !args.actionPath)) {
+    return {
+      ok: false,
+      exitCode: 4,
+      error: 'commitment_input_incomplete',
+      detail: '--digest-salt plus --mandate and/or --action are required together',
+    };
+  }
+  const v2 = (artifacts || []).filter((artifact) => artifact && artifact.artifactSchema === SCHEMA_V2);
+  if (v2.length === 0) {
+    return {
+      ok: false,
+      exitCode: 4,
+      error: 'commitment_schema_unsupported',
+      detail: 'mandateDigest and actionDigest exist only on canonical v2',
+    };
+  }
+  const parsedSalt = parseCommitmentSalt(args.digestSalt);
+  if (parsedSalt.error) {
+    return { ok: false, exitCode: 4, error: parsedSalt.error, detail: parsedSalt.detail };
+  }
+  let mandate;
+  let action;
+  if (args.mandateFlag) {
+    const loaded = readCommitmentJson(args.mandatePath, 'mandate');
+    if (loaded.error) return { ok: false, exitCode: 4, error: loaded.error, detail: loaded.detail };
+    mandate = loaded.value;
+  }
+  if (args.actionFlag) {
+    const loaded = readCommitmentJson(args.actionPath, 'action');
+    if (loaded.error) return { ok: false, exitCode: 4, error: loaded.error, detail: loaded.detail };
+    action = loaded.value;
+  }
+
+  const fields = [];
+  for (const artifact of v2) {
+    let body;
+    try {
+      body = JSON.parse(artifact.canonical);
+    } catch {
+      return { ok: false, exitCode: 4, error: 'commitment_mismatch', detail: 'v2 canonical is not JSON' };
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return { ok: false, exitCode: 4, error: 'commitment_mismatch', detail: 'v2 canonical is not an object' };
+    }
+    if (args.mandateFlag) {
+      const check = matchCommitment('mandateDigest', body.mandateDigest, mandate, parsedSalt.salt);
+      if (!check.ok) return check;
+      fields.push('mandateDigest');
+    }
+    if (args.actionFlag) {
+      const check = matchCommitment('actionDigest', body.actionDigest, action, parsedSalt.salt);
+      if (!check.ok) return check;
+      fields.push('actionDigest');
+    }
+  }
+  return { ok: true, fields: [...new Set(fields)] };
+}
+
+function matchCommitment(field, actual, value, salt) {
+  if (typeof actual !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(actual)) {
+    return { ok: false, exitCode: 4, error: 'commitment_missing', field };
+  }
+  let recomputed;
+  try {
+    recomputed = portableSaltedCommitmentDigest(value, salt);
+  } catch {
+    return { ok: false, exitCode: 4, error: 'commitment_mismatch', field, detail: 'recompute failed' };
+  }
+  if (recomputed !== actual) {
+    return {
+      ok: false,
+      exitCode: 4,
+      error: 'commitment_mismatch',
+      field,
+      code: 'DECISION_COMMITMENT_DIGEST_MISMATCH',
+    };
+  }
+  return { ok: true };
 }
 
 function resolvePub(entry) {
@@ -170,6 +351,12 @@ function parseArgs(argv) {
     requireValidUntil: false,
     allowVectorOnly: false,
     schema: 'auto',
+    mandatePath: null,
+    actionPath: null,
+    digestSalt: null,
+    mandateFlag: false,
+    actionFlag: false,
+    digestSaltFlag: false,
   };
   const rest = [];
   for (let i = 0; i < argv.length; i++) {
@@ -185,7 +372,17 @@ function parseArgs(argv) {
         throw new Error('--schema must be v1, v2, all, or auto');
       }
       out.schema = value;
-    } else rest.push(a);
+    } else if (a === '--mandate') {
+      out.mandateFlag = true;
+      out.mandatePath = argv[++i] ?? '';
+    } else if (a === '--action') {
+      out.actionFlag = true;
+      out.actionPath = argv[++i] ?? '';
+    } else if (a === '--digest-salt') {
+      out.digestSaltFlag = true;
+      out.digestSalt = argv[++i] ?? '';
+    }
+    else rest.push(a);
   }
   out.path = rest[0] || null;
   return out;
@@ -506,7 +703,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.path) {
     console.error(
-      'Usage: node scripts/verify-canonical-export.mjs <export.json> [--keys path|url] [--now unix] [--require-valid-until] [--allow-vector-only] [--schema v1|v2|all|auto] [--v2]',
+      'Usage: node scripts/verify-canonical-export.mjs <export.json> [--keys path|url] [--now unix] [--require-valid-until] [--allow-vector-only] [--schema v1|v2|all|auto] [--v2] [--mandate file.json] [--action file.json] [--digest-salt hex]',
     );
     process.exit(1);
   }
@@ -522,25 +719,49 @@ async function main() {
   const verifiedSchemas = outcomes.filter((item) => item.body.ok).map((item) => item.body.artifactSchema);
   const failed = outcomes.find((item) => !item.body.ok);
 
-  if (!failed && outcomes.length === 1) {
-    console.log(
-      JSON.stringify(
-        {
-          ...outcomes[0].body,
-          verified_schemas: verifiedSchemas,
-          schema_selection: args.schema,
-        },
-        null,
-        2,
-      ),
-    );
-    process.exit(0);
-  }
   if (!failed) {
+    const commitment = checkSaltedCommitments(selected.artifacts, args);
+    if (commitment && commitment.ok === false) {
+      console.log(
+        JSON.stringify(
+          {
+            ok: false,
+            error: commitment.error,
+            field: commitment.field ?? null,
+            detail: commitment.detail ?? null,
+            code: commitment.code ?? 'DECISION_COMMITMENT_DIGEST_MISMATCH',
+            verified_schemas: verifiedSchemas,
+            schema_selection: args.schema,
+          },
+          null,
+          2,
+        ),
+      );
+      process.exit(commitment.exitCode);
+    }
+    const commitmentCheck = commitment
+      ? { commitment_check: { ok: true, fields: commitment.fields } }
+      : {};
+    if (outcomes.length === 1) {
+      console.log(
+        JSON.stringify(
+          {
+            ...outcomes[0].body,
+            ...commitmentCheck,
+            verified_schemas: verifiedSchemas,
+            schema_selection: args.schema,
+          },
+          null,
+          2,
+        ),
+      );
+      process.exit(0);
+    }
     console.log(
       JSON.stringify(
         {
           ok: true,
+          ...commitmentCheck,
           verified_schemas: verifiedSchemas,
           schema_selection: args.schema,
           results: outcomes.map((item) => item.body),
