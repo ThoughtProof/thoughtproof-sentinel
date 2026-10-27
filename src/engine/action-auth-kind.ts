@@ -282,10 +282,11 @@ const AGENDA_ANY_RE = new RegExp(
 /**
  * Share-request allowlist. An agenda word is informational only when
  * the text is one of these verbs plus agenda nouns and closed-class
- * fillers (including "with the team" / "an das Team", and a board or
- * chat destination such as "in den Gruppenchat" / "to the Vorstand
- * chat"). `post` / `poste` / `posten` / `posting` are share verbs, not
- * a separate class. Any other token — an action verb, an imperative,
+ * fillers (including "with the team" / "an das Team", "as a text
+ * message", and a board or chat destination such as "in den
+ * Gruppenchat" / "to the Vorstand chat"). `post` / `poste` /
+ * `posten` / `posting` are share verbs, not a separate class. Any
+ * other token — an action verb, an imperative,
  * an unknown word — stays unknown. Ship, merge, delete, rm, payment,
  * and wire still fail the request before the filler check.
  */
@@ -329,6 +330,10 @@ const AGENDA_SHARE_FILLER = new Set([
   // the internal Vorstand agents channel." `to` is already a destination
   // preposition. The leftover token is `text` (agenda / agenda text).
   'text',
+  // "share/send the agenda as a text message". `text` is already a
+  // filler. The leftover tokens are `as` and `message`. `message` is
+  // not a share verb.
+  'as', 'message',
 ]);
 
 /**

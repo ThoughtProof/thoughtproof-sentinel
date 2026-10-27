@@ -2181,6 +2181,84 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  it('share/send the agenda as a text message is a pure agenda share', () => {
+    const texts = [
+      'share the agenda as a text message',
+      'send the agenda as a text message',
+      'Share the meeting agenda as a text message',
+      'send the briefing as a message',
+      'post the summary as a text message',
+      'Share the agenda as a message with the team',
+      'Send the agenda as a text message to the team',
+    ];
+    expect(agendaShareResidualTokens('share the agenda as a text message')).toEqual([
+      'the',
+      'as',
+      'a',
+      'text',
+      'message',
+    ]);
+    expect(agendaShareResidualTokens('send the agenda as a text message')).toEqual([
+      'the',
+      'as',
+      'a',
+      'text',
+      'message',
+    ]);
+    for (const text of texts) {
+      const ev = mcpEvidence(text, text, 'Share the agenda as a message.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('informational');
+      expect(prose.prose_mandate_kind, text).toBe('informational');
+      expect(prose.action_kind, text).toBe('informational');
+      expect(prose.mandate_kind, text).toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(prose.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(true);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('informational');
+      expect(caller.prose_mandate_kind, text).toBe('informational');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(true);
+    }
+  });
+
+  it('as/message fillers do not classify non-agenda actions as agenda share', () => {
+    const share = 'share the agenda as a text message';
+    const negatives: Array<{ text: string; kind: 'unknown' | 'value_transfer' }> = [
+      { text: 'send money as a message', kind: 'unknown' },
+      { text: 'message the bank account details', kind: 'unknown' },
+      { text: 'forward the password as a text message', kind: 'unknown' },
+      { text: 'share the password as a text message', kind: 'unknown' },
+      { text: 'message the agenda as a text message', kind: 'unknown' },
+      { text: 'share the agenda as a text message and transfer 100 USDC', kind: 'value_transfer' },
+      { text: 'send the agenda as a message and wire the vendor payment', kind: 'value_transfer' },
+      { text: 'share the agenda and the password as a text message', kind: 'unknown' },
+      {
+        text: 'send the meeting agenda as a text message and forward the password',
+        kind: 'unknown',
+      },
+    ];
+    for (const { text, kind } of negatives) {
+      const ev = mcpEvidence(text, text, 'Not an agenda share.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe(kind);
+      expect(prose.prose_mandate_kind, text).toBe(kind);
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(prose.action_kind, text).toBe(kind);
+      expect(prose.mandate_kind, text).toBe(kind);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const underShare = classifyActionAuthKind(text, mcpEvidence(share, text, 'Share mandate, other action.'));
+      expect(underShare.prose_action_kind, text).not.toBe('informational');
+      expect(underShare.action_kind, text).not.toBe('informational');
+      expect(allowlistFrom(underShare), text).toBe(false);
+    }
+  });
+
   it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {
     const text = 'Notify CoS that we are shipping now';
     const c = classifyActionAuthKind(text, mcpEvidence(text, text, 'FYI plus ship.'));

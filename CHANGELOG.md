@@ -58,6 +58,13 @@
   the old release. It is not evidence of a v2 regression.
 
 ### Fixed
+- `as` and `message` are agenda-share fillers. `share the agenda as a
+  text message` and `send the agenda as a text message` classify as a
+  pure agenda share. The same words do not pull a non-agenda action
+  onto that path: `send money as a message`, `message the bank account
+  details`, `forward the password as a text message`, and an agenda
+  mixed with a payment, a transfer, or a credential stay off the share
+  allowlist. `message` is not a share verb.
 - A declared-informational agenda share no longer fail-closes when the
   action is `Post today's board agenda text to the internal Vorstand
   agents channel.` against `Share today's board agenda with the Vorstand
