@@ -255,8 +255,10 @@ function canonicalIdentity(value: unknown): string | null {
 
 /**
  * One allowance grammar. A safe non-negative integer number becomes its
- * decimal string. Any other number, and any string that is not the
- * canonical integer or `unlimited`, is unparseable.
+ * decimal string. A decimal string that matches the grammar is kept
+ * unchanged. A string `Number` cannot represent as a finite value is
+ * unparseable: the gate would skip `unlimited_approval` as
+ * `allowance_unparseable`. `unlimited` is the only non-numeric token.
  */
 function canonicalAllowance(value: unknown): string | null {
   if (typeof value === 'number') {
@@ -268,7 +270,8 @@ function canonicalAllowance(value: unknown): string | null {
   if (value === CANONICAL_UNLIMITED_ALLOWANCE) return value;
   if (
     CANONICAL_ALLOWANCE_PATTERN.test(value) &&
-    utf8Bytes(value) <= MANDATE_MAX_STRING_UTF8_BYTES
+    utf8Bytes(value) <= MANDATE_MAX_STRING_UTF8_BYTES &&
+    Number.isFinite(Number(value))
   ) {
     return value;
   }

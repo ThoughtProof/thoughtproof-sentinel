@@ -11,6 +11,7 @@ import {
   boundedPermissionCompatibleWithMandate,
   informationalActionMayPublicAllow,
 } from './engine/action-auth-kind.js';
+import { parseAllowance, runAuthorizationGate } from './engine/authorization-gate.js';
 import {
   parseMandateProofSignature,
   stage4TransportAccepts,
@@ -504,6 +505,98 @@ describe('mandate normalization', () => {
       ok: true,
       mandate: { action: { asset: 'USDC', recipient: 'r' } },
     });
+  });
+
+  it('blocks a decimal allowance Number cannot represent, and keeps a finite huge one', () => {
+    const permission = { kind: 'permission', allowance: '1', asset: 'USDC', recipient: 'spender' };
+    for (const length of [309, 512]) {
+      const allowance = '9'.repeat(length);
+      expect(Number.isFinite(Number(allowance))).toBe(false);
+      expect(parseAllowance(allowance)).toBeNull();
+      const overflow = normalizeMandate({ action: { ...permission, allowance } });
+      expectBlock(overflow, 'malformed');
+      expect(verdictWithMandateNormalization('ALLOW', overflow, true)).toBe('BLOCK');
+      const skipped = runAuthorizationGate(
+        {
+          kind: 'permission',
+          granted: { maxAmount: 1, asset: 'USDC', recipient: 'spender' },
+          action: { kind: 'permission', amount: 1, allowance, asset: 'USDC', recipient: 'spender' },
+        },
+        'enforce',
+      );
+      expect(skipped.skipped).toContainEqual({
+        kind: 'unlimited_approval',
+        reason: 'allowance_unparseable',
+      });
+      expect(skipped.violations.some((item) => item.kind === 'unlimited_approval')).toBe(false);
+    }
+
+    const finiteHuge = '9'.repeat(300);
+    const uint256 = (2n ** 256n - 1n).toString();
+    expect(Number.isFinite(Number(finiteHuge))).toBe(true);
+    expect(Number.isFinite(Number(uint256))).toBe(true);
+    expect(String(Number(finiteHuge))).not.toBe(finiteHuge);
+    for (const allowance of [finiteHuge, uint256]) {
+      const normalized = normalizeMandate({ action: { ...permission, allowance } });
+      expect(normalized.ok).toBe(true);
+      if (normalized.ok) expect(normalized.mandate.action.allowance).toBe(allowance);
+      const gate = runAuthorizationGate(
+        {
+          kind: 'value_transfer',
+          granted: { maxAmount: 1, asset: 'USDC', recipient: 'spender' },
+          action: { kind: 'permission', amount: 1, allowance, asset: 'USDC', recipient: 'spender' },
+        },
+        'enforce',
+      );
+      expect(gate.checked).toContain('unlimited_approval');
+      expect(gate.skipped.some((item) => item.reason === 'allowance_unparseable')).toBe(false);
+      expect(gate.violations.map((item) => item.kind)).toContain('unlimited_approval');
+      expect(gate.wouldBlock).toBe(true);
+      expect(gate.enforcedVerdict).toBe('BLOCK');
+    }
+
+    const bounded = {
+      kind: 'value_transfer' as const,
+      granted: { maxAmount: 100, asset: 'USDC', recipient: '0xUNIROUTER' },
+      action: {
+        kind: 'permission' as const,
+        amount: 100,
+        allowance: '100',
+        asset: 'USDC',
+        recipient: '0xUNIROUTER',
+      },
+    };
+    expect(boundedPermissionCompatibleWithMandate('', '', bounded)).toBe(true);
+    expect(
+      informationalActionMayPublicAllow('permission', 'value_transfer', {
+        boundedPermissionCompatible: true,
+        mandate: bounded,
+      }),
+    ).toBe(true);
+    const exact = runAuthorizationGate(bounded, 'enforce');
+    expect(exact.checked).toContain('unlimited_approval');
+    expect(exact.violations).toEqual([]);
+    expect(exact.wouldBlock).toBe(false);
+    expect(exact.enforcedVerdict).toBeNull();
+    const small = runAuthorizationGate(
+      {
+        kind: 'permission',
+        granted: { maxAmount: 1, asset: 'USDC', recipient: 'spender' },
+        action: { kind: 'permission', amount: 1, allowance: '1', asset: 'USDC', recipient: 'spender' },
+      },
+      'enforce',
+    );
+    expect(small.violations).toEqual([]);
+    expect(small.wouldBlock).toBe(false);
+  });
+
+  it('does not invent a recipient for an informational action', () => {
+    const result = normalizeMandate({
+      action: { kind: 'informational', content: 'Tell CoS host runs git main' },
+    });
+    expectBlock(result, 'action_not_concrete');
+    expect(JSON.stringify(result)).not.toContain('recipient');
+    expect(verdictWithMandateNormalization('ALLOW', result, true)).toBe('BLOCK');
   });
 
   it('preserves a value_transfer mandate with a bounded permission action', () => {
