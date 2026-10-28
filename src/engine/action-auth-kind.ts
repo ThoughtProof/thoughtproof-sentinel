@@ -69,8 +69,10 @@
  * informational only for a pure share request (`share` / `send` /
  * `sende` / `schick` / `schicke` / `teile` / `post` / `poste` /
  * `posten` / `posting`, optionally "with the team" / "an das Team" /
- * "in den Gruppenchat" / "to the Vorstand chat") with no other action
- * verb. A trailing sentence that is only a closed negated constraint
+ * "in den Gruppenchat" / "to the Vorstand chat", one recipient after
+ * `to` / `with`, a weekday qualifier, or a closed channel phrase such
+ * as "by email" / "as a text message") with no other action verb.
+ * A trailing sentence that is only a closed negated constraint
  * ("Do not send money, credentials, or anything outside the internal
  * channel.", "Never share credentials.", "Kein Geld, keine
  * Zugangsdaten senden.") is removed before the filler check. The share
@@ -289,12 +291,15 @@ const AGENDA_ANY_RE = new RegExp(
  * Share-request allowlist. An agenda word is informational only when
  * the text is one of these verbs plus agenda nouns and closed-class
  * fillers (including "with the team" / "an das Team", "as a text
- * message", and a board or chat destination such as "in den
- * Gruppenchat" / "to the Vorstand chat"). `post` / `poste` /
- * `posten` / `posting` are share verbs, not a separate class. Any
- * other token — an action verb, an imperative,
- * an unknown word — stays unknown. Ship, merge, delete, rm, payment,
- * and wire still fail the request before the filler check.
+ * message", a weekday such as "Thursday", and a board or chat
+ * destination such as "in den Gruppenchat" / "to the Vorstand chat").
+ * One recipient after `to` / `with` (a single name or noun, optional
+ * determiner) and a closed channel phrase ("by email", "via email",
+ * "by text", "as a text message", "as a message") are tolerated on
+ * top of that set. A second name, a second recipient, or any other
+ * token stays unknown. `post` / `poste` / `posten` / `posting` are
+ * share verbs, not a separate class. Ship, merge, delete, rm,
+ * payment, and wire still fail the request before the filler check.
  */
 const AGENDA_SHARE_VERB =
   '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting)';
@@ -340,6 +345,17 @@ const AGENDA_SHARE_FILLER = new Set([
   // filler. The leftover tokens are `as` and `message`. `message` is
   // not a share verb.
   'as', 'message',
+  // Weekday/date qualifiers on the agenda ("for Thursday",
+  // "Thursday's"). `tuesday` / `today` / `tomorrow` are already
+  // fillers. The possessive form is what the apostrophe strip leaves
+  // (`Thursday's` → `thursdays`). Not a month name and not a number.
+  'monday', 'mondays',
+  'tuesdays',
+  'wednesday', 'wednesdays',
+  'thursday', 'thursdays',
+  'friday', 'fridays',
+  'saturday', 'saturdays',
+  'sunday', 'sundays',
 ]);
 
 /**
@@ -826,18 +842,139 @@ export function agendaShareResidualTokens(text: string): string[] {
 }
 
 /**
- * True only for a pure agenda share. Closed filler list: when in doubt,
- * unknown. Does not treat "schick" as covering "schicken".
- * Operative signals are decided on the full text. A closed trailing
- * constraint is ignored only after that, and the share verb has to
- * remain after that clause is removed.
+ * Closed channel phrases on a pure agenda share. `by` / `via` / `email`
+ * are not fillers: only these sequences pass. Longer phrases are
+ * listed first so a shorter one cannot consume the front of a longer
+ * one. "as a text message" / "as a message" are also fillers; they
+ * stay listed so the phrase, not the free words, is the contract.
+ */
+const AGENDA_SHARE_CHANNEL_PHRASES: readonly (readonly string[])[] = [
+  ['as', 'a', 'text', 'message'],
+  ['as', 'a', 'message'],
+  ['as', 'message'],
+  ['by', 'email'],
+  ['via', 'email'],
+  ['by', 'text'],
+];
+
+/** Recipient introducer. `an` / `für` / `mit` are fillers, not this set. */
+const AGENDA_SHARE_RECIPIENT_PREP = new Set(['to', 'with']);
+
+/** Determiner that may sit between to/with and the one recipient word. */
+const AGENDA_SHARE_RECIPIENT_DET = new Set([
+  'the', 'a', 'an', 'our', 'my', 'this', 'that',
+]);
+
+/**
+ * Words that must not be the one recipient. Anywhere else they already
+ * fail the filler check. In the recipient slot they would otherwise
+ * look like a name ("to approve", "to the wallet", "with the amount",
+ * "to pay", "to the password"). Operative signals still win on the
+ * full text before this runs.
+ */
+const AGENDA_RECIPIENT_DENY = new Set([
+  'pay', 'paying', 'paid', 'payment', 'payments',
+  'transfer', 'transferring', 'transfers',
+  'wire', 'wiring',
+  'money', 'funds', 'fund', 'amount', 'amounts',
+  'eur', 'euro', 'euros', 'usd', 'usdc', 'usdt', 'eth', 'weth',
+  'invoice', 'invoices', 'wallet', 'wallets', 'budget', 'currency',
+  'dollar', 'dollars', 'fee', 'fees', 'notional', 'ceiling',
+  'swap', 'bridge', 'cash', 'geld',
+  'credential', 'credentials', 'password', 'passwords',
+  'passwort', 'passwoerter',
+  'key', 'keys', 'secret', 'secrets', 'token', 'tokens',
+  'zugangsdaten',
+  'delete', 'cancel', 'cancelled', 'canceled', 'modify', 'book', 'booking',
+  'upload', 'publish', 'external', 'public',
+  'approve', 'release', 'push', 'revoke', 'kill', 'shutdown', 'drop', 'rm',
+  'merge', 'webhook', 'twitter', 'linkedin', 'email',
+  'http', 'https', 'sendmoney',
+]);
+
+function agendaChannelPhraseLength(tokens: readonly string[], index: number): number {
+  for (const phrase of AGENDA_SHARE_CHANNEL_PHRASES) {
+    let matched = true;
+    for (let k = 0; k < phrase.length; k++) {
+      if (tokens[index + k] !== phrase[k]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return phrase.length;
+  }
+  return 0;
+}
+
+/** One letter-only word. Digits, emails, and denied verbs are not names. */
+function isAgendaShareRecipientWord(token: string): boolean {
+  if (!/^[a-zäöü]{2,32}$/.test(token)) return false;
+  if (AGENDA_SHARE_FILLER.has(token)) return false;
+  if (AGENDA_RECIPIENT_DENY.has(token)) return false;
+  return true;
+}
+
+/**
+ * `channel` / `chat` / `gruppenchat` / `kanal` are fillers, so a failed
+ * destination window ("to the customer channel") would otherwise read
+ * the unknown name as a person and the noun as filler. A recipient
+ * must not sit immediately in front of that noun. The closed
+ * destination regex still matches the allowlisted names.
+ */
+const AGENDA_CHANNEL_NOUN_TOKEN = new Set(['channel', 'chat', 'gruppenchat', 'kanal']);
+
+/**
+ * Fillers, plus one recipient after to/with, plus closed channel
+ * phrases. The recipient is one content word (optional determiner).
+ * A second name, "and Bob", or "the client list" as extra payload
+ * does not pass. Residual tokens themselves are not rewritten.
+ */
+function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
+  let recipientUsed = false;
+  let prep = false;
+  for (let i = 0; i < tokens.length; ) {
+    const channel = agendaChannelPhraseLength(tokens, i);
+    if (channel > 0) {
+      i += channel;
+      prep = false;
+      continue;
+    }
+    const token = tokens[i] ?? '';
+    if (AGENDA_SHARE_FILLER.has(token)) {
+      if (AGENDA_SHARE_RECIPIENT_PREP.has(token)) prep = true;
+      else if (!(prep && AGENDA_SHARE_RECIPIENT_DET.has(token))) prep = false;
+      i += 1;
+      continue;
+    }
+    if (
+      prep &&
+      !recipientUsed &&
+      isAgendaShareRecipientWord(token) &&
+      !AGENDA_CHANNEL_NOUN_TOKEN.has(tokens[i + 1] ?? '')
+    ) {
+      recipientUsed = true;
+      prep = false;
+      i += 1;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
+ * True only for a pure agenda share. Closed filler list, one recipient,
+ * and closed channel phrases: when in doubt, unknown. Does not treat
+ * "schick" as covering "schicken". Operative signals are decided on
+ * the full text. A closed trailing constraint is ignored only after
+ * that, and the share verb has to remain after that clause is removed.
  */
 function isAgendaShareRequest(text: string): boolean {
   if (!text || !AGENDA_ANY_RE.test(text)) return false;
   if (textHasAgendaOperativeSignal(text)) return false;
   const shareText = withoutTrailingAgendaConstraints(text);
   if (!AGENDA_ANY_RE.test(shareText) || !AGENDA_SHARE_VERB_RE.test(shareText)) return false;
-  return agendaShareResidualTokens(text).every((token) => AGENDA_SHARE_FILLER.has(token));
+  return agendaShareResidualsAreClosed(agendaShareResidualTokens(text));
 }
 
 /**
