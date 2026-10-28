@@ -122,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // ADR-0023 stage 4. Default off: this block is skipped and the rest of
+    // ADR-0023 stage 4. Default off: this block is inactive and the rest of
     // the handler is unchanged. A verified proof is a precondition only.
     let mandateVerified: MandateVerifiedContinuation | undefined;
     if (mandateProofEnforceEnabled()) {
