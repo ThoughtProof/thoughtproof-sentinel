@@ -377,7 +377,7 @@ const spec = {
           '401': { description: 'Missing or invalid X-Sentinel-Key' },
           '503': {
             description:
-              'Verifier model config missing (e.g. SERV_API_KEY unset), or mandate verification unavailable while SENTINEL_MANDATE_PROOF_ENFORCE is true. Gate-down — not a verdict and not model uncertainty. Mandate failures use error "Mandate verification unavailable" and codes such as ACCOUNT_UNAVAILABLE, POLICY_UNAVAILABLE, MANIFEST_UNAVAILABLE, or REPLAY_STORE_UNAVAILABLE. Distinct from 500 INTERNAL_ERROR. A signature does not turn this into ALLOW.',
+              'Verifier model config missing (e.g. SERV_API_KEY unset), or mandate verification unavailable while SENTINEL_MANDATE_PROOF_ENFORCE is true. Gate-down — not a verdict and not model uncertainty. Mandate 503 bodies use error "Mandate verification unavailable" and a code such as ACCOUNT_UNAVAILABLE, POLICY_UNAVAILABLE, MANIFEST_UNAVAILABLE, REPLAY_STORE_UNAVAILABLE, or MANDATE_VERIFICATION_UNAVAILABLE. A provably invalid proof is HTTP 200 with verdict BLOCK, not this status. Distinct from 500 INTERNAL_ERROR. A signature does not turn a 503 into ALLOW.',
             content: {
               'application/json': {
                 schema: {
@@ -396,6 +396,7 @@ const spec = {
                         'RECEIPT_TIME_UNUSABLE',
                         'REPLAY_STORE_UNAVAILABLE',
                         'POLICY_UNAVAILABLE',
+                        'MANDATE_VERIFICATION_UNAVAILABLE',
                       ],
                       description:
                         'MODEL_CONFIG_MISSING is gate-down for the verifier model. The other codes are mandate verification unavailable (no verdict).',

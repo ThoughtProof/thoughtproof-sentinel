@@ -326,6 +326,32 @@ describe('evaluateMandateRequestPath', () => {
     expect(replay.calls).toBe(2);
   });
 
+  it('reports a thrown normalizer as MANDATE_VERIFICATION_UNAVAILABLE', async () => {
+    const store = countingStore();
+    const decision = await evaluate(bodyOf(TRANSFER, { signature: 'ab'.repeat(64) }), {
+      manifestStore: store,
+      normalize: () => {
+        throw new Error('normalization blew up: secret-mandate-text');
+      },
+    });
+    expect(decision.action).toBe('unavailable');
+    if (decision.action === 'unavailable') {
+      expect(decision.status).toBe(503);
+      expect(decision.body).toEqual({
+        error: MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE,
+        code: 'MANDATE_VERIFICATION_UNAVAILABLE',
+        request_id: REQUEST_ID,
+      });
+      expect(decision.body).not.toHaveProperty('verdict');
+      expect(decision.body.code).not.toBe('MANIFEST_UNAVAILABLE');
+      const json = JSON.stringify(decision.body);
+      expect(json).not.toContain('blew up');
+      expect(json).not.toContain('secret-mandate-text');
+      expect(json).not.toContain('ALLOW');
+    }
+    expect(store.loads).toBe(0);
+  });
+
   it('returns 503 when the manifest or the replay store does not answer', async () => {
     const normalization = normalizedTransfer();
     const proof = signedProof(fields(), normalization.mandate);

@@ -9,10 +9,12 @@ const calls = vi.hoisted(() => [] as string[]);
 const engineState = vi.hoisted(() => ({
   verdict: 'UNCERTAIN' as 'ALLOW' | 'BLOCK' | 'UNCERTAIN',
 }));
+const engineInputs = vi.hoisted(() => [] as unknown[]);
 
 vi.mock('./engine/index.js', () => ({
-  verify: vi.fn(async () => {
+  verify: vi.fn(async (input: unknown) => {
     calls.push('engine');
+    engineInputs.push(input);
     return {
       id: 'sent_wire_handler',
       verdict: engineState.verdict,
@@ -56,6 +58,8 @@ import {
   type MandateRequestDeps,
 } from './mandate-request-path.js';
 import { MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE } from './mandate-no-auth.js';
+import { computePackageDigest } from './package-digest.js';
+import type { SentinelVerifyRequest } from './types.js';
 import { normalizeMandate } from './mandate-normalize.js';
 import {
   PRINCIPAL_MANDATE_PURPOSE,
@@ -230,6 +234,7 @@ function baseBody(extra: Record<string, unknown> = {}) {
 describe('POST /sentinel/verify mandate proof flag', () => {
   beforeEach(() => {
     calls.length = 0;
+    engineInputs.length = 0;
     engineState.verdict = 'UNCERTAIN';
     verifyMock.mockClear();
     x402Mock.mockClear();
@@ -478,5 +483,58 @@ describe('POST /sentinel/verify mandate proof flag', () => {
     expect(verifyMock).not.toHaveBeenCalled();
     expect(x402Mock).not.toHaveBeenCalled();
     expect(billingMock).not.toHaveBeenCalled();
+  });
+
+  it('gives two signed informational actions different F1 digests of the engine request', async () => {
+    process.env.SENTINEL_MANDATE_PROOF_ENFORCE = 'true';
+    process.env.SENTINEL_AUTH_REQUIRED = 'true';
+    process.env.SENTINEL_API_KEYS = `${API_KEY}:direct:agent-h:${ACCOUNT}`;
+    engineState.verdict = 'ALLOW';
+    const signedEvidence = [{
+      type: 'signed_event',
+      raw_event: Buffer.from('{"payload":{},"signature":"00"}').toString('base64'),
+      signature_scheme: 'ed25519',
+      signer_pubkey: 'ab'.repeat(32),
+      claims: ['note'],
+      verification: 'optional',
+    }];
+
+    async function run(content: string, nonce: string) {
+      const raw = {
+        kind: 'informational',
+        action: { kind: 'informational', content, recipient: 'ops-channel' },
+      };
+      const normalization = normalizeMandate(raw);
+      if (!normalization.ok) throw new Error('fixture mandate did not normalize');
+      const proof = signedProof(normalization.mandate, { nonce });
+      const req = request(baseBody({
+        mode: 'action_authorization',
+        mandate: raw,
+        mandate_proof: proof,
+        signed_evidence: signedEvidence,
+      }), { 'x-sentinel-key': API_KEY });
+      attachDeps(req, handlerDeps());
+      const before = engineInputs.length;
+      const ctx = mockRes();
+      await handler(req as never, ctx.res as never);
+      expect(ctx.statusCode).toBe(200);
+      const received = engineInputs[before] as SentinelVerifyRequest;
+      const digest = (ctx.body as { meta?: { package_digest?: string } }).meta?.package_digest;
+      expect(JSON.stringify(ctx.body)).not.toContain(proof.signature);
+      expect(JSON.stringify(ctx.body)).not.toContain(PRIMARY_X);
+      return { received, digest };
+    }
+
+    const alpha = await run('alpha-status', 'nonce-content-alpha');
+    const beta = await run('beta-status', 'nonce-content-beta');
+    const alphaAction = alpha.received.mandate?.action as { content?: string } | undefined;
+    const betaAction = beta.received.mandate?.action as { content?: string } | undefined;
+    expect(alphaAction?.content).toBe('alpha-status');
+    expect(betaAction?.content).toBe('beta-status');
+    expect(alpha.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(beta.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(alpha.digest).not.toBe(beta.digest);
+    expect(alpha.digest).toBe(computePackageDigest(alpha.received));
+    expect(beta.digest).toBe(computePackageDigest(beta.received));
   });
 });

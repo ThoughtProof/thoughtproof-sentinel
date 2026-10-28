@@ -175,17 +175,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const agentId = (req.headers['x-sentinel-agent-id'] as string | undefined) ?? authResult.agent_id;
 
     // --- Engine call — pure verification ---
-    // A verified mandate is the strict normalized object. Flag off keeps
-    // the validated request object exactly as it was.
-    const response = await verify(
-      mandateVerified
-        ? { ...result.data, mandate: mandateVerified.normalizedMandate }
-        : result.data,
-    );
+    // One request object for the engine and for F1. A verified proof
+    // replaces the mandate with the strict normalized object, including
+    // fields the legacy normalizer drops (for example action.content).
+    // Flag off keeps the validated request reference unchanged.
+    const requestToVerify = mandateVerified
+      ? { ...result.data, mandate: mandateVerified.normalizedMandate }
+      : result.data;
+    const response = await verify(requestToVerify);
 
     // --- Evidence Processing (F1) ---
-    const evidenceResult = processSignedEvidence(result.data);
-    let processedResponse = applyEvidenceEffects(response, evidenceResult, result.data);
+    const evidenceResult = processSignedEvidence(requestToVerify);
+    let processedResponse = applyEvidenceEffects(response, evidenceResult, requestToVerify);
     if (mandateVerified) {
       const nextVerdict = verdictAfterVerifiedMandate(processedResponse.verdict, mandateVerified);
       if (nextVerdict !== processedResponse.verdict) {

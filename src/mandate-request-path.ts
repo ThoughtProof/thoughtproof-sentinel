@@ -351,7 +351,9 @@ export async function evaluateMandateRequestPath(
       },
     };
   } catch {
-    return unavailable(input.requestId, 'MANIFEST_UNAVAILABLE');
+    // Unexpected failure, including a thrown normalizer. A manifest miss
+    // is reported by the manifest check itself. This catch is not that miss.
+    return unavailable(input.requestId, 'MANDATE_VERIFICATION_UNAVAILABLE');
   }
 }
 
