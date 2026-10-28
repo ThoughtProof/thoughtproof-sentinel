@@ -6,7 +6,7 @@
  *
  * Sentinel tiers:
  * - checkpoint: Nano solo (1 model call)
- * - standard: Nano→Pro cascade (1-2 model calls)
+ * - standard: Pro→Swift cascade (1-2 model calls; see src/tiers.ts)
  *
  * Reliability Option 3: optional AbortSignal + engine budget race on each
  * provider call. Late results after abort never decide the outcome.
