@@ -88,7 +88,52 @@ export type NoAuthMandateDecision =
     };
 
 function hasAccountId(value: string | undefined): value is string {
-  return typeof value === 'string' && value.length > 0;
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export const MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE = 'Mandate verification unavailable';
+
+export const STAGE4_UNAVAILABLE_CODES = [
+  'ACCOUNT_UNAVAILABLE',
+  'MANIFEST_UNAVAILABLE',
+  'MANIFEST_MALFORMED',
+  'TARGET_ENVIRONMENT_UNAVAILABLE',
+  'RECEIPT_TIME_UNUSABLE',
+  'REPLAY_STORE_UNAVAILABLE',
+] as const;
+
+export type Stage4UnavailableCode = (typeof STAGE4_UNAVAILABLE_CODES)[number];
+
+export interface Stage4UnavailableBody {
+  error: typeof MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE;
+  code: Stage4UnavailableCode;
+  request_id: string;
+}
+
+function isUnavailableCode(value: string): value is Stage4UnavailableCode {
+  return (STAGE4_UNAVAILABLE_CODES as readonly string[]).includes(value);
+}
+
+/**
+ * Stage-4 HTTP 503 body. Three fields, no `verdict`. The message is
+ * constant. `cause` and `mandate` are ignored so an exception or the
+ * mandate plaintext cannot leak into the body. Not wired to a handler.
+ * BLOCK stays a separate result and is not passed through here.
+ */
+export function stage4UnavailablePayload(input: {
+  code: string;
+  requestId: string;
+  cause?: unknown;
+  mandate?: unknown;
+}): Stage4UnavailableBody {
+  void input.cause;
+  void input.mandate;
+  const code = isUnavailableCode(input.code) ? input.code : 'ACCOUNT_UNAVAILABLE';
+  return {
+    error: MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE,
+    code,
+    request_id: typeof input.requestId === 'string' ? input.requestId : '',
+  };
 }
 
 /**

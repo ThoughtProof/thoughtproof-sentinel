@@ -75,7 +75,30 @@ const PERMISSION_ACTION_KEYS = new Set([
   'recipient',
 ]);
 
-const KIND_ONLY_ACTION_KEYS = new Set(['kind']);
+const INFORMATIONAL_ACTION_KEYS = new Set(['kind', 'content', 'recipient']);
+
+const DEPLOY_SHIP_ACTION_KEYS = new Set(['kind', 'target', 'revision']);
+
+/**
+ * Execution-relevant fields. A missing one is not a bound action.
+ * Permission's spender is `recipient`, the field the authorization gate
+ * already reads. Mandate `kind` is not required to equal `action.kind`.
+ */
+export const ACTION_REQUIRED_FIELDS = {
+  value_transfer: ['amount', 'asset', 'recipient'],
+  permission: ['allowance', 'asset', 'recipient'],
+  informational: ['content', 'recipient'],
+  deploy_ship: ['target', 'revision'],
+} as const;
+
+/**
+ * Bounded allowance: a non-negative decimal integer. No sign, whitespace,
+ * exponent, decimal point, or leading zeros. `0` is the only zero form.
+ */
+export const CANONICAL_ALLOWANCE_PATTERN = /^(0|[1-9][0-9]*)$/;
+
+/** The only unlimited allowance. Other spellings are malformed. */
+export const CANONICAL_UNLIMITED_ALLOWANCE = 'unlimited';
 
 export interface NormalizedGranted {
   maxAmount?: number;
@@ -88,12 +111,20 @@ export interface NormalizedAction {
   kind: ConcreteActionKind;
   amount?: number;
   asset?: string;
+  /** Payee for a transfer, audience for informational, spender for permission. */
   recipient?: string;
-  allowance?: string | number;
+  /** Canonical integer string, or exactly `unlimited`. */
+  allowance?: string;
+  content?: string;
+  /** Deployment target for `deploy_ship`. */
+  target?: string;
+  /** Revision, tag, or commit for `deploy_ship`. */
+  revision?: string;
 }
 
 export interface NormalizedMandate {
-  kind: ConcreteActionKind;
+  /** Preserved when the caller sent a supported kind. Not copied from `action`. */
+  kind?: ConcreteActionKind;
   granted?: NormalizedGranted;
   action: NormalizedAction;
 }
@@ -106,7 +137,6 @@ export type MandateBlockReason =
   | 'unknown_field'
   | 'malformed'
   | 'alias_conflict'
-  | 'kind_mismatch'
   | 'prototype_key'
   | 'too_large';
 
@@ -212,13 +242,37 @@ function isCanonicalNumber(value: unknown): value is number {
   return (JSON.parse(JSON.stringify(value)) as unknown) === value;
 }
 
-function isBoundedString(value: unknown): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length > 0 &&
-    utf8Bytes(value) <= MANDATE_MAX_STRING_UTF8_BYTES &&
-    !hasLoneSurrogate(value)
-  );
+/**
+ * Trimmed identity. Blank and whitespace-only values are not identities.
+ * The canonical text is the trimmed string. Case is unchanged.
+ */
+function canonicalIdentity(value: unknown): string | null {
+  if (typeof value !== 'string' || hasLoneSurrogate(value)) return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || utf8Bytes(trimmed) > MANDATE_MAX_STRING_UTF8_BYTES) return null;
+  return trimmed;
+}
+
+/**
+ * One allowance grammar. A safe non-negative integer number becomes its
+ * decimal string. Any other number, and any string that is not the
+ * canonical integer or `unlimited`, is unparseable.
+ */
+function canonicalAllowance(value: unknown): string | null {
+  if (typeof value === 'number') {
+    if (!isCanonicalNumber(value) || !Number.isSafeInteger(value)) return null;
+    const text = String(value);
+    return CANONICAL_ALLOWANCE_PATTERN.test(text) ? text : null;
+  }
+  if (typeof value !== 'string' || hasLoneSurrogate(value)) return null;
+  if (value === CANONICAL_UNLIMITED_ALLOWANCE) return value;
+  if (
+    CANONICAL_ALLOWANCE_PATTERN.test(value) &&
+    utf8Bytes(value) <= MANDATE_MAX_STRING_UTF8_BYTES
+  ) {
+    return value;
+  }
+  return null;
 }
 
 function hitOffset(hits: KeyHit[] | null, key: string, parent: string | null): number | undefined {
@@ -513,17 +567,19 @@ function parseGranted(
   if (!amount.ok) return amount;
   let asset: string | undefined;
   if (Object.prototype.hasOwnProperty.call(value, 'asset')) {
-    if (!isBoundedString(value.asset)) {
+    const identity = canonicalIdentity(value.asset);
+    if (identity == null) {
       return { ok: false, result: block('malformed', hitOffset(hits, 'asset', 'granted')) };
     }
-    asset = value.asset;
+    asset = identity;
   }
   let recipient: string | undefined;
   if (Object.prototype.hasOwnProperty.call(value, 'recipient')) {
-    if (!isBoundedString(value.recipient)) {
+    const identity = canonicalIdentity(value.recipient);
+    if (identity == null) {
       return { ok: false, result: block('malformed', hitOffset(hits, 'recipient', 'granted')) };
     }
-    recipient = value.recipient;
+    recipient = identity;
   }
   let allowUnlimited: boolean | undefined;
   if (Object.prototype.hasOwnProperty.call(value, 'allowUnlimited')) {
@@ -546,7 +602,8 @@ function parseGranted(
 function actionKeysFor(kind: ConcreteActionKind): Set<string> {
   if (kind === 'value_transfer') return TRANSFER_ACTION_KEYS;
   if (kind === 'permission') return PERMISSION_ACTION_KEYS;
-  return KIND_ONLY_ACTION_KEYS;
+  if (kind === 'informational') return INFORMATIONAL_ACTION_KEYS;
+  return DEPLOY_SHIP_ACTION_KEYS;
 }
 
 function parseAction(
@@ -583,39 +640,61 @@ function parseAction(
 
   let asset: string | undefined;
   if (Object.prototype.hasOwnProperty.call(value, 'asset')) {
-    if (!isBoundedString(value.asset)) {
+    const identity = canonicalIdentity(value.asset);
+    if (identity == null) {
       return { ok: false, result: block('malformed', hitOffset(hits, 'asset', 'action')) };
     }
-    asset = value.asset;
+    asset = identity;
   }
   let recipient: string | undefined;
   if (Object.prototype.hasOwnProperty.call(value, 'recipient')) {
-    if (!isBoundedString(value.recipient)) {
+    const identity = canonicalIdentity(value.recipient);
+    if (identity == null) {
       return { ok: false, result: block('malformed', hitOffset(hits, 'recipient', 'action')) };
     }
-    recipient = value.recipient;
+    recipient = identity;
   }
-  let allowance: string | number | undefined;
+  let content: string | undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'content')) {
+    const identity = canonicalIdentity(value.content);
+    if (identity == null) {
+      return { ok: false, result: block('malformed', hitOffset(hits, 'content', 'action')) };
+    }
+    content = identity;
+  }
+  let target: string | undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'target')) {
+    const identity = canonicalIdentity(value.target);
+    if (identity == null) {
+      return { ok: false, result: block('malformed', hitOffset(hits, 'target', 'action')) };
+    }
+    target = identity;
+  }
+  let revision: string | undefined;
+  if (Object.prototype.hasOwnProperty.call(value, 'revision')) {
+    const identity = canonicalIdentity(value.revision);
+    if (identity == null) {
+      return { ok: false, result: block('malformed', hitOffset(hits, 'revision', 'action')) };
+    }
+    revision = identity;
+  }
+  let allowance: string | undefined;
   if (Object.prototype.hasOwnProperty.call(value, 'allowance')) {
-    const raw = value.allowance;
-    if (typeof raw === 'string') {
-      if (!isBoundedString(raw)) {
-        return { ok: false, result: block('malformed', hitOffset(hits, 'allowance', 'action')) };
-      }
-      allowance = raw;
-    } else if (isCanonicalNumber(raw)) {
-      allowance = raw;
-    } else {
+    const parsedAllowance = canonicalAllowance(value.allowance);
+    if (parsedAllowance == null) {
       return { ok: false, result: block('malformed', hitOffset(hits, 'allowance', 'action')) };
     }
+    allowance = parsedAllowance;
   }
 
-  if (kind === 'value_transfer') {
-    if (amount.value === undefined || asset === undefined || recipient === undefined) {
-      return { ok: false, result: block('action_not_concrete', hitOffset(hits, 'action', null)) };
-    }
-  }
-  if (kind === 'permission' && allowance === undefined) {
+  const missing =
+    (kind === 'value_transfer' &&
+      (amount.value === undefined || asset === undefined || recipient === undefined)) ||
+    (kind === 'permission' &&
+      (allowance === undefined || asset === undefined || recipient === undefined)) ||
+    (kind === 'informational' && (content === undefined || recipient === undefined)) ||
+    (kind === 'deploy_ship' && (target === undefined || revision === undefined));
+  if (missing) {
     return { ok: false, result: block('action_not_concrete', hitOffset(hits, 'action', null)) };
   }
 
@@ -624,6 +703,9 @@ function parseAction(
   if (asset !== undefined) action.asset = asset;
   if (recipient !== undefined) action.recipient = recipient;
   if (allowance !== undefined) action.allowance = allowance;
+  if (content !== undefined) action.content = content;
+  if (target !== undefined) action.target = target;
+  if (revision !== undefined) action.revision = revision;
   return { ok: true, action };
 }
 
@@ -679,13 +761,12 @@ function normalizeObject(value: unknown, hits: KeyHit[] | null, fromText: boolea
   const action = parseAction(value.action, hits);
   if (!action.ok) return action.result;
 
+  let mandateKind: ConcreteActionKind | undefined;
   if (Object.prototype.hasOwnProperty.call(value, 'kind')) {
     if (!isConcreteKind(value.kind)) {
       return block('malformed', hitOffset(hits, 'kind', null) ?? at(0));
     }
-    if (value.kind !== action.action.kind) {
-      return block('kind_mismatch', hitOffset(hits, 'kind', null) ?? at(0));
-    }
+    mandateKind = value.kind;
   }
 
   let granted: NormalizedGranted | undefined;
@@ -695,7 +776,8 @@ function normalizeObject(value: unknown, hits: KeyHit[] | null, fromText: boolea
     granted = parsed.granted;
   }
 
-  const mandate: NormalizedMandate = { kind: action.action.kind, action: action.action };
+  const mandate: NormalizedMandate = { action: action.action };
+  if (mandateKind !== undefined) mandate.kind = mandateKind;
   if (granted) mandate.granted = granted;
   return finish(mandate, hits);
 }

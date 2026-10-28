@@ -6,7 +6,15 @@
 import { generateKeyPairSync, sign, verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ACTION_KINDS } from './engine/action-auth-kind.js';
+import {
+  ACTION_KINDS,
+  boundedPermissionCompatibleWithMandate,
+  informationalActionMayPublicAllow,
+} from './engine/action-auth-kind.js';
+import {
+  parseMandateProofSignature,
+  stage4TransportAccepts,
+} from './mandate-proof-signature.js';
 import {
   MANDATE_MAX_KEYS,
   MANDATE_MAX_STRING_UTF8_BYTES,
@@ -109,33 +117,46 @@ describe('mandate normalization', () => {
   });
 
   it('normalizes a concrete action and does not return ALLOW', () => {
-    const info = normalizeMandate({ action: { kind: 'informational' } });
+    const info = normalizeMandate({
+      action: { kind: 'informational', content: 'status ping', recipient: 'ops' },
+    });
+    const infoJson = '{"action":{"content":"status ping","kind":"informational","recipient":"ops"}}';
     expect(info).toEqual({
       ok: true,
-      mandate: { kind: 'informational', action: { kind: 'informational' } },
-      canonicalJson: '{"action":{"kind":"informational"},"kind":"informational"}',
-      canonicalBytes: Buffer.byteLength(
-        '{"action":{"kind":"informational"},"kind":"informational"}',
-        'utf8',
-      ),
+      mandate: {
+        action: { kind: 'informational', content: 'status ping', recipient: 'ops' },
+      },
+      canonicalJson: infoJson,
+      canonicalBytes: Buffer.byteLength(infoJson, 'utf8'),
     });
     expect(info).not.toHaveProperty('verdict');
     expect(JSON.stringify(info)).not.toContain('ALLOW');
 
-    const ship = normalizeMandate({ kind: 'deploy_ship', action: { kind: 'deploy_ship' } });
+    const ship = normalizeMandate({
+      kind: 'deploy_ship',
+      action: { kind: 'deploy_ship', target: 'pkg', revision: '1.2.3' },
+    });
     expect(ship).toMatchObject({
       ok: true,
-      mandate: { kind: 'deploy_ship', action: { kind: 'deploy_ship' } },
+      mandate: {
+        kind: 'deploy_ship',
+        action: { kind: 'deploy_ship', target: 'pkg', revision: '1.2.3' },
+      },
     });
 
     const permission = normalizeMandate({
-      action: { kind: 'permission', allowance: 'MAX_UINT256' },
+      action: { kind: 'permission', allowance: 1, asset: ' USDC ', recipient: ' spender ' },
     });
     expect(permission).toMatchObject({
       ok: true,
-      mandate: { action: { kind: 'permission', allowance: 'MAX_UINT256' } },
+      mandate: {
+        action: { kind: 'permission', allowance: '1', asset: 'USDC', recipient: 'spender' },
+      },
     });
-    if (permission.ok) expect(permission.canonicalJson).toContain('MAX_UINT256');
+    if (permission.ok) {
+      expect(permission.canonicalJson).toContain('"allowance":"1"');
+      expect(permission.canonicalJson).not.toContain('MAX_UINT256');
+    }
   });
 
   it('folds aliases into one canonical object and rejects a conflict', () => {
@@ -212,11 +233,12 @@ describe('mandate normalization', () => {
     expectBlock(normalizeMandate(1), 'not_object');
     expectBlock(
       normalizeMandate({
-        kind: 'informational',
-        action: { kind: 'value_transfer', amount: 1, asset: 'USDC', recipient: 'r' },
+        kind: 'unknown',
+        action: { kind: 'informational', content: 'status', recipient: 'ops' },
       }),
-      'kind_mismatch',
+      'malformed',
     );
+    expectBlock(normalizeMandate({ action: { kind: 'pay' } }), 'action_not_concrete');
     expectBlock(
       normalizeMandate({
         action: { kind: 'value_transfer', amount: -1, asset: 'USDC', recipient: 'r' },
@@ -229,9 +251,17 @@ describe('mandate normalization', () => {
       }),
       'malformed',
     );
-    expectBlock(normalizeMandate({ action: { kind: 'informational' }, granted: {} }), 'malformed');
     expectBlock(
-      normalizeMandate({ action: { kind: 'permission', allowance: '' } }),
+      normalizeMandate({
+        action: { kind: 'informational', content: 'status', recipient: 'ops' },
+        granted: {},
+      }),
+      'malformed',
+    );
+    expectBlock(
+      normalizeMandate({
+        action: { kind: 'permission', allowance: '', asset: 'USDC', recipient: 'spender' },
+      }),
       'malformed',
     );
     const cycle: Record<string, unknown> = {};
@@ -299,7 +329,7 @@ describe('mandate normalization', () => {
 
   it('does not treat the word action inside a string as the action key', () => {
     const text =
-      '{"kind":"informational","granted":{"recipient":"action"},"action":{"kind":"informational"}}';
+      '{"kind":"informational","granted":{"recipient":"action"},"action":{"kind":"informational","content":"status","recipient":"ops"}}';
     const result = normalizeMandate(text);
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -364,6 +394,168 @@ describe('mandate normalization', () => {
     expect(verdictWithMandateNormalization('ALLOW', normalizeMandate({ granted: { maxAmount: 1 } }), true)).toBe(
       'BLOCK',
     );
+  });
+
+  it('rejects an incomplete action for every supported kind', () => {
+    const cases: Array<{ full: Record<string, unknown>; fields: string[] }> = [
+      {
+        full: { kind: 'value_transfer', amount: 1, asset: 'USDC', recipient: 'r' },
+        fields: ['amount', 'asset', 'recipient'],
+      },
+      {
+        full: { kind: 'permission', allowance: '1', asset: 'USDC', recipient: 'spender' },
+        fields: ['allowance', 'asset', 'recipient'],
+      },
+      {
+        full: { kind: 'informational', content: 'status ping', recipient: 'ops' },
+        fields: ['content', 'recipient'],
+      },
+      {
+        full: { kind: 'deploy_ship', target: 'pkg', revision: '1.2.3' },
+        fields: ['target', 'revision'],
+      },
+    ];
+    const signature = 'ab'.repeat(64);
+    expect(parseMandateProofSignature(signature).ok).toBe(true);
+    for (const entry of cases) {
+      for (const field of entry.fields) {
+        const action = { ...entry.full };
+        delete action[field];
+        const result = normalizeMandate({ action });
+        expectBlock(result, 'action_not_concrete');
+        expect(verdictWithMandateNormalization('ALLOW', result, true)).toBe('BLOCK');
+        expect(verdictWithMandateNormalization('UNCERTAIN', result, true)).toBe('BLOCK');
+        expect(stage4TransportAccepts(result, parseMandateProofSignature(signature))).toBe(false);
+        expect(JSON.stringify(result)).not.toContain('ALLOW');
+      }
+      const bound = normalizeMandate({ action: entry.full });
+      expect(bound.ok).toBe(true);
+      expect(stage4TransportAccepts(bound, parseMandateProofSignature(signature))).toBe(true);
+      expect(verdictWithMandateNormalization('BLOCK', bound, true)).toBe('BLOCK');
+      expect(bound).not.toHaveProperty('verdict');
+    }
+    expectBlock(normalizeMandate({ action: { kind: 'deploy_ship' } }), 'action_not_concrete');
+    expectBlock(normalizeMandate({ action: { kind: 'informational' } }), 'action_not_concrete');
+    expectBlock(
+      normalizeMandate({ action: { kind: 'permission', allowance: 1 } }),
+      'action_not_concrete',
+    );
+  });
+
+  it('rejects blank identities and unparseable allowances', () => {
+    const transfer = { kind: 'value_transfer', amount: 1, asset: 'USDC', recipient: 'r' };
+    for (const field of ['asset', 'recipient'] as const) {
+      expectBlock(normalizeMandate({ action: { ...transfer, [field]: ' ' } }), 'malformed');
+      expectBlock(normalizeMandate({ action: { ...transfer, [field]: '\n\t' } }), 'malformed');
+    }
+    expectBlock(
+      normalizeMandate({
+        action: { kind: 'informational', content: '  ', recipient: 'ops' },
+      }),
+      'malformed',
+    );
+    expectBlock(
+      normalizeMandate({
+        action: { kind: 'deploy_ship', target: 'pkg', revision: ' ' },
+      }),
+      'malformed',
+    );
+    expectBlock(
+      normalizeMandate({
+        granted: { maxAmount: 1, asset: ' ', recipient: 'r' },
+        action: transfer,
+      }),
+      'malformed',
+    );
+
+    const permission = { kind: 'permission', allowance: '1', asset: 'USDC', recipient: 'spender' };
+    for (const allowance of [
+      '-1',
+      'not-an-allowance',
+      '01',
+      '1e2',
+      ' 1',
+      '1 ',
+      '+1',
+      '1.0',
+      'MAX_UINT256',
+      'Unlimited',
+      '0x10',
+      '',
+    ]) {
+      const result = normalizeMandate({ action: { ...permission, allowance } });
+      expectBlock(result, 'malformed');
+      expect(verdictWithMandateNormalization('ALLOW', result, true)).toBe('BLOCK');
+    }
+    const numbered = normalizeMandate({ action: { ...permission, allowance: 1 } });
+    expect(numbered).toMatchObject({
+      ok: true,
+      mandate: { action: { allowance: '1', asset: 'USDC', recipient: 'spender' } },
+    });
+    const unlimited = normalizeMandate({ action: { ...permission, allowance: 'unlimited' } });
+    expect(unlimited).toMatchObject({
+      ok: true,
+      mandate: { action: { allowance: 'unlimited' } },
+    });
+    const trimmed = normalizeMandate({
+      action: { ...transfer, asset: ' USDC ', recipient: ' r ' },
+    });
+    expect(trimmed).toMatchObject({
+      ok: true,
+      mandate: { action: { asset: 'USDC', recipient: 'r' } },
+    });
+  });
+
+  it('preserves a value_transfer mandate with a bounded permission action', () => {
+    const mandate = {
+      kind: 'value_transfer' as const,
+      granted: { maxAmount: 100, asset: 'USDC', recipient: '0xUNIROUTER' },
+      action: {
+        kind: 'permission' as const,
+        amount: 100,
+        allowance: '100',
+        asset: 'USDC',
+        recipient: '0xUNIROUTER',
+      },
+    };
+    expect(boundedPermissionCompatibleWithMandate('', '', mandate)).toBe(true);
+    expect(
+      informationalActionMayPublicAllow('permission', 'value_transfer', {
+        boundedPermissionCompatible: true,
+        mandate,
+      }),
+    ).toBe(true);
+
+    const normalized = normalizeMandate(mandate);
+    expect(normalized.ok).toBe(true);
+    if (normalized.ok) {
+      expect(normalized.mandate.kind).toBe('value_transfer');
+      expect(normalized.mandate.action.kind).toBe('permission');
+      expect(normalized.mandate.action.allowance).toBe('100');
+    }
+    expect(normalized).not.toHaveProperty('verdict');
+    expect(verdictWithMandateNormalization('BLOCK', normalized, true)).toBe('BLOCK');
+    expect(verdictWithMandateNormalization('UNCERTAIN', normalized, true)).toBe('UNCERTAIN');
+    expect(JSON.stringify(normalized)).not.toContain('ALLOW');
+
+    const unbounded = {
+      ...mandate,
+      action: { ...mandate.action, allowance: 'unlimited' },
+    };
+    expect(boundedPermissionCompatibleWithMandate('', '', unbounded)).toBe(false);
+    expect(
+      informationalActionMayPublicAllow('permission', 'value_transfer', {
+        boundedPermissionCompatible: false,
+        mandate: unbounded,
+      }),
+    ).toBe(false);
+    const described = normalizeMandate(unbounded);
+    expect(described.ok).toBe(true);
+    if (described.ok) {
+      expect(described.mandate.kind).toBe('value_transfer');
+      expect(described.mandate.action.kind).toBe('permission');
+    }
+    expect(verdictWithMandateNormalization('BLOCK', described, true)).toBe('BLOCK');
   });
 
   it('does not let signature validity change a gate verdict', () => {

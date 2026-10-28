@@ -5,32 +5,82 @@
  * Does not authorize execution.
  *
  * The account id is only the explicit field on the key record
- * (`key:platform:agent_id:account_id`). A pre-account record
- * (`key:platform:agent_id`) is HTTP 503. The agent id is not copied.
- * A request account id and X-Sentinel-Agent-Id are not read.
+ * (`key:platform:agent_id:account_id`). HTTP 503 is only for an
+ * already-authenticated key whose record has no account id.
+ * An invalid or removed key stays the auth layer's 401.
+ * The agent id is not copied. A request account id and
+ * X-Sentinel-Agent-Id are not read.
  *
  * Principal-key rotation is not this API-key field. A retired kid is
  * BLOCK for a new authorization. Historical verification is a separate
  * result and never authorizes execution.
  */
 
-import {
-  resolveServerAccountId,
-  type ServerAccountLookup,
-  type ServerAccountResult,
-} from './server-account.js';
+import { parseSentinelApiKeyRecords } from './server-account.js';
 
 export type MigrationGateVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
 
 export type PrincipalKeyStatus = 'active' | 'retired' | 'revoked';
 
 /**
- * The stage-1 mapping. No other source is consulted.
- * A missing record and a record with no account field are both
- * `ACCOUNT_UNAVAILABLE`.
+ * A principal `validateApiKey` has already accepted or rejected.
+ * This function does not replace that decision with HTTP 503.
  */
-export function migrateApiKeyToAccount(input: ServerAccountLookup): ServerAccountResult {
-  return resolveServerAccountId(input);
+export interface PrincipalAuthState {
+  authenticated: boolean;
+  apiKey: string;
+}
+
+export interface AuthenticatedAccountMappingInput {
+  principal: PrincipalAuthState;
+  /** Server env fixture. Required for a mapping. A missing fixture is unreadable. */
+  env?: Record<string, unknown>;
+  /** Ignored. It must not select the account. */
+  requestAccountId?: string;
+  /** Ignored. It must not select the account. */
+  agentIdHeader?: string;
+}
+
+export type AuthenticatedAccountMapping =
+  | { ok: true; accountId: string }
+  | { ok: false; httpStatus: 503; code: 'ACCOUNT_UNAVAILABLE' }
+  | { applies: false; authorizesExecution: false };
+
+/**
+ * Map an already-authenticated key to its server account id.
+ * HTTP 503 `ACCOUNT_UNAVAILABLE` only when `principal.authenticated`
+ * is true, the key is present in the server record, and that record
+ * has no account id (migration required). An unauthenticated principal,
+ * an invalid key, or a key that is no longer in the list does not get
+ * that 503. Those stay the auth layer's 401. Request fields are ignored.
+ */
+export function mapAuthenticatedPrincipalToAccount(
+  input: AuthenticatedAccountMappingInput,
+): AuthenticatedAccountMapping {
+  void input.requestAccountId;
+  void input.agentIdHeader;
+
+  if (input.principal.authenticated !== true || input.principal.apiKey.length === 0) {
+    return { applies: false, authorizesExecution: false };
+  }
+
+  let raw: unknown;
+  try {
+    if (!input.env) return { ok: false, httpStatus: 503, code: 'ACCOUNT_UNAVAILABLE' };
+    raw = input.env.SENTINEL_API_KEYS;
+  } catch {
+    return { ok: false, httpStatus: 503, code: 'ACCOUNT_UNAVAILABLE' };
+  }
+
+  const records = parseSentinelApiKeyRecords(raw);
+  if (!records) return { ok: false, httpStatus: 503, code: 'ACCOUNT_UNAVAILABLE' };
+
+  const matched = records.find((record) => record.key === input.principal.apiKey);
+  if (!matched) return { applies: false, authorizesExecution: false };
+  if (!matched.accountId || matched.accountId.trim().length === 0) {
+    return { ok: false, httpStatus: 503, code: 'ACCOUNT_UNAVAILABLE' };
+  }
+  return { ok: true, accountId: matched.accountId };
 }
 
 export interface HistoricalVerificationInput {

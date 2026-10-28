@@ -8,6 +8,7 @@ import { verdictWithMandateNormalization, normalizeMandate } from './mandate-nor
 import {
   decideNoAuthMandatePath,
   stage4FailureClass,
+  stage4UnavailablePayload,
   type Stage4FailureKind,
 } from './mandate-no-auth.js';
 import { verdictWithPrincipalCheck } from './principal-key-manifest.js';
@@ -51,6 +52,57 @@ describe('no-auth mandate path', () => {
       const blank = decideNoAuthMandatePath({ authenticatedAccountId: '', ...flags });
       expect(blank).toEqual(decision);
     }
+  });
+
+  it('treats a whitespace-only account id as no account', () => {
+    for (const authenticatedAccountId of [' ', '   ', '\n', '\t', ' \t ']) {
+      const decision = decideNoAuthMandatePath({
+        authenticatedAccountId,
+        mandateProofPresent: true,
+        signatureVerified: true,
+        concreteAction: true,
+      });
+      expect(decision).toEqual({
+        applies: true,
+        ok: false,
+        httpStatus: 503,
+        code: 'ACCOUNT_UNAVAILABLE',
+      });
+      if (decision.applies) {
+        expect(verdictWithPrincipalCheck('ALLOW', decision)).toBe('UNCERTAIN');
+      }
+      expect(JSON.stringify(decision)).not.toContain('ALLOW');
+    }
+  });
+
+  it('builds a 503 body with no verdict and no mandate contents', () => {
+    const body = stage4UnavailablePayload({
+      code: 'ACCOUNT_UNAVAILABLE',
+      requestId: 'req_fixture',
+      cause: new Error('redis password leaked'),
+      mandate: { action: { recipient: 'secret-recipient', content: 'hidden mandate' } },
+    });
+    expect(body).toEqual({
+      error: 'Mandate verification unavailable',
+      code: 'ACCOUNT_UNAVAILABLE',
+      request_id: 'req_fixture',
+    });
+    expect(Object.keys(body).sort()).toEqual(['code', 'error', 'request_id']);
+    expect(body).not.toHaveProperty('verdict');
+    const json = JSON.stringify(body);
+    expect(json).not.toContain('leaked');
+    expect(json).not.toContain('secret-recipient');
+    expect(json).not.toContain('hidden mandate');
+    expect(json).not.toContain('ALLOW');
+    expect(json).not.toContain('BLOCK');
+
+    const hidden = stage4UnavailablePayload({
+      code: 'not-a-real-code secret-recipient',
+      requestId: 'req_fixture',
+    });
+    expect(hidden.code).toBe('ACCOUNT_UNAVAILABLE');
+    expect(JSON.stringify(hidden)).not.toContain('secret-recipient');
+    expect(JSON.stringify(hidden)).not.toContain('not-a-real-code');
   });
 
   it('does not authorize when an account id is already present', () => {

@@ -4,11 +4,12 @@
  */
 import { generateKeyPairSync, sign, verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { validateApiKey } from './auth.js';
 import {
   classifyWrongAccount,
   historicalPrincipalVerification,
-  migrateApiKeyToAccount,
+  mapAuthenticatedPrincipalToAccount,
   verdictFromHistoricalVerification,
 } from './mandate-account-migration.js';
 import { normalizeMandate } from './mandate-normalize.js';
@@ -128,23 +129,32 @@ async function check(options: {
   return { result, loads };
 }
 
+const originalEnv = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...originalEnv };
+});
+
 describe('key to account migration', () => {
-  it('maps a migrated key record and fails closed for a pre-account key', () => {
+  it('maps an authenticated key and 503s only when that record has no account', () => {
     const env = {
       SENTINEL_API_KEYS: `${LEGACY_KEY}:openserv:agent42:${ACCOUNT},${NEW_KEY}:acp:0xABC:${OTHER}`,
     };
-    const mapped = migrateApiKeyToAccount({
-      apiKey: LEGACY_KEY,
+    const mapped = mapAuthenticatedPrincipalToAccount({
+      principal: { authenticated: true, apiKey: LEGACY_KEY },
       requestAccountId: 'spoofed-account',
       agentIdHeader: 'agent42',
       env,
     });
     expect(mapped).toEqual({ ok: true, accountId: ACCOUNT });
-    const other = migrateApiKeyToAccount({ apiKey: NEW_KEY, env });
+    const other = mapAuthenticatedPrincipalToAccount({
+      principal: { authenticated: true, apiKey: NEW_KEY },
+      env,
+    });
     expect(other).toEqual({ ok: true, accountId: OTHER });
 
-    const preAccount = migrateApiKeyToAccount({
-      apiKey: LEGACY_KEY,
+    const preAccount = mapAuthenticatedPrincipalToAccount({
+      principal: { authenticated: true, apiKey: LEGACY_KEY },
       requestAccountId: ACCOUNT,
       agentIdHeader: 'agent42',
       env: { SENTINEL_API_KEYS: `${LEGACY_KEY}:openserv:agent42` },
@@ -158,12 +168,37 @@ describe('key to account migration', () => {
     expect(JSON.stringify(preAccount)).not.toContain('ALLOW');
     expect(JSON.stringify(preAccount)).not.toContain('agent42');
 
-    const removed = migrateApiKeyToAccount({
-      apiKey: LEGACY_KEY,
+    const removed = mapAuthenticatedPrincipalToAccount({
+      principal: { authenticated: true, apiKey: LEGACY_KEY },
       env: { SENTINEL_API_KEYS: `${NEW_KEY}:acp:0xABC:${ACCOUNT}` },
     });
-    expect(removed).toEqual({ ok: false, httpStatus: 503, code: 'ACCOUNT_UNAVAILABLE' });
-    expect(removed).not.toMatchObject({ verdict: 'BLOCK', reason: 'retired' });
+    expect(removed).toEqual({ applies: false, authorizesExecution: false });
+    expect(removed).not.toMatchObject({ httpStatus: 503 });
+    expect(JSON.stringify(removed)).not.toContain('ALLOW');
+  });
+
+  it('does not turn an auth failure into 503 or into an account id', () => {
+    process.env.SENTINEL_AUTH_REQUIRED = 'true';
+    process.env.SENTINEL_API_KEYS = `${LEGACY_KEY}:openserv:agent42:${ACCOUNT}`;
+    const invalid = validateApiKey('sk_wrong');
+    expect(invalid.valid).toBe(false);
+    expect(invalid).not.toHaveProperty('accountId');
+
+    const unauthenticated = mapAuthenticatedPrincipalToAccount({
+      principal: { authenticated: false, apiKey: LEGACY_KEY },
+      env: { SENTINEL_API_KEYS: process.env.SENTINEL_API_KEYS },
+    });
+    expect(unauthenticated).toEqual({ applies: false, authorizesExecution: false });
+    expect(unauthenticated).not.toHaveProperty('accountId');
+    expect(unauthenticated).not.toMatchObject({ httpStatus: 503 });
+
+    const wrongKey = mapAuthenticatedPrincipalToAccount({
+      principal: { authenticated: true, apiKey: 'sk_wrong' },
+      env: { SENTINEL_API_KEYS: process.env.SENTINEL_API_KEYS },
+    });
+    expect(wrongKey).toEqual({ applies: false, authorizesExecution: false });
+    expect(JSON.stringify(invalid)).not.toContain('ALLOW');
+    expect(JSON.stringify(wrongKey)).not.toContain('ALLOW');
   });
 
   it('blocks a retired kid for a new authorization and keeps history off the execution path', async () => {
