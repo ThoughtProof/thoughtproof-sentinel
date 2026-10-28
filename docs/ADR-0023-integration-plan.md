@@ -4,7 +4,9 @@
 **Parent:** [ADR-0023](ADR-0023-principal-signed-mandate.md) (Proposed). This plan does not change that status.
 **Decider:** Founder
 
-This document is a plan. It is not an implementation GO, not a suite GO, and not a per-account enablement GO. It changes no code, no request path, and no workflow. Accepting it does not authorize editing the modules named below.
+This document is a plan. It is not an implementation GO, not a suite GO, and not a per-account enablement GO. Accepting it does not authorize wiring the modules named below into the request path.
+
+**Prerequisite note (2026-10-28).** Shared mandate normalization, the key-to-account mapping, and the no-auth failure class are specified in [Stage 4 prerequisites](#stage-4-prerequisites--normalization-key-mapping-no-auth) and implemented off the request path. That note is not a stage-4 wiring GO, not an enablement GO, and not a suite GO. `registerPrincipalKey` stays locked. No account is enabled. The replay store is not enabled.
 
 ## Paid-suite trigger paths
 
@@ -113,6 +115,85 @@ These hold in every stage. A later stage must not weaken an earlier one.
 
 **Separate GOs.** An implementation GO for the manifest shape and the status rules. Who may pin a key is decided: the verified account owner or an explicitly authorized account admin, through a separate admin process, piloted as a documented manual process. That process is not this stage. `registerPrincipalKey` stays locked until it exists. The verify-path GO is neither of those. No suite GO while the files stay off the trigger list.
 
+## Stage 4 prerequisites — normalization, key mapping, no-auth
+
+**Status.** Specified and implemented off the request path (2026-10-28). Not a wiring GO. Nothing in this section is called from `POST /sentinel/verify`.
+
+**Goal.** Give stage 4 one mandate normalization, a proof of how existing keys become account ids (including rotation), and an explicit fail-closed rule when no authenticated account exists. Shipping the modules does not wire them.
+
+### Shared mandate normalization
+
+Module: `src/mandate-normalize.ts`. Tests: `src/mandate-normalize.test.ts`.
+
+The signer, the authorization gate, and the P1 digest use this object, not `normalizeMandate` in `src/validation.ts`. That function rewrites aliases and drops fields. This one does not drop a field to make an object valid. JCS runs on the normalized object only. It does not decide which fields exist. The contract version `sentinel.mandate.normalized.v1` is not a field of the canonical object.
+
+A bound concrete action is a plain object `action` whose `kind` is `informational`, `value_transfer`, `permission`, or `deploy_ship`. `unknown` is not concrete.
+
+- `{}` is BLOCK `empty`.
+- No `action` is BLOCK `action_missing`.
+- An `action` that is not that shape is BLOCK `action_not_concrete`.
+- `value_transfer` requires a finite `amount` ≥ 0, a non-empty `asset`, and a non-empty `recipient`.
+- `permission` requires `allowance` (a finite number ≥ 0, or a non-empty string). The string is kept as written. It is not lowercased.
+- `informational` and `deploy_ship` are kind only. Any other action field is BLOCK `unknown_field`, not stripped.
+- Top-level keys are `kind`, `granted`, and `action` only. `kind`, when sent, must equal `action.kind` (BLOCK `kind_mismatch`). The canonical object always carries that `kind`.
+- `granted` is optional. When present it is a non-empty object of `maxAmount`, `asset`, `recipient`, and `allowUnlimited`.
+
+Aliases `maxAmountUsd` and `max_amount` become `maxAmount`. Aliases `amountUsd` and `amount_usd` become `amount`. The same value on the alias and the canonical name keeps one field. Two different values are BLOCK `alias_conflict`. Strings keep their original code units.
+
+`__proto__`, `constructor`, and `prototype` are BLOCK `prototype_key`. The normalized object is built by assigning known keys on a fresh object. A non-plain prototype is the same BLOCK.
+
+Size limits are BLOCK `too_large`: the original text and the canonical JSON are at most 8192 UTF-8 bytes, and each object has at most 16 keys. A string field over 512 UTF-8 bytes is BLOCK `malformed`. A further object inside `granted` or `action` is BLOCK `malformed`. The walk is one pass over the keys and one pass over the original text.
+
+Offsets are UTF-16 indexes into that original text, the same indexes `String.prototype.indexOf` uses on that text. They are not indexes into a lowercased copy. Unicode case folding can expand a character (U+0130) and move a cut. A key is found by the scan, so the word `action` inside a string value is not the `action` key.
+
+Unknown input and malformed types are BLOCK. The result type has no ALLOW. `ok: true` means a concrete normalized mandate exists. It is not a verdict and it does not authorize execution. A failed normalization is known-invalid, so the combined verdict is BLOCK even when the gate verdict is ALLOW or UNCERTAIN, and even when the signature verified. An existing BLOCK stays BLOCK. When normalization succeeds, ALLOW stays ALLOW and UNCERTAIN stays UNCERTAIN. Passing `signatureVerified: true` does not change the function's result.
+
+Stage 3 still accepts a signed `{}` as `principal_signed`, because stage 3 does not apply this check. That success is not a bound action. Stage 4 must sign and verify `canonicalJson` from this module, not the pre-normalization object. This prerequisite does not change `principalMandateSignedBytes`.
+
+### Key to account, rotation, wrong account
+
+Module: `src/mandate-account-migration.ts`. Tests: `src/mandate-account-migration.test.ts`.
+
+`migrateApiKeyToAccount` is `resolveServerAccountId`. The account id is the explicit account field on `SENTINEL_API_KEYS` (`key:platform:agent_id:account_id`). A pre-account record (`key:platform:agent_id`) is HTTP 503 `ACCOUNT_UNAVAILABLE`. The agent id is not the account id. A body account id and `X-Sentinel-Agent-Id` are not the account id. A key that is no longer in the list is HTTP 503. That is not BLOCK `retired` and not a principal-signed success.
+
+Principal-key rotation is the manifest, not the API-key string. A replacement kid can be `active` while the old kid is `retired`. A new authorization with the retired kid is BLOCK `retired`. `historicalPrincipalVerification` is a different result: `purpose: 'historical'`, `authorizesExecution: false`, verdict BLOCK `historical_not_authorization`, whether or not the signature matched and whether the key status is `active`, `retired`, or `revoked`. It is not `mandate_source: principal_signed`. `verdictFromHistoricalVerification` never returns ALLOW. An existing BLOCK stays BLOCK. UNCERTAIN stays UNCERTAIN. A gate ALLOW becomes BLOCK on this path, because this path does not authorize execution.
+
+Wrong account uses the stage-3 checks:
+
+- The manifest document's `accountId` differs from the authenticated account: HTTP 503 `MANIFEST_MALFORMED`. The load key stays the authenticated account.
+- The proof's `account_id` differs: BLOCK `account_mismatch`. The other account is not loaded.
+
+`registerPrincipalKey` stays locked (`REGISTRATION_UNAUTHORIZED`, no write). These stage-3 rules stay as they are: `notBefore <= now < notAfter` (`notAfter` exclusive), environment exactly `production`, `preview`, or `development`, a 2 second store deadline, and signature bytes UTF-8 `thoughtproof.sentinel.mandate.v1`, one 0x00 byte, then UTF-8 JCS. A signer-chosen `iat` does not widen the key window.
+
+### No authenticated account
+
+Module: `src/mandate-no-auth.ts`. Tests: `src/mandate-no-auth.test.ts`.
+
+When `SENTINEL_AUTH_REQUIRED` is not exactly `true`, `validateApiKey` returns `{ valid: true }` and no account id. It does not invent one from `SENTINEL_API_KEYS`. A key record with no account field also leaves `accountId` unset. `resolveServerAccountId` is then HTTP 503 `ACCOUNT_UNAVAILABLE`. A failed key check stays `valid: false` (HTTP 401 on the handler today). This prerequisite does not turn that into ALLOW.
+
+`decideNoAuthMandatePath` is the mandate-path result for a missing account id, including a blank one. It returns HTTP 503 `ACCOUNT_UNAVAILABLE` with `applies: true`. It does not read the proof, the signature, or the normalizer: a present `mandate_proof`, a verified signature, and a concrete action all stay 503. The result is not `caller_declared` and not ALLOW. `verdictWithPrincipalCheck` maps that 503 to UNCERTAIN. An existing BLOCK stays BLOCK.
+
+If an account id is already present, `applies` is false and `authorizesExecution` is false. That result is not a verdict. The caller still runs normalization and the principal check. It is not an ALLOW.
+
+503 and BLOCK are different classes (`stage4FailureClass`):
+
+| Situation | Class | Result |
+|---|---|---|
+| No authenticated account | unverifiable | HTTP 503 `ACCOUNT_UNAVAILABLE`. Not BLOCK. |
+| Manifest `accountId` mismatch | unverifiable | HTTP 503 `MANIFEST_MALFORMED` |
+| Manifest store does not answer | unverifiable | HTTP 503 `MANIFEST_UNAVAILABLE` |
+| Replay store does not answer | unverifiable | HTTP 503 `REPLAY_STORE_UNAVAILABLE` |
+| `{}`, missing `action` | known-invalid | BLOCK `empty` or `action_missing` |
+| Proof `account_id` mismatch | known-invalid | BLOCK `account_mismatch` |
+| Retired kid on a new authorization | known-invalid | BLOCK `retired` |
+| Historical verification | known-invalid, not an execution | BLOCK `historical_not_authorization` |
+
+A bad signature, a revoked kid, and an expired or replayed proof stay BLOCK on the stage-3 and stage-2 checks. None of these rows is ALLOW. A valid signature does not move a row.
+
+**Paid-suite trigger paths.** No. The modules are `src/mandate-normalize.ts`, `src/mandate-account-migration.ts`, and `src/mandate-no-auth.ts`, plus their tests. They are outside the six paths. This section does not edit `src/engine/**`, the scenario file, the suite script, either helper under `scripts/lib/`, or the workflow file.
+
+**Separate GOs.** A later implementation GO is still required before any of these functions is called from the verify handler, before `caller_declared` is recorded, and before any account is protected.
+
 ## Stage 4 — Request-path wiring
 
 **Goal.** `caller_declared` is only an explicitly established legacy status. Once protection is enabled, a signature is required even when `mandate_proof` is omitted. An explicitly sent `mandate_proof` is always verified or rejected. The nonce is consumed before any side effect.
@@ -129,7 +210,7 @@ These hold in every stage. A later stage must not weaken an earlier one.
 - Shipping the code does not enable protection and does not establish a legacy status. `caller_declared` applies only where that status was explicitly recorded. Missing or unreadable account or policy data is HTTP 503, never a downgrade of a protected account and never an implicit `caller_declared`.
 - With protection on, an omitted `mandate_proof` is a known-invalid proof: BLOCK, not `caller_declared`, and not ALLOW.
 - An explicitly sent `mandate_proof` is verified or rejected, including when the account is explicitly legacy. It is never silently ignored.
-- **Open in this stage: shared mandate validation.** The signer, the gate, and the digest still need one normalization. A correctly signed `{}`, or a mandate without `action`, must not count as a bound action. Stage 3 does not add that check. Stage 4 does not close until it is specified.
+- **Shared mandate validation is specified and still unwired.** `src/mandate-normalize.ts` rejects a correctly signed `{}` and a mandate without a concrete `action`. Stage 3 does not call it. Stage 4 does not close until the verify path uses that normalization for the signature, the gate, and the digest. The prerequisite section does not do that wiring.
 - The atomic stage 2 step runs only after the signature and the account-id equality check have succeeded, and before `x402Gate`, `verify()`, attestation, and billing. A BLOCK or UNCERTAIN from that step returns before those calls.
 - `mandate_proof.account_id` must equal the stage 1 account id. It does not select the account. A mismatch is BLOCK.
 - `mandate_source: principal_signed` is set only for the mandate that verified.
@@ -164,10 +245,12 @@ A rollback never turns store, key, or policy failures into ALLOW. It must not we
 
 These need their own answers before the stage that depends on them. Decided items are marked. The rest are still open.
 
-- **Account-id source.** `SENTINEL_API_KEYS` has no account-id field today. What store or config is the stable id, and what happens to keys that predate it?
+- **Account-id source.** What store or config is the stable id once the env record is not enough? The prerequisite records the current mapping and does not close this. `key:platform:agent_id:account_id` resolves through `resolveServerAccountId`. A pre-account `key:platform:agent_id` is HTTP 503 `ACCOUNT_UNAVAILABLE`. The agent id is not copied. Principal-key rotation is separate: a retired kid is BLOCK for a new authorization, and historical verification does not authorize execution.
 - **Replay backend.** Which shared store, and how is it kept distinct from the rate-limit Redis that is allowed to fall back to memory? Is the nonce scoped per account or global?
 - **Registration authority (decided).** A key may be pinned, rotated, or revoked only by the verified account owner or an explicitly authorized account admin, and only through a separate admin process. The pilot is a documented manual process. The agent, the verify API key, and `X-Sentinel-Agent-Id` are not that authority. Until that process is in place, `registerPrincipalKey` stays locked and writes nothing.
-- **Shared mandate validation (open, stage 4).** The signer, the authorization gate, and the digest still need one shared normalization. A correctly signed `{}`, or a mandate without `action`, must not count as a bound action. That check is not part of stage 3.
+- **Shared mandate validation (specified, not wired).** `src/mandate-normalize.ts` is the shared normalization. A correctly signed `{}`, or a mandate without a concrete `action`, is BLOCK, not a bound action. Unknown and malformed input is BLOCK, never ALLOW. Wiring it into the signer, the gate, the digest, and `POST /sentinel/verify` is still stage 4 and is not done. Stage 3 does not call it.
+- **0x signature prefix (open).** `verifyEd25519` in `src/principal-key-manifest.ts` accepts 128 hex digits, or the same digits with a `0x` or `0X` prefix. Proposal: do not require the prefix. Keep accepting both forms. The prefix does not select an account and does not change a BLOCK or a 503 into ALLOW. Whether a stored receipt keeps the original text or the stripped hex is not decided here.
+- **HTTP 503 on the stage-4 response (open).** Check results already carry `httpStatus: 503` and a `code` (`ACCOUNT_UNAVAILABLE`, `MANIFEST_UNAVAILABLE`, `MANIFEST_MALFORMED`, `TARGET_ENVIRONMENT_UNAVAILABLE`, `RECEIPT_TIME_UNUSABLE`, `REPLAY_STORE_UNAVAILABLE`). Proposal, matching `modelConfigUnavailablePayload` and `rateLimitUnavailablePayload`: status 503 and a body `{ error, code, request_id }` using that `code`, with no `verdict` field and no ALLOW. `verdictWithPrincipalCheck` maps the 503 result to UNCERTAIN, and an existing BLOCK stays BLOCK. Do not collapse 503 into BLOCK in the HTTP body. The wording of `error`, and whether `verdict: UNCERTAIN` is added beside `code`, are not decided here.
 - **Policy store.** Where an explicitly established `caller_declared` or protected status is recorded, and who may flip it. The enablement GO depends on this. Unreadable policy data is already decided: HTTP 503, not `caller_declared`.
 - **Rate-limit writes.** Auth must run before consumption so the account id exists. The rate limiter currently increments before `x402Gate`. Whether that increment is a side effect that must move after a successful consume is undecided. It must not be used as a replay fallback either way.
 - **Receipt clock.** ADR-0023 uses server receipt time plus 30 seconds of skew. Whether every instance reads one clock, or each reads its own clock inside that skew, is undecided.
