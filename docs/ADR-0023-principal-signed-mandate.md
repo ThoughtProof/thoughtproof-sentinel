@@ -44,6 +44,8 @@ P1's salted digest is not the signature payload. The salt is generated on the se
 
 Registration is separately authorized. The principal generates the key pair and holds the private key. Sentinel stores only the public key, in a server-pinned manifest for that account. The agent cannot have arbitrary mandates signed, and it cannot register its own key.
 
+The pilot manual process for a pin, a rotation, a retirement, and a revocation is [ADR-0023 key-pinning admin process](ADR-0023-key-pinning-admin-process.md). That document does not unlock `registerPrincipalKey`, does not wire verification, and does not enable an account.
+
 `principal_kid` selects one Ed25519 key in that manifest. The document is close to the existing key doc (OKP, `kid`, `status`, `notBefore`, `notAfter`) and is not the public export JWKS at `/.well-known/thoughtproof-keys.json`. The caller-supplied F1 `key_manifest` stays an evidence manifest. It is not the principal manifest. A caller-supplied JWKS URL is rejected: the request would choose its own trust anchor.
 
 ## Account binding
@@ -143,7 +145,7 @@ After the signature verifies, consume the nonce in the shared store atomically, 
 
 A consumed nonce is retained at least until `exp + skew`. No replay entry may expire while the proof could still be accepted. If the replay store or the key store is unavailable, the result is UNCERTAIN / HTTP 503, not a pass and not a local fallback.
 
-The manifest may hold more than one kid so a replacement key can be registered before the old one is retired. Rotation and revocation are account actions outside `POST /sentinel/verify`. The verify caller cannot add, retire, or revoke a kid.
+The manifest may hold more than one kid so a replacement key can be registered before the old one is retired. Rotation and revocation are account actions outside `POST /sentinel/verify`. The verify caller cannot add, retire, or revoke a kid. The pilot steps for those actions are the [key-pinning admin process](ADR-0023-key-pinning-admin-process.md).
 
 | Status | New authorization request |
 |---|---|
