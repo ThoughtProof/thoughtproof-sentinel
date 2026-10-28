@@ -109,6 +109,33 @@ const spec = {
                     description:
                       'Verification tier. checkpoint: nano solo ($0.005). standard: 2-model cascade ($0.008, default).',
                   },
+                  mandate_proof: {
+                    type: 'object',
+                    description:
+                      'Optional principal signature envelope (ADR-0023). Accepted only when SENTINEL_MANDATE_PROOF_ENFORCE is exactly true (default off). While the flag is off this field is unknown and the request is rejected. Optional in this schema does not override an account policy that requires a proof. The signature is 128 lowercase hex characters. A verified proof may set mandate_source to principal_signed on the canonical v2 body only. It does not change the verdict, and v1 signed_export bytes do not gain the field. Known-invalid proofs are BLOCK. Store or account failures are HTTP 503 with error "Mandate verification unavailable" and no verdict.',
+                    properties: {
+                      schema_version: { type: 'string' },
+                      nonce: { type: 'string' },
+                      iat: { type: 'integer' },
+                      exp: { type: 'integer' },
+                      account_id: {
+                        type: 'string',
+                        description:
+                          'Must equal the server account id. It does not select the account.',
+                      },
+                      environment: {
+                        type: 'string',
+                        enum: ['production', 'preview', 'development'],
+                      },
+                      purpose: { type: 'string' },
+                      principal_kid: { type: 'string' },
+                      signature: {
+                        type: 'string',
+                        pattern: '^[0-9a-f]{128}$',
+                        description: 'Ed25519 signature, 128 lowercase hex characters. No 0x prefix.',
+                      },
+                    },
+                  },
                   mandate: {
                     type: 'object',
                     description:
@@ -350,7 +377,7 @@ const spec = {
           '401': { description: 'Missing or invalid X-Sentinel-Key' },
           '503': {
             description:
-              'Verifier model config missing (e.g. SERV_API_KEY unset). Gate-down — not a verdict and not model uncertainty. Distinct from 500 INTERNAL_ERROR.',
+              'Verifier model config missing (e.g. SERV_API_KEY unset), or mandate verification unavailable while SENTINEL_MANDATE_PROOF_ENFORCE is true. Gate-down — not a verdict and not model uncertainty. Mandate 503 bodies use error "Mandate verification unavailable" and a code such as ACCOUNT_UNAVAILABLE, POLICY_UNAVAILABLE, MANIFEST_UNAVAILABLE, REPLAY_STORE_UNAVAILABLE, or MANDATE_VERIFICATION_UNAVAILABLE. A provably invalid proof is HTTP 200 with verdict BLOCK, not this status. Distinct from 500 INTERNAL_ERROR. A signature does not turn a 503 into ALLOW.',
             content: {
               'application/json': {
                 schema: {
@@ -360,8 +387,19 @@ const spec = {
                     error: { type: 'string', example: 'Verification service temporarily unavailable' },
                     code: {
                       type: 'string',
-                      enum: ['MODEL_CONFIG_MISSING'],
-                      description: 'Dedicated code so MCP hosts treat gate-down ≠ cascade UNCERTAIN',
+                      enum: [
+                        'MODEL_CONFIG_MISSING',
+                        'ACCOUNT_UNAVAILABLE',
+                        'MANIFEST_UNAVAILABLE',
+                        'MANIFEST_MALFORMED',
+                        'TARGET_ENVIRONMENT_UNAVAILABLE',
+                        'RECEIPT_TIME_UNUSABLE',
+                        'REPLAY_STORE_UNAVAILABLE',
+                        'POLICY_UNAVAILABLE',
+                        'MANDATE_VERIFICATION_UNAVAILABLE',
+                      ],
+                      description:
+                        'MODEL_CONFIG_MISSING is gate-down for the verifier model. The other codes are mandate verification unavailable (no verdict).',
                     },
                     request_id: { type: 'string' },
                   },

@@ -1,6 +1,7 @@
 /**
  * ADR-0023 stage 3: server-pinned Ed25519 public keys for one account.
- * Not called from the verify handler. Not enabled for any account.
+ * Not enabled for any account. The request-path module calls
+ * verifyPrincipalMandate only when enforcement is on.
  * A verified signature does not produce ALLOW.
  *
  * The manifest is not the caller-supplied evidence manifest and not the

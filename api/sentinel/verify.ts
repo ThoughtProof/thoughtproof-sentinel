@@ -26,6 +26,14 @@ import {
   responseDigestSalt,
 } from '../../src/package-digest.js';
 import { getPotCliVersion, publishablePotCliVersion } from '../../src/runtime-versions.js';
+import {
+  bodyWithoutMandateProof,
+  evaluateMandateRequestPath,
+  mandateProofEnforceEnabled,
+  mandateRequestDeps,
+  verdictAfterVerifiedMandate,
+  type MandateVerifiedContinuation,
+} from '../../src/mandate-request-path.js';
 
 const VERSION = '0.1.0';
 const VALID_PLATFORMS: PaymentPlatform[] = ['openserv', 'acp', 'direct'];
@@ -114,6 +122,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
+    // ADR-0023 stage 4. Default off: this block is skipped and the rest of
+    // the handler is unchanged. A verified proof is a precondition only.
+    let mandateVerified: MandateVerifiedContinuation | undefined;
+    if (mandateProofEnforceEnabled()) {
+      const mandateDecision = await evaluateMandateRequestPath({
+        authRequired: process.env.SENTINEL_AUTH_REQUIRED === 'true',
+        apiKey: typeof req.headers['x-sentinel-key'] === 'string' ? req.headers['x-sentinel-key'] : '',
+        accountIdFromAuth: authResult.accountId,
+        agentIdHeader: req.headers['x-sentinel-agent-id'],
+        body: req.body,
+        requestId,
+        deps: mandateRequestDeps(req),
+      });
+      if (mandateDecision.action === 'unavailable') {
+        return res.status(503).json(mandateDecision.body);
+      }
+      if (mandateDecision.action === 'unauthorized') {
+        return res.status(401).json({ error: 'Invalid API key', code: 'UNAUTHORIZED' });
+      }
+      if (mandateDecision.action === 'block') {
+        return res.status(200).json(mandateDecision.body);
+      }
+      mandateVerified = mandateDecision.verified;
+    }
+
     // --- x402 Payment Gate (after auth + rate limit, before engine) ---
     const paymentResult = await x402Gate(req, res);
     if (!paymentResult.allowed) {
@@ -121,7 +154,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // --- Request Validation ---
-    const result = validateVerifyRequest(req.body);
+    // Flag off passes the original body. Flag on drops mandate_proof so the
+    // legacy whitelist does not 400 a field the gate already handled.
+    const result = validateVerifyRequest(
+      mandateProofEnforceEnabled() ? bodyWithoutMandateProof(req.body) : req.body,
+    );
     if (!result.valid) {
       return res.status(400).json({
         error: 'Validation failed',
@@ -138,11 +175,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const agentId = (req.headers['x-sentinel-agent-id'] as string | undefined) ?? authResult.agent_id;
 
     // --- Engine call — pure verification ---
-    const response = await verify(result.data);
+    // One request object for the engine and for F1. A verified proof
+    // replaces the mandate with the strict normalized object, including
+    // fields the legacy normalizer drops (for example action.content).
+    // Flag off keeps the validated request reference unchanged.
+    const requestToVerify = mandateVerified
+      ? { ...result.data, mandate: mandateVerified.normalizedMandate }
+      : result.data;
+    const response = await verify(requestToVerify);
 
     // --- Evidence Processing (F1) ---
-    const evidenceResult = processSignedEvidence(result.data);
-    const processedResponse = applyEvidenceEffects(response, evidenceResult, result.data);
+    const evidenceResult = processSignedEvidence(requestToVerify);
+    let processedResponse = applyEvidenceEffects(response, evidenceResult, requestToVerify);
+    if (mandateVerified) {
+      const nextVerdict = verdictAfterVerifiedMandate(processedResponse.verdict, mandateVerified);
+      if (nextVerdict !== processedResponse.verdict) {
+        processedResponse = { ...processedResponse, verdict: nextVerdict };
+      }
+    }
 
     // --- Response Validation ---
     if (!processedResponse.verdict || !['ALLOW', 'BLOCK', 'UNCERTAIN'].includes(processedResponse.verdict)) {
@@ -202,13 +252,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const signedExport = maybeIssueSignedExport(processedResponse, process.env, exportNowSeconds);
     // Salted v2 commitments. A failure omits the digests and the salt.
     // It does not change the verdict, the promotion, or signed_export (v1).
-    const commitment = prepareV2CommitmentSupplements(result.data.mandate);
+    const commitment = prepareV2CommitmentSupplements(
+      mandateVerified ? mandateVerified.normalizedMandate : result.data.mandate,
+    );
     const signedExportV2 = maybeIssueSignedExportV2(
       processedResponse,
       process.env,
       exportNowSeconds,
       {},
-      commitment,
+      mandateVerified
+        ? { ...commitment, mandateSource: mandateVerified.mandateSource }
+        : commitment,
     );
     const potCli = readPublishablePotCli();
     const digestSalt = responseDigestSalt(signedExportV2, commitment.digestSaltCandidate);

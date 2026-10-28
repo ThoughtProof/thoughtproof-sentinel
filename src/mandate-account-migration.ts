@@ -1,7 +1,8 @@
 /**
  * ADR-0023 stage-4 prerequisite: how an existing API key becomes an
  * account id, and how rotation and a wrong account are classified.
- * Not called from the verify handler. Does not enable accounts.
+ * Does not enable accounts. The request-path module is the only caller,
+ * and only when enforcement is on.
  * Does not authorize execution.
  *
  * The account id is only the explicit field on the key record

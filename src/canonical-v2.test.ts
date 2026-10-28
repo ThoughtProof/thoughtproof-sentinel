@@ -388,4 +388,32 @@ describe('v2 vectors', () => {
     const v2Bad = script('scripts/fixtures/m1-export-v2/export-v2-tampered-canonical.json');
     expect(v2Bad.status).not.toBe(0);
   });
+
+  it('puts mandate_source on v2 only when the principal proof verified', () => {
+    const response = fixtureResponse(promotion());
+    response.verdict = 'BLOCK';
+    const v1 = buildCanonicalSentinelVerdict(response);
+    expect(v1).not.toHaveProperty('mandateSource');
+    expect(serializeCanonicalSentinelVerdict(v1)).not.toContain('mandate_source');
+    expect(serializeCanonicalSentinelVerdict(v1)).not.toContain('principal_signed');
+
+    const omitted = buildCanonicalSentinelVerdictV2(response, { potCli: POT_CLI });
+    expect(omitted).not.toHaveProperty('mandateSource');
+    expect(serializeCanonicalSentinelVerdict(omitted)).not.toContain('mandateSource');
+
+    const signed = buildCanonicalSentinelVerdictV2(response, {
+      potCli: POT_CLI,
+      mandateSource: 'principal_signed',
+    });
+    expect(signed.mandateSource).toBe('principal_signed');
+    expect(signed.verdict).toBe('BLOCK');
+    expect(serializeCanonicalSentinelVerdict(signed)).toContain('"mandateSource":"principal_signed"');
+
+    const notLegacy = buildCanonicalSentinelVerdictV2(response, {
+      potCli: POT_CLI,
+      mandateSource: 'caller_declared',
+    });
+    expect(notLegacy).not.toHaveProperty('mandateSource');
+    expect(notLegacy.verdict).toBe('BLOCK');
+  });
 });

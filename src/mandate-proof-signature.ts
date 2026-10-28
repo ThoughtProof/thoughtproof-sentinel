@@ -1,6 +1,7 @@
 /**
  * ADR-0023 stage-4 transport for `mandate_proof.signature`.
- * Not called from the verify handler. Not an ALLOW.
+ * Not an ALLOW. The request-path module is the only caller, and only
+ * when enforcement is on.
  *
  * The only accepted text is 128 lowercase hex characters:
  * `/^[0-9a-f]{128}$/`. A `0x` prefix, uppercase, whitespace, and any

@@ -868,7 +868,11 @@ export function maybeIssueSignedExportV2(
   env: NodeJS.ProcessEnv = process.env,
   nowSeconds?: number,
   load: LoadExportSignerOptions = {},
-  supplements: { mandateDigest?: string; actionDigest?: string } = {},
+  supplements: {
+    mandateDigest?: string;
+    actionDigest?: string;
+    mandateSource?: string;
+  } = {},
 ): SignedCanonicalExport | null {
   try {
     const signer = loadExportSignerFromEnv(env, { ...load, nowSeconds });
@@ -877,6 +881,7 @@ export function maybeIssueSignedExportV2(
       buildCanonicalSentinelVerdictV2(response, {
         mandateDigest: supplements.mandateDigest,
         actionDigest: supplements.actionDigest,
+        mandateSource: supplements.mandateSource,
       }),
       {
         privateKey: signer.privateKey,
