@@ -1,6 +1,7 @@
 /**
  * ADR-0023 stage-4 prerequisite: one mandate normalization.
- * Not called from the verify handler. Not a verdict by itself.
+ * Not a verdict by itself. The request-path module is the only caller,
+ * and only when enforcement is on.
  * A failed check is BLOCK. Success is a concrete normalized mandate.
  * It is not ALLOW, and a verified signature does not make it ALLOW.
  *

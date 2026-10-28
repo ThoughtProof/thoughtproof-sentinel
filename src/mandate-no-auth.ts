@@ -8,9 +8,12 @@
  * invent one, and it does not turn that gap into ALLOW or into
  * `caller_declared`.
  *
- * 503 is unverifiable (no account, bad manifest, store down).
+ * 503 is unverifiable (no account, bad manifest, store down, unreadable policy).
  * BLOCK is known-invalid (empty mandate, bad proof, retired key).
  * A verified signature does not move either one to ALLOW.
+ *
+ * The mandate request-path module calls these helpers only when
+ * enforcement is on. This file does not import the verify handler.
  */
 
 export type Stage4FailureKind =
@@ -100,6 +103,7 @@ export const STAGE4_UNAVAILABLE_CODES = [
   'TARGET_ENVIRONMENT_UNAVAILABLE',
   'RECEIPT_TIME_UNUSABLE',
   'REPLAY_STORE_UNAVAILABLE',
+  'POLICY_UNAVAILABLE',
 ] as const;
 
 export type Stage4UnavailableCode = (typeof STAGE4_UNAVAILABLE_CODES)[number];
@@ -117,8 +121,8 @@ function isUnavailableCode(value: string): value is Stage4UnavailableCode {
 /**
  * Stage-4 HTTP 503 body. Three fields, no `verdict`. The message is
  * constant. `cause` and `mandate` are ignored so an exception or the
- * mandate plaintext cannot leak into the body. Not wired to a handler.
- * BLOCK stays a separate result and is not passed through here.
+ * mandate plaintext cannot leak into the body. BLOCK stays a separate
+ * result and is not passed through here.
  */
 export function stage4UnavailablePayload(input: {
   code: string;

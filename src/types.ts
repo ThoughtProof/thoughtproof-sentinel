@@ -75,6 +75,22 @@ export interface AgentContext {
   tags?: string[];
 }
 
+/**
+ * Wire shape of `mandate_proof`. The request-path gate parses it.
+ * This type does not verify a signature and does not authorize execution.
+ */
+export interface MandateProofEnvelope {
+  schema_version?: string;
+  nonce?: string;
+  iat?: number;
+  exp?: number;
+  account_id?: string;
+  environment?: string;
+  purpose?: string;
+  principal_kid?: string;
+  signature?: string;
+}
+
 export interface SentinelVerifyRequest {
   /** Unique identifier (optional, auto-generated) */
   id?: string;
@@ -97,6 +113,14 @@ export interface SentinelVerifyRequest {
    * MCP `verify_before_action` maps host `action.kind` → `mandate.action.kind`.
    */
   mandate?: AuthorizationMandate;
+  /**
+   * Optional principal-signed envelope (ADR-0023). Present on the wire
+   * only when SENTINEL_MANDATE_PROOF_ENFORCE is exactly `true`. While
+   * that flag is off the field stays unknown to the validator.
+   * Optional here does not override an account policy that requires it.
+   * The validated request does not copy this object into the engine.
+   */
+  mandate_proof?: MandateProofEnvelope;
   /**
    * Deterministic-gate rollout stage (action_authorization only). Default
    * 'shadow': the gate computes and logs but does NOT change the verdict.

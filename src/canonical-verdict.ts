@@ -148,6 +148,11 @@ export interface CanonicalSentinelVerdictBodyV2
    * Omitted when the action is absent or hashing fails.
    */
   actionDigest?: string;
+  /**
+   * `principal_signed` only, and only for the mandate that verified.
+   * Omitted otherwise. Not a verdict input. Absent from v1.
+   */
+  mandateSource?: 'principal_signed';
 }
 
 export type CanonicalSentinelVerdictArtifact =
@@ -179,6 +184,12 @@ export interface BuildCanonicalSentinelVerdictV2Options {
   mandateDigest?: string;
   /** Precomputed salted action commitment. Same acceptance rule as mandateDigest. */
   actionDigest?: string;
+  /**
+   * Set only for a mandate whose principal proof verified.
+   * Any other value is omitted. It is not a verdict and it is not copied
+   * onto the v1 body.
+   */
+  mandateSource?: string;
 }
 
 /**
@@ -277,6 +288,9 @@ export function buildCanonicalSentinelVerdictV2(
   }
   if (typeof options.actionDigest === 'string' && COMMITMENT_DIGEST.test(options.actionDigest)) {
     body.actionDigest = options.actionDigest;
+  }
+  if (options.mandateSource === 'principal_signed') {
+    body.mandateSource = 'principal_signed';
   }
 
   // Report-only. A malformed report is omitted. It is never a reason to throw

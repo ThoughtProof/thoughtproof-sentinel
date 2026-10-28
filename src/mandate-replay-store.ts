@@ -1,6 +1,7 @@
 /**
  * ADR-0023 stage 2: one atomic nonce consume on the shared Redis store.
- * Not called from the verify handler. Not a verdict input.
+ * Not a verdict input. The request-path module consumes a nonce only
+ * after a proof verifies, and only when enforcement is on.
  * There is no in-memory fallback. A store miss or error is HTTP 503,
  * never ALLOW.
  *
