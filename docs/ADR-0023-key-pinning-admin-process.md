@@ -1,12 +1,12 @@
 # ADR-0023 key-pinning admin process
 
-**Status:** Proposed (2026-10-28). Draft for founder review. Do not merge without Raul GO. Do not execute a pin from this document.
+**Status:** Proposed (2026-10-28). Founder review the same day recorded the decisions below. Do not merge without Raul GO. Do not execute a pin from this document.
 **Parent:** [ADR-0023](ADR-0023-principal-signed-mandate.md) (Proposed). [Integration plan](ADR-0023-integration-plan.md) (Proposed). This document does not change either status.
 **Decider:** Founder
 
 This is the pilot manual process for pinning, rotating, retiring, and revoking a principal Ed25519 public key. It is consistent with the manifest rules in `src/principal-key-manifest.ts` and with the stage-4 prerequisite notes. It changes no code, no test, no workflow, and no request path.
 
-Publishing this process is not a founder GO. It does not unlock `registerPrincipalKey`. It does not authorize an operator write. It does not wire `verifyPrincipalMandate` into `POST /sentinel/verify`. It does not enable protection for any account. `registerPrincipalKey` still returns `{ ok: false, httpStatus: 503, code: 'REGISTRATION_UNAUTHORIZED' }` and writes nothing. A later founder GO has to name this document and explicitly authorize the first pin, or explicitly authorize a change to that function, before anyone follows the execution steps below.
+**Decided (founder review, 2026-10-28).** Merging this document does not permit manual pinning, does not unlock `registerPrincipalKey`, does not wire `verifyPrincipalMandate` into `POST /sentinel/verify`, and does not enable any account. `registerPrincipalKey` still returns `{ ok: false, httpStatus: 503, code: 'REGISTRATION_UNAUTHORIZED' }` and writes nothing. A later founder GO has to name this document and explicitly authorize the first pin, or explicitly authorize a change to that function, before anyone follows the execution steps below.
 
 Placeholder strings in the examples are not keys, not signatures, and not vectors.
 
@@ -66,9 +66,9 @@ The audit log entry is status and counts only. The operator-supplied fields are:
 | `action` | `pin`, `rotate_add`, `retire`, `revoke`, or `emergency_revoke` |
 | `environment` | `production`, `preview`, or `development` |
 | `result` | `accepted`, `rejected`, or `failed` |
-| `reason` | Present only when the result is not `accepted`. One of `identity_unconfirmed`, `admin_unauthorized`, `possession_failed`, `window_invalid`, `environment_mismatch`, `account_unmapped`, `private_key_present`, `malformed_request`, `store_unavailable`, `readback_failed`. |
-| `keys_before`, `keys_after` | Integer counts of keys on the document. |
-| `active_after`, `retired_after`, `revoked_after` | Integer counts by status after the attempt. On a reject or a failed write that changed nothing, the after-counts equal the before-counts. |
+| `reason` | Present only when the result is not `accepted`. One of `identity_unconfirmed`, `admin_unauthorized`, `possession_failed`, `window_invalid`, `environment_mismatch`, `account_unmapped`, `private_key_present`, `malformed_request`, `store_unavailable`, `readback_failed`, `version_mismatch`, `state_unclear`. |
+| `keys_before`, `keys_after` | Integer counts of keys on the document, taken from a read that answered. |
+| `active_after`, `retired_after`, `revoked_after` | Integer counts by status after the attempt. On a reject or a failed write that changed nothing, and where a fresh read answered, the after-counts equal the before-counts from that read. A `state_unclear` entry omits counts. It does not copy them from a stale read. |
 
 The log system may add its own event id and timestamp. The entry does not include `accountId`, `kid`, `x`, a signature, a nonce, an API key, or any private key. Counts and statuses are not a substitute for the evidence record. The evidence record cites the log event id.
 
@@ -129,7 +129,7 @@ Scope is not a field on the manifest. The verifier does not read it. A pin is no
 
 The holder proves they control the private key that matches `x`. The operator checks that signature offline, before any write. A failed check is `possession_failed`. Nothing is written. The public verify API is not used as the checker.
 
-**Proposal, open for the founder.** Use a domain that is only for this admin challenge:
+**Decided (founder review, 2026-10-28).** The possession domain is separate from the mandate domain:
 
 ```
 signed_input =
@@ -140,7 +140,9 @@ signed_input =
 
 `signature` is not a field of `challenge`. One 0x00 byte separates the domain from the JCS. JCS is RFC 8785, the same canonicalization the mandate path uses. The signer and the operator sign and verify those bytes, not a pretty-printed JSON document.
 
-The mandate domain stays `thoughtproof.sentinel.mandate.v1`. The export domain stays `thoughtproof.sentinel.export.v1`. A pin signature over either of those domains, or over unprefixed JCS, is not possession for this process. The separated domain is the proposal because a challenge that reused the mandate domain and happened to be a valid mandate envelope would be a real `action_authorization` signature. `verifyPrincipalMandate` accepts only the mandate domain, so a signature under the pin domain does not verify as a mandate. That separation is the property the proposal is for.
+Proof of possession proves control of the key. It does not authorize the account. Account authorization is the independent identity check above: the registry channel and the two-person match. A valid possession signature does not permit a pin, a write, or an enablement.
+
+The mandate domain stays `thoughtproof.sentinel.mandate.v1`. The export domain stays `thoughtproof.sentinel.export.v1`. A signature over either of those domains, or over unprefixed JCS, is not possession for this process. `verifyPrincipalMandate` accepts only the mandate domain, so a signature under the pin domain does not verify as a mandate.
 
 `challenge` fields:
 
@@ -181,7 +183,7 @@ Placeholder only. These values are not a key and not a signature.
 
 The operator removes `signature` before JCS. The remaining object is the challenge.
 
-Until the founder accepts or replaces the domain string, operators do not collect a possession signature and do not write a manifest. The steps below are the procedure that applies once that decision and the separate execution GO both exist.
+The domain string above is decided. The challenge field names, `schema_version`, and `purpose` in the table are still an open question. A possession signature under the decided domain still does not authorize a store write. A write waits for a separate founder GO. Merging this document does not give that GO.
 
 ## Execution
 
@@ -209,6 +211,16 @@ The document has no `schema`, no `version`, no `environment`, and no private fie
 
 Which physical store receives the write is still the open manifest-store question in the integration plan. This document does not choose a backend and does not share the rate-limit Redis fallback. There is no in-memory store. If the store is not yet chosen, or it does not answer, the result is `store_unavailable` and the operator writes nothing.
 
+### Compare-and-set
+
+Every change uses compare-and-set. That includes a pin, a rotation, a retirement, a revocation, a corrective write, and anything that would otherwise have been a rollback. The operator reads the document and the store's version or etag, builds the next document from that read, and sends the write only with that version or etag. The version or etag is store metadata beside the document. It is not a `version` field on the manifest. A `version` field on the document is malformed. If the store version has moved, the write aborts (`version_mismatch`). The operator does not overwrite the new version with the copy they held.
+
+`revoked` is terminal for that `kid`. A rotation, a retirement, a pin, a corrective write, or a rollback must leave that `kid` on the document with `status: revoked`. A write that would set it to `active` or `retired`, or would drop it, is not sent. A revocation made by another operator in between is kept.
+
+When the store state is unclear, the operator does not write an older document back. Unclear means the load timed out, the answer is partial, or it is not possible to tell whether a write landed. The operator stops, escalates, and re-reads. The only later write is a forward change against the version that re-read returned: add a new `kid`, or move a `kid` that is not `revoked` to `retired` or `revoked`. That write does not resurrect a `kid` and does not put a prior copy of the document back. If the re-read does not answer, the audit result is `failed` with reason `state_unclear`, and the entry does not copy counts from the stale read.
+
+There is no step that restores a previous manifest.
+
 ### Read-back
 
 The second operator reads the store with the same `load(accountId)` shape the verifier uses, and treats a load that stays silent past 2000 milliseconds (`PRINCIPAL_MANIFEST_LOAD_DEADLINE_MS`) as no answer.
@@ -221,7 +233,7 @@ Acceptance is all of the following:
 4. The document contains no private-key field and no field the parser would reject.
 5. Both operators name the same environment token, and that token is the server target of the store that answered.
 
-A read-back that fails is `readback_failed`. The operator restores the previous document when one existed, or removes the document when this was the first key. A mismatched `accountId` left in place is the verify-path failure HTTP 503 `MANIFEST_MALFORMED`. The operator does not finish an accepted pin on that document.
+A read-back that fails is `readback_failed`. The operator follows the compare-and-set rule above. They do not write the previous document back, and they do not delete the document to undo the attempt. If the new `kid` is `revoked` on that read, the pin is not accepted and `revoked` stays. A mismatched `accountId` is still the verify-path failure HTTP 503 `MANIFEST_MALFORMED`. Correcting it is a forward write against the current version or etag, and that write keeps every `revoked` `kid`. The operator does not finish an accepted pin on a mismatched document. If they cannot tell what the store holds, they stop, escalate, re-read, and re-apply only a forward change.
 
 A successful read-back is not ALLOW, does not set `mandate_source`, and is not a call to `POST /sentinel/verify`.
 
@@ -230,29 +242,33 @@ A successful read-back is not ALLOW, does not set `mandate_source`, and is not a
 Rotation is a new `kid` and a new key pair. It is not a new API-key string. The API-key record and the principal manifest are different maps.
 
 1. The holder or admin files a `rotate_add` request for the new key. Possession, identity, and the two-person check are the same as a pin.
-2. The operator appends the new key with `status: active` and leaves the old key `active`. The manifest may hold more than one `kid` so the replacement exists before the old one stops.
-3. Read-back shows both kids, with the counts in the audit entry.
-4. A later `retire` request sets the old key to `retired`. The old key stays on the document. The `kid` is not deleted and not reused.
+2. The operator reads the current document and its version or etag, appends the new key with `status: active`, and leaves every other `kid` as it was read. A `kid` that is `revoked` stays `revoked`. The write is compare-and-set. On `version_mismatch` the operator aborts, re-reads, and re-applies only that forward append. The manifest may hold more than one `kid` so the replacement exists before the old one stops.
+3. Read-back shows the new `kid` and shows every `revoked` `kid` still `revoked`, with the counts in the audit entry.
+4. A later `retire` request sets a key that is `active` to `retired`, again with compare-and-set. The `kid` stays on the document. It is not deleted and not reused. If that `kid` is already `revoked`, the retirement write is not sent.
 
-The pilot does not change `x` in place under an existing `kid`. A different public key is a different `kid`.
+The pilot does not change `x` in place under an existing `kid`. A different public key is a different `kid`. Rotation does not undo a revocation.
 
 ## Retirement
 
-`retired` is BLOCK `retired` for every new authorization, including when receipt time is inside `notBefore` / `notAfter`, and including when the signer chose an `iat` inside the old window. The 30-second proof skew does not make a retired key active.
+`retired` is BLOCK `retired` for every new authorization, including when receipt time is inside `notBefore` / `notAfter`, and including when the signer chose an `iat` inside the old window. The 30-second proof skew does not make a retired key active. Retirement uses the same compare-and-set rule. It does not change a `revoked` `kid`, and a failed retirement does not write an older document back.
 
 Historical verification is a separate case. `historicalPrincipalVerification` returns `purpose: historical`, `authorizesExecution: false`, and BLOCK `historical_not_authorization`, whether or not a signature matched and whether the recorded status was `active`, `retired`, or `revoked`. That result is not `mandate_source: principal_signed`. `verdictFromHistoricalVerification` does not return ALLOW. An existing BLOCK stays BLOCK. UNCERTAIN stays UNCERTAIN. A gate ALLOW becomes BLOCK on that path. This admin process does not run historical verification and does not enable it.
 
 ## Revocation
 
-`revoked` is BLOCK `revoked` for a new authorization, including inside any old window. The verifier checks `revoked` before the time window. Revocation in the pilot is not reversible. A replacement key is a new `kid` through the pin steps. The revoked `kid` stays on the document so a later proof selects `revoked` rather than `unknown_kid`.
+`revoked` is BLOCK `revoked` for a new authorization, including inside any old window. The verifier checks `revoked` before the time window. `revoked` is terminal for that `kid`. No later pin, rotation, retirement, corrective write, or rollback sets it back to `active` or `retired`, and none of those deletes it. A replacement key is a new `kid` through the pin steps. The revoked `kid` stays on the document so a later proof selects `revoked` rather than `unknown_kid`.
+
+Revocation blocks new authorizations with that key. It does not automatically stop approvals already issued or actions already running.
 
 ### Emergency revocation
 
-An emergency request may come from the holder, from an authorized admin, or from an operator who suspects the private key is exposed. The on-call operator confirms identity on the registry channel when the requester is the holder or the admin. When the operator is acting on suspicion, both the suspicion and the operator id go into the evidence record.
+**Decided (founder review, 2026-10-28).** An emergency request may come from the holder, from an authorized admin, or from an operator who suspects the private key is exposed. The operator confirms identity on the registry channel when the requester is the holder or the admin. When the operator is acting on suspicion, both the suspicion and the operator id go into the evidence record.
 
-The on-call operator may write `status: revoked` for the named `kid` before the second operator agrees. Revocation only removes authority, so the write is not delayed for the second checker. The second operator confirms the evidence after the write. A late or failed second confirmation does not restore the key. If the emergency request was unauthorized, the key stays `revoked`. A replacement still requires the full two-person pin.
+The operator writes `status: revoked` immediately, using compare-and-set against the version or etag just read. The 15 minutes is an internal pilot target for a confirmed read-back of that write. It is not an allowed waiting time before the write. The second person may review the emergency revocation afterwards. That review does not change `revoked` back. If the emergency request was unauthorized, the key stays `revoked`. A replacement still requires the full two-person pin.
 
-**Proposed response time, open for the founder.** The read-back shows `status: revoked` within 15 minutes of a confirmed emergency request. That number is not an SLA until the founder accepts it and names the on-call. Once the store answers with `revoked`, the next verification has no grace period.
+A binding SLA is not in force. A binding SLA needs a named on-call and a fixed store. Neither is given yet. Once the store answers with `revoked`, the next verification of a new authorization has no grace period. The revocation still does not automatically stop approvals already issued or actions already running.
+
+If the compare-and-set aborts because the `kid` is already `revoked`, the operator re-reads and does not write an older status. If the store state is unclear, the operator stops, escalates, re-reads, and re-applies only the forward revocation.
 
 There is no emergency pin. Adding a key keeps the two-person check before the write.
 
@@ -262,7 +278,7 @@ Expiry is the `notAfter` bound, not a status. While `status` is `active` and rec
 
 The operator does not delete a key when it expires. The document keeps it so the check can return `key_expired`. Deleting it would make the same proof `unknown_kid` once the store has answered. Both are BLOCK. The pilot keeps the key.
 
-The pilot does not edit `notBefore`, `notAfter`, or `x` on an existing `kid`. A longer window, or an earlier end, is a new `kid` through `rotate_add`, then `retire` on the old `kid`. The old key stays on the document with `status: retired`. That stays inside the audit actions above and leaves the original bounds readable.
+The pilot does not edit `notBefore`, `notAfter`, or `x` on an existing `kid`. A longer window, or an earlier end, is a new `kid` through `rotate_add`, then `retire` on the old `kid` when that `kid` is not `revoked`. A `revoked` `kid` stays `revoked`. Both writes use compare-and-set. The old key stays on the document. That stays inside the audit actions above and leaves the original bounds readable.
 
 No job in this process polls for expiry. Operators who want uninterrupted use start rotation before `notAfter`. This document does not create that job.
 
@@ -285,7 +301,7 @@ The operator's audit `reason` uses the admin enums in the audit section. The HTT
 
 - No self-service pin, rotation, retirement, or revocation.
 - No automated registration and no agent-registered key.
-- No change to `registerPrincipalKey`. It stays locked until a separate founder GO. Documenting this process is not that GO.
+- No change to `registerPrincipalKey`. It stays locked until a separate founder GO. Merging this document does not permit manual pinning, does not unlock that function, does not wire verification, and does not enable an account.
 - No wiring into `POST /sentinel/verify`, no enablement, and no suite run.
 - No use of the verify API key or `X-Sentinel-Agent-Id` as registration authority.
 - No caller-supplied principal manifest and no caller-supplied JWKS URL.
@@ -293,17 +309,22 @@ The operator's audit `reason` uses the admin enums in the audit section. The HTT
 - No public archive of `principal_kid`.
 - No standing mandate, no delegation, and no historical-verification path on a new authorization.
 
+## Founder decisions (2026-10-28)
+
+These three items are decided. They are not open questions.
+
+1. **Possession domain.** `thoughtproof.sentinel.principal-key-pin.v1`, one 0x00 byte, then UTF-8 JCS of the challenge. Proof of possession proves key control only. Account authorization is the independent identity check.
+2. **Emergency revocation timing.** The operator writes the revocation immediately. Fifteen minutes is the internal pilot target for a confirmed read-back of that write, not an allowed waiting time. The second person may review afterwards. A binding SLA needs a named on-call and a fixed store, which are not given. Revocation blocks new authorizations with that key. It does not automatically stop approvals already issued or actions already running. `revoked` is terminal for that `kid`.
+3. **Effect of this document.** Merging it does not permit manual pinning, unlocking `registerPrincipalKey`, wiring, or account enablement.
+
 ## Open questions
 
-These are not decided. The procedure above uses the proposed answers so the founder can accept or replace them. None of them authorizes a write.
+These operational points are still open. None of them authorizes a write. The decisions above are not in this list.
 
-1. **Possession domain.** Proposed: `thoughtproof.sentinel.principal-key-pin.v1`, one 0x00 byte, then UTF-8 JCS of the challenge. The mandate domain is the alternative the proposal rejects, because a challenge under that domain can be a real mandate signature. Confirm the domain string, the challenge `schema_version`, and `purpose`.
-2. **Challenge window.** Proposed: reuse the mandate proof limits (`exp > iat`, at most 300 seconds, 30 seconds of skew). Confirm or replace those numbers for the admin challenge only.
-3. **Challenge field names.** Proposed: `account_id`, `not_before`, and `not_after` on the signed challenge, and `accountId`, `notBefore`, and `notAfter` on the stored manifest, matching each parser. Confirm the split.
-4. **Emergency path and response time.** Proposed: one on-call operator may write `revoked` before the second operator confirms, a late second confirmation does not restore the key, and the read-back shows `revoked` within 15 minutes of a confirmed emergency request. The 15 minutes is not an SLA until it is accepted and an on-call is named.
-5. **Admin pin without a fresh holder confirmation.** Proposed: no. `pin` and `rotate` keep a fresh holder out-of-band confirmation. `retire` and `revoke` may proceed on the admin's registry grant plus admin out-of-band confirmation.
-6. **Null bounds and in-place edits.** The verifier allows a null bound as an open side. Proposed pilot: both bounds required, and no in-place change to `x` or to either bound. An earlier end is a new `kid` plus retirement.
-7. **Evidence contents.** Proposed: the internal evidence record may hold `accountId`, `kid`, and public `x`. The audit log stays status and counts only. Neither record is a public archive. Confirm that split.
-8. **Manifest store.** Still open in the integration plan. Which store the operator writes, and how it stays distinct from the rate-limit Redis that may fall back to memory. This process does not choose it. No pin is executed while it is unset.
-9. **Registry.** Proposed: a founder-maintained list of the confirming person, the out-of-band channel, and any admin grant, per `accountId`. Confirm who may edit it and where it lives. It must not live in the request, and it must not contain API keys or private keys.
-10. **Unlock.** Proposed: this document does not satisfy "until that process is in place" as the condition that unlocks `registerPrincipalKey`. The function stays locked until a separate founder GO. Confirm that reading.
+1. **Challenge window.** Proposed: reuse the mandate proof limits (`exp > iat`, at most 300 seconds, 30 seconds of skew). Confirm or replace those numbers for the admin challenge only.
+2. **Challenge field names.** The possession domain is decided. Still open: `schema_version`, `purpose`, and the split between `account_id` / `not_before` / `not_after` on the signed challenge and `accountId` / `notBefore` / `notAfter` on the stored manifest.
+3. **Admin pin without a fresh holder confirmation.** Proposed: no. `pin` and `rotate` keep a fresh holder out-of-band confirmation. `retire` and `revoke` may proceed on the admin's registry grant plus admin out-of-band confirmation.
+4. **Null bounds and in-place edits.** The verifier allows a null bound as an open side. Proposed pilot: both bounds required, and no in-place change to `x` or to either bound. An earlier end is a new `kid` plus retirement of a `kid` that is not `revoked`.
+5. **Evidence contents.** Proposed: the internal evidence record may hold `accountId`, `kid`, and public `x`. The audit log stays status and counts only. Neither record is a public archive. Confirm that split.
+6. **Manifest store.** Still open in the integration plan. Which store the operator writes, how its version or etag is read for compare-and-set, and how it stays distinct from the rate-limit Redis that may fall back to memory. This process does not choose it. No pin is executed while it is unset. A binding emergency-revocation SLA also waits on this store.
+7. **Registry and on-call.** Proposed: a founder-maintained list of the confirming person, the out-of-band channel, and any admin grant, per `accountId`. Confirm who may edit it and where it lives. It must not live in the request, and it must not contain API keys or private keys. The named on-call for a binding revocation SLA is not given.
