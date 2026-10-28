@@ -97,16 +97,21 @@ These hold in every stage. A later stage must not weaken an earlier one.
 - Sentinel stores the public key only. The principal holds the private key.
 - The verify caller cannot add, retire, or revoke a kid. An API key or `X-Sentinel-Agent-Id` is not registration authority.
 - `principal_kid` selects one key in the manifest for the authenticated account, not a key in the request.
-- `active` means receipt time `now` is inside `notBefore` / `notAfter`. A signer-chosen `iat` does not widen that window.
-- `retired` is BLOCK for a new authorization request. `revoked` is BLOCK, including inside any old window.
-- An unknown kid, once the store has answered, is BLOCK. A store that does not answer is UNCERTAIN / HTTP 503.
+- `active` means `notBefore <= now < notAfter` for each bound that is set. `notAfter` is exclusive. A null bound is open on that side. The 30-second proof skew does not apply. A signer-chosen `iat` does not widen the window. If both bounds are set, `notAfter` must be greater than `notBefore`; otherwise the manifest is invalid and the result is HTTP 503.
+- `notBefore` and `notAfter` are strict RFC3339 UTC timestamps (`YYYY-MM-DDTHH:MM:SSZ`) that round-trip through the calendar. A value `Date.parse` would normalize, such as `2026-02-30T00:00:00Z`, makes the manifest invalid (HTTP 503).
+- `retired` is BLOCK for any new authorization. Historical verification of a retired key is out of scope for this stage. `revoked` is BLOCK, including inside any old window.
+- The manifest document carries `accountId` in addition to the store key. The store is read only for the authenticated account. A different `accountId` on the delivered document is HTTP 503. A different `account_id` in the signed proof is BLOCK and does not select the store key.
+- v1 `environment` is exactly `production`, `preview`, or `development`. It is compared to a trusted server-side target environment injected by the caller, not taken from the manifest or the proof. Any other proof value, including whitespace, is BLOCK. A mismatch with the configured target is BLOCK. A missing or non-exact server target is HTTP 503.
+- The signature bytes are UTF-8 `thoughtproof.sentinel.mandate.v1`, one 0x00 byte, then UTF-8 JCS of the envelope without `signature`. There is no fallback to unprefixed JCS.
+- An unknown kid, once the store has answered, is BLOCK. A store that does not answer, including a load that stays silent past its deadline, is UNCERTAIN / HTTP 503.
 - `principal_kid` is not written to a public archive by this stage.
+- Pinning, rotation, and revocation are done only by the verified account owner or an explicitly authorized account admin, through a separate admin process. The pilot is a documented manual process. Until that process is in place, `registerPrincipalKey` stays locked: it rejects every attempt and it does not write. The agent, the verify API key, and `X-Sentinel-Agent-Id` are not that authority.
 
 **Offline tests.** Fixtures for active, retired, revoked, unknown, and not-yet-valid windows, with a fake receipt clock. A registration call authenticated only as the verify caller or only by `X-Sentinel-Agent-Id` is rejected. A request-body `key_manifest` is not read as the principal manifest. No network and no live key generation beyond a test fixture keypair held in the test file.
 
 **Paid-suite trigger paths.** No, on the same condition as stage 2: the module and the registration entry point stay outside the six paths. A handler placed under `src/engine/**` would start the suite.
 
-**Separate GOs.** An implementation GO for the manifest shape and the status rules, and a distinct registration GO for who may pin a key and how they prove they are the principal for that account. The verify-path GO is not either of those. No suite GO while the files stay off the trigger list.
+**Separate GOs.** An implementation GO for the manifest shape and the status rules. Who may pin a key is decided: the verified account owner or an explicitly authorized account admin, through a separate admin process, piloted as a documented manual process. That process is not this stage. `registerPrincipalKey` stays locked until it exists. The verify-path GO is neither of those. No suite GO while the files stay off the trigger list.
 
 ## Stage 4 — Request-path wiring
 
@@ -124,6 +129,7 @@ These hold in every stage. A later stage must not weaken an earlier one.
 - Shipping the code does not enable protection and does not establish a legacy status. `caller_declared` applies only where that status was explicitly recorded. Missing or unreadable account or policy data is HTTP 503, never a downgrade of a protected account and never an implicit `caller_declared`.
 - With protection on, an omitted `mandate_proof` is a known-invalid proof: BLOCK, not `caller_declared`, and not ALLOW.
 - An explicitly sent `mandate_proof` is verified or rejected, including when the account is explicitly legacy. It is never silently ignored.
+- **Open in this stage: shared mandate validation.** The signer, the gate, and the digest still need one normalization. A correctly signed `{}`, or a mandate without `action`, must not count as a bound action. Stage 3 does not add that check. Stage 4 does not close until it is specified.
 - The atomic stage 2 step runs only after the signature and the account-id equality check have succeeded, and before `x402Gate`, `verify()`, attestation, and billing. A BLOCK or UNCERTAIN from that step returns before those calls.
 - `mandate_proof.account_id` must equal the stage 1 account id. It does not select the account. A mismatch is BLOCK.
 - `mandate_source: principal_signed` is set only for the mandate that verified.
@@ -156,11 +162,12 @@ A rollback never turns store, key, or policy failures into ALLOW. It must not we
 
 ## Open questions
 
-These need their own answers before the stage that depends on them. This plan does not decide them.
+These need their own answers before the stage that depends on them. Decided items are marked. The rest are still open.
 
 - **Account-id source.** `SENTINEL_API_KEYS` has no account-id field today. What store or config is the stable id, and what happens to keys that predate it?
 - **Replay backend.** Which shared store, and how is it kept distinct from the rate-limit Redis that is allowed to fall back to memory? Is the nonce scoped per account or global?
-- **Registration authority.** Who may pin, rotate, or revoke a key, and what proof binds that person to the stage 1 account? The agent and the API key are not the answer. The exact process is still open.
+- **Registration authority (decided).** A key may be pinned, rotated, or revoked only by the verified account owner or an explicitly authorized account admin, and only through a separate admin process. The pilot is a documented manual process. The agent, the verify API key, and `X-Sentinel-Agent-Id` are not that authority. Until that process is in place, `registerPrincipalKey` stays locked and writes nothing.
+- **Shared mandate validation (open, stage 4).** The signer, the authorization gate, and the digest still need one shared normalization. A correctly signed `{}`, or a mandate without `action`, must not count as a bound action. That check is not part of stage 3.
 - **Policy store.** Where an explicitly established `caller_declared` or protected status is recorded, and who may flip it. The enablement GO depends on this. Unreadable policy data is already decided: HTTP 503, not `caller_declared`.
 - **Rate-limit writes.** Auth must run before consumption so the account id exists. The rate limiter currently increments before `x402Gate`. Whether that increment is a side effect that must move after a successful consume is undecided. It must not be used as a replay fallback either way.
 - **Receipt clock.** ADR-0023 uses server receipt time plus 30 seconds of skew. Whether every instance reads one clock, or each reads its own clock inside that skew, is undecided.
