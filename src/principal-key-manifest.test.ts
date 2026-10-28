@@ -4,13 +4,15 @@
  */
 import { generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - canonicalize types are loose; runtime export is the function
 import canonicalize from 'canonicalize';
 import {
+  PRINCIPAL_MANDATE_DOMAIN,
   PRINCIPAL_MANDATE_PURPOSE,
   PRINCIPAL_MANDATE_SCHEMA,
+  PRINCIPAL_MANIFEST_LOAD_DEADLINE_MS,
   principalMandateSignedBytes,
   registerPrincipalKey,
   verdictWithPrincipalCheck,
@@ -27,9 +29,9 @@ const ACCOUNT = 'acct-stage3';
 const OTHER = 'acct-other';
 const KID = 'kid-stage3';
 const OTHER_KID = 'kid-other';
-const ENV = 'test-env';
+const ENV = 'production';
 const PINNED_JCS =
-  '{"account_id":"acct-stage3","environment":"test-env","exp":1800000060,"iat":1800000000,"mandate":{"action":{"amount":1,"kind":"value_transfer"},"kind":"value_transfer"},"nonce":"nonce-stage3-1","principal_kid":"kid-stage3","purpose":"action_authorization","schema_version":"sentinel.mandate-proof.v1"}';
+  '{"account_id":"acct-stage3","environment":"production","exp":1800000060,"iat":1800000000,"mandate":{"action":{"amount":1,"kind":"value_transfer"},"kind":"value_transfer"},"nonce":"nonce-stage3-1","principal_kid":"kid-stage3","purpose":"action_authorization","schema_version":"sentinel.mandate-proof.v1"}';
 
 const MANDATE = {
   kind: 'value_transfer',
@@ -115,6 +117,8 @@ async function check(options: {
   manifest?: unknown;
   store?: PrincipalManifestStore | null;
   requestBodyKeyManifest?: unknown;
+  /** `null` omits the injected target. Omitted uses `ENV`. */
+  targetEnvironment?: string | null;
   onLoad?: (accountId: string) => void;
 } = {}): Promise<PrincipalMandateResult> {
   const store = options.store === undefined
@@ -136,9 +140,16 @@ async function check(options: {
       : options.proof,
     nowSeconds: options.now ?? NOW,
     store,
+    targetEnvironment: options.targetEnvironment === null
+      ? undefined
+      : (options.targetEnvironment ?? ENV),
     requestBodyKeyManifest: options.requestBodyKeyManifest,
   });
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 function expectBlock(result: PrincipalMandateResult, reason: string): void {
   expect(result).toEqual({ ok: false, verdict: 'BLOCK', reason });
@@ -196,6 +207,9 @@ describe('principal key manifest', () => {
       proof: signedProof(primary.privateKey, fields({ iat: NOW - 10, exp: NOW + 60 })),
     });
     expectBlock(result, 'retired');
+    expect(verdictWithPrincipalCheck('ALLOW', result)).toBe('BLOCK');
+    expect(verdictWithPrincipalCheck('UNCERTAIN', result)).toBe('BLOCK');
+    expect(JSON.stringify(result)).not.toContain('ALLOW');
   });
 
   it('rejects a key that is not yet valid at receipt time', async () => {
@@ -214,12 +228,38 @@ describe('principal key manifest', () => {
     expectBlock(result, 'key_expired');
   });
 
-  it('treats notBefore and notAfter as inclusive at the receipt second', async () => {
-    const result = await check({
+  it('treats notBefore as inclusive and notAfter as exclusive', async () => {
+    const atStart = await check({
+      manifest: pinned([keyEntry({ notBefore: iso(NOW), notAfter: iso(NOW + 1) })]),
+    });
+    expect(atStart).toMatchObject({ ok: true, mandateSource: 'principal_signed' });
+    expect(atStart).not.toHaveProperty('verdict');
+
+    const atEnd = await check({
+      manifest: pinned([keyEntry({ notBefore: iso(NOW - 10), notAfter: iso(NOW) })]),
+    });
+    expectBlock(atEnd, 'key_expired');
+    expect(verdictWithPrincipalCheck('ALLOW', atEnd)).toBe('BLOCK');
+
+    const insideProofSkew = await check({
+      manifest: pinned([keyEntry({ notBefore: iso(NOW - 1000), notAfter: iso(NOW - 29) })]),
+      proof: signedProof(primary.privateKey, fields({ iat: NOW - 80, exp: NOW - 29 })),
+    });
+    expectBlock(insideProofSkew, 'key_expired');
+    expect(verdictWithPrincipalCheck('ALLOW', insideProofSkew)).toBe('BLOCK');
+  });
+
+  it('returns 503 when both key bounds are set and notAfter is not after notBefore', async () => {
+    const equal = await check({
       manifest: pinned([keyEntry({ notBefore: iso(NOW), notAfter: iso(NOW) })]),
     });
-    expect(result).toMatchObject({ ok: true, principalKid: KID });
-    expect(result).not.toHaveProperty('verdict');
+    const reversed = await check({
+      manifest: pinned([keyEntry({ notBefore: iso(NOW + 10), notAfter: iso(NOW) })]),
+    });
+    expect(equal).toEqual({ ok: false, httpStatus: 503, code: 'MANIFEST_MALFORMED' });
+    expect(reversed).toEqual({ ok: false, httpStatus: 503, code: 'MANIFEST_MALFORMED' });
+    expect(verdictWithPrincipalCheck('ALLOW', equal)).toBe('UNCERTAIN');
+    expect(JSON.stringify(equal)).not.toContain('ALLOW');
   });
 
   it('does not let the 30-second skew widen the key window', async () => {
@@ -374,6 +414,30 @@ describe('principal key manifest', () => {
     }
   });
 
+  it('rejects an invalid calendar date such as 2026-02-30T00:00:00Z', async () => {
+    const invalid = [
+      keyEntry({ notBefore: '2026-02-30T00:00:00Z' }),
+      keyEntry({ notAfter: '2026-02-30T00:00:00Z' }),
+      keyEntry({ notBefore: '2026-02-29T00:00:00Z' }),
+      keyEntry({ notAfter: '2026-04-31T00:00:00Z' }),
+      keyEntry({ notBefore: '2026-01-01T24:00:00Z' }),
+    ];
+    for (const entry of invalid) {
+      const result = await check({ manifest: pinned([entry]) });
+      expect(result).toEqual({ ok: false, httpStatus: 503, code: 'MANIFEST_MALFORMED' });
+      expect(verdictWithPrincipalCheck('ALLOW', result)).toBe('UNCERTAIN');
+      expect(JSON.stringify(result)).not.toContain('ALLOW');
+    }
+    const leap = await check({
+      manifest: pinned([keyEntry({
+        notBefore: '2024-02-29T00:00:00Z',
+        notAfter: iso(NOW + 1000),
+      })]),
+    });
+    expect(leap).toMatchObject({ ok: true, mandateSource: 'principal_signed' });
+    expect(leap).not.toHaveProperty('verdict');
+  });
+
   it('rejects an account mismatch and does not load the signed account', async () => {
     const calls: string[] = [];
     const result = await check({
@@ -383,6 +447,19 @@ describe('principal key manifest', () => {
     });
     expectBlock(result, 'account_mismatch');
     expect(calls).toEqual([]);
+    expect(JSON.stringify(result)).not.toContain(OTHER);
+  });
+
+  it('returns 503 when the delivered manifest accountId is not the authenticated account', async () => {
+    const calls: string[] = [];
+    const result = await check({
+      onLoad: (accountId) => calls.push(accountId),
+      manifest: pinned([keyEntry()], OTHER),
+    });
+    expect(result).toEqual({ ok: false, httpStatus: 503, code: 'MANIFEST_MALFORMED' });
+    expect(calls).toEqual([ACCOUNT]);
+    expect(verdictWithPrincipalCheck('ALLOW', result)).toBe('UNCERTAIN');
+    expect(JSON.stringify(result)).not.toContain('ALLOW');
     expect(JSON.stringify(result)).not.toContain(OTHER);
   });
 
@@ -431,6 +508,35 @@ describe('principal key manifest', () => {
       store: { async load() { return { answered: false }; } },
     });
     expect(silent).toEqual({ ok: false, httpStatus: 503, code: 'MANIFEST_UNAVAILABLE' });
+  });
+
+  it('returns 503 when store.load never resolves and clears the deadline', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const pending = check({
+      store: {
+        load: () => new Promise(() => {}),
+      },
+    });
+    const early = await Promise.race([
+      pending.then(() => 'settled' as const),
+      vi.advanceTimersByTimeAsync(PRINCIPAL_MANIFEST_LOAD_DEADLINE_MS - 1).then(() => 'waiting' as const),
+    ]);
+    expect(early).toBe('waiting');
+
+    const done = await Promise.race([
+      pending.then((result) => result),
+      vi.advanceTimersByTimeAsync(1).then(() => 'still-waiting' as const),
+    ]);
+    expect(done).toEqual({ ok: false, httpStatus: 503, code: 'MANIFEST_UNAVAILABLE' });
+    if (typeof done === 'string') throw new Error('deadline did not reject the silent load');
+    expect(verdictWithPrincipalCheck('ALLOW', done)).toBe('UNCERTAIN');
+    expect(verdictWithPrincipalCheck('BLOCK', done)).toBe('BLOCK');
+    expect(JSON.stringify(done)).not.toContain('ALLOW');
+
+    const loaded = check();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(loaded).resolves.toMatchObject({ ok: true, mandateSource: 'principal_signed' });
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('does not read a request-body key manifest as the principal manifest', async () => {
@@ -507,12 +613,8 @@ describe('principal key manifest', () => {
     expect(writes).toBe(0);
   });
 
-  it('signs UTF-8 JCS without the export domain prefix or the signature field', () => {
-    const bytes = principalMandateSignedBytes(MANDATE, fields());
-    expect(bytes?.toString('utf8')).toBe(PINNED_JCS);
-    expect(bytes?.includes(0)).toBe(false);
-    expect(bytes?.toString('utf8')).not.toContain('thoughtproof.sentinel.export.v1');
-    expect(bytes?.toString('utf8')).not.toContain('signature');
+  it('vector: signature bytes are the mandate domain, one 0x00, then UTF-8 JCS', () => {
+    expect(PRINCIPAL_MANDATE_DOMAIN).toBe('thoughtproof.sentinel.mandate.v1');
     const independent = (canonicalize as (value: unknown) => string)({
       schema_version: 'sentinel.mandate-proof.v1',
       mandate: MANDATE,
@@ -525,6 +627,30 @@ describe('principal key manifest', () => {
       purpose: 'action_authorization',
     });
     expect(independent).toBe(PINNED_JCS);
+    const domain = Buffer.from(PRINCIPAL_MANDATE_DOMAIN, 'utf8');
+    const jcs = Buffer.from(PINNED_JCS, 'utf8');
+    const expected = Buffer.concat([domain, Buffer.from([0x00]), jcs]);
+    const bytes = principalMandateSignedBytes(MANDATE, fields());
+    expect(bytes?.equals(expected)).toBe(true);
+    expect(bytes?.[domain.length]).toBe(0x00);
+    expect(Array.from(bytes ?? []).filter((byte) => byte === 0).length).toBe(1);
+    expect(bytes?.subarray(domain.length + 1).toString('utf8')).toBe(PINNED_JCS);
+    expect(bytes?.subarray(0, domain.length).toString('utf8')).not.toContain('thoughtproof.sentinel.export.v1');
+    expect(bytes?.subarray(domain.length + 1).toString('utf8')).not.toContain('signature');
+  });
+
+  it('rejects a signature over unprefixed JCS with no fallback', async () => {
+    const unprefixed = Buffer.from(PINNED_JCS, 'utf8');
+    const result = await check({
+      proof: {
+        ...fields(),
+        signature: sign(null, unprefixed, primary.privateKey).toString('hex'),
+      },
+    });
+    expectBlock(result, 'signature_invalid');
+    expect(verdictWithPrincipalCheck('ALLOW', result)).toBe('BLOCK');
+    expect(verdictWithPrincipalCheck('UNCERTAIN', result)).toBe('BLOCK');
+    expect(JSON.stringify(result)).not.toContain('ALLOW');
   });
 
   it('does not accept an export-domain signature or an evidence signature', async () => {
@@ -546,6 +672,69 @@ describe('principal key manifest', () => {
     });
     expectBlock(exportSigned, 'signature_invalid');
     expectBlock(evidenceSigned, 'signature_invalid');
+  });
+
+  it('rejects a proof environment outside production, preview, and development', async () => {
+    for (const environment of [' ', 'production ', ' preview', 'staging', 'test-env', 'PRODUCTION']) {
+      let loads = 0;
+      const result = await check({
+        proof: signedProof(primary.privateKey, fields({ environment })),
+        store: {
+          async load() {
+            loads += 1;
+            return { answered: true, manifest: pinned() };
+          },
+        },
+      });
+      expectBlock(result, 'environment_rejected');
+      expect(loads).toBe(0);
+      expect(verdictWithPrincipalCheck('ALLOW', result)).toBe('BLOCK');
+      expect(JSON.stringify(result)).not.toContain('ALLOW');
+    }
+  });
+
+  it('blocks when the proof environment does not match the injected target', async () => {
+    let loads = 0;
+    const result = await check({
+      targetEnvironment: 'preview',
+      proof: signedProof(primary.privateKey, fields({ environment: 'production' })),
+      store: {
+        async load() {
+          loads += 1;
+          return { answered: true, manifest: pinned() };
+        },
+      },
+    });
+    expectBlock(result, 'environment_mismatch');
+    expect(loads).toBe(0);
+    expect(verdictWithPrincipalCheck('ALLOW', result)).toBe('BLOCK');
+    expect(verdictWithPrincipalCheck('UNCERTAIN', result)).toBe('BLOCK');
+  });
+
+  it('returns 503 when the server target environment is missing or not exact', async () => {
+    const proof = signedProof(primary.privateKey, fields({ environment: 'development' }));
+    for (const targetEnvironment of [null, '', ' ', 'development ', 'staging'] as const) {
+      let loads = 0;
+      const result = await check({
+        targetEnvironment,
+        proof,
+        store: {
+          async load() {
+            loads += 1;
+            return { answered: true, manifest: pinned() };
+          },
+        },
+      });
+      expect(result).toEqual({
+        ok: false,
+        httpStatus: 503,
+        code: 'TARGET_ENVIRONMENT_UNAVAILABLE',
+      });
+      expect(loads).toBe(0);
+      expect(verdictWithPrincipalCheck('ALLOW', result)).toBe('UNCERTAIN');
+      expect(verdictWithPrincipalCheck('BLOCK', result)).toBe('BLOCK');
+      expect(JSON.stringify(result)).not.toContain('ALLOW');
+    }
   });
 
   it('rejects an unusable receipt time without reading the store', async () => {

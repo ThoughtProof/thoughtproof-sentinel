@@ -4,8 +4,9 @@
  * A verified signature does not produce ALLOW.
  *
  * The manifest is not the caller-supplied evidence manifest and not the
- * export key document. Registration rejects the verify caller and
- * X-Sentinel-Agent-Id. No registration authority is accepted here.
+ * export key document. Pinning belongs to a verified account owner or an
+ * explicitly authorized account admin, through a separate admin process.
+ * Until that process exists, registration stays locked.
  * Receipt time is an argument. This module does not read a clock.
  */
 
@@ -20,6 +21,21 @@ export const PRINCIPAL_MANDATE_SCHEMA = 'sentinel.mandate-proof.v1';
 
 /** Purpose for this path. Other purposes are not accepted here. */
 export const PRINCIPAL_MANDATE_PURPOSE = 'action_authorization';
+
+/**
+ * Domain separator for mandate signatures. Distinct from
+ * `thoughtproof.sentinel.export.v1`. One 0x00 byte follows these UTF-8
+ * bytes. There is no unprefixed-JCS fallback.
+ */
+export const PRINCIPAL_MANDATE_DOMAIN = 'thoughtproof.sentinel.mandate.v1';
+
+/** v1 target environments. Comparison is exact: no trim, no other token. */
+export const PRINCIPAL_ENVIRONMENTS = ['production', 'preview', 'development'] as const;
+
+export type PrincipalEnvironment = (typeof PRINCIPAL_ENVIRONMENTS)[number];
+
+/** A silent `store.load` past this deadline is the same as no answer. */
+export const PRINCIPAL_MANIFEST_LOAD_DEADLINE_MS = 2_000;
 
 const EXPORT_KEY_SCHEMA = 'thoughtproof.keys.v1';
 const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -69,7 +85,8 @@ const PRIVATE_KEY_FIELDS = new Set([
   'seed',
 ]);
 
-const ISO_SECOND = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+/** Strict RFC3339 UTC, second resolution, no offset and no fraction. */
+const RFC3339_UTC_SECOND = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
 
 export type PrincipalKeyStatus = 'active' | 'retired' | 'revoked';
 
@@ -119,6 +136,11 @@ export interface PrincipalMandateInput {
   /** No store means the manifest cannot be read. There is no memory fallback. */
   store: PrincipalManifestStore | null;
   /**
+   * Trusted server-side target environment. Injected by the caller.
+   * Not read from the proof, the manifest, or the request.
+   */
+  targetEnvironment?: string;
+  /**
    * Caller-supplied evidence manifest. Ignored. It is not the principal manifest.
    */
   requestBodyKeyManifest?: unknown;
@@ -137,11 +159,14 @@ export type PrincipalBlockReason =
   | 'retired'
   | 'key_not_yet_valid'
   | 'key_expired'
+  | 'environment_rejected'
+  | 'environment_mismatch'
   | 'signature_invalid';
 
 export type PrincipalUnavailableCode =
   | 'ACCOUNT_UNAVAILABLE'
   | 'RECEIPT_TIME_UNUSABLE'
+  | 'TARGET_ENVIRONMENT_UNAVAILABLE'
   | 'MANIFEST_UNAVAILABLE'
   | 'MANIFEST_MALFORMED';
 
@@ -203,17 +228,26 @@ function isUnixSeconds(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-function unixFromIso(iso: string): number | null {
-  if (!ISO_SECOND.test(iso)) return null;
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return null;
-  return Math.floor(ms / 1000);
+export function isPrincipalEnvironment(value: unknown): value is PrincipalEnvironment {
+  return value === 'production' || value === 'preview' || value === 'development';
 }
 
 /**
- * UTF-8 JCS of the versioned object. `signature` is not included.
- * ADR-0023 also names a domain separator distinct from the export domain
- * and does not give that separator. These bytes are JCS only.
+ * Strict RFC3339 UTC plus a round-trip. `Date.parse` turns `2026-02-30`
+ * into 2 March; that normalized instant is not the timestamp that was written.
+ */
+function unixFromIso(iso: string): number | null {
+  if (!RFC3339_UTC_SECOND.test(iso)) return null;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms) || ms % 1000 !== 0) return null;
+  const roundTrip = new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  if (roundTrip !== iso) return null;
+  return ms / 1000;
+}
+
+/**
+ * UTF-8 domain, one 0x00 byte, then UTF-8 JCS of the versioned envelope.
+ * `signature` is not in the JCS object. Unprefixed JCS is not accepted.
  */
 export function principalMandateSignedBytes(
   mandate: unknown,
@@ -231,7 +265,43 @@ export function principalMandateSignedBytes(
     purpose: proof.purpose,
   });
   if (canonical == null) return null;
-  return Buffer.from(canonical, 'utf8');
+  return Buffer.concat([
+    Buffer.from(PRINCIPAL_MANDATE_DOMAIN, 'utf8'),
+    Buffer.from([0x00]),
+    Buffer.from(canonical, 'utf8'),
+  ]);
+}
+
+/**
+ * Bound `store.load`. A promise that never settles becomes a rejection at
+ * the deadline. The timer is cleared when the load settles and when the
+ * deadline fires.
+ */
+function withDeadline<T>(pending: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  return new Promise<T>((resolve, reject) => {
+    const clear = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    const finish = (settle: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clear();
+      settle();
+    };
+    timer = setTimeout(() => {
+      timer = undefined;
+      finish(() => reject(new Error('principal_manifest_load_deadline')));
+    }, ms);
+    pending.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
 }
 
 function publicKeyFromOkpX(x: string): boolean {
@@ -339,6 +409,8 @@ function parseManifest(
   if (value.schema === EXPORT_KEY_SCHEMA || value.version !== undefined) return { ok: false };
   const top = Object.keys(value);
   if (top.some((key) => key !== 'accountId' && key !== 'keys')) return { ok: false };
+  // Document accountId is required in addition to the store key. The lookup
+  // account is the authenticated account. A different document account is invalid.
   if (value.accountId !== accountId) return { ok: false };
   if (!Array.isArray(value.keys)) return { ok: false };
 
@@ -361,6 +433,13 @@ function parseManifest(
     const notBefore = parseBound(entry.notBefore);
     const notAfter = parseBound(entry.notAfter);
     if (!notBefore.ok || !notAfter.ok) return { ok: false };
+    if (
+      notBefore.unix != null &&
+      notAfter.unix != null &&
+      notAfter.unix <= notBefore.unix
+    ) {
+      return { ok: false };
+    }
     if (seen.has(entry.kid)) return { ok: false };
     seen.add(entry.kid);
     const key: PrincipalPublicKey = {
@@ -379,10 +458,11 @@ function parseManifest(
 }
 
 /**
- * `active` at receipt time: status is active and `now` is inside the window.
- * Endpoints match export signer readiness (`now < notBefore` and `now > notAfter`
- * are outside). The 30-second proof skew does not move this window.
- * `iat` is not an argument. `malformed` means the window cannot be read.
+ * `active` at receipt time: status is active and `notBefore <= now < notAfter`
+ * for each bound that is set. `notAfter` is exclusive. The 30-second proof
+ * skew does not move this window. `iat` is not an argument.
+ * `retired` is BLOCK for every new authorization. Historical verification
+ * is out of scope. `malformed` means the window cannot be read.
  */
 function keyFailureAtReceipt(
   key: PrincipalPublicKey,
@@ -394,8 +474,9 @@ function keyFailureAtReceipt(
   const notAfter = key.notAfter == null ? null : unixFromIso(key.notAfter);
   if (key.notBefore != null && notBefore == null) return 'malformed';
   if (key.notAfter != null && notAfter == null) return 'malformed';
+  if (notBefore != null && notAfter != null && notAfter <= notBefore) return 'malformed';
   if (notBefore != null && nowSeconds < notBefore) return 'key_not_yet_valid';
-  if (notAfter != null && nowSeconds > notAfter) return 'key_expired';
+  if (notAfter != null && nowSeconds >= notAfter) return 'key_expired';
   return null;
 }
 
@@ -405,9 +486,11 @@ function isAnswer(value: unknown): value is PrincipalManifestAnswer {
 }
 
 /**
- * Reject every registration attempt. The verify API key and
- * X-Sentinel-Agent-Id are not registration authority. Who may pin a key
- * is still open, so this entry point writes nothing.
+ * Reject every registration attempt. A key may be pinned only by the
+ * verified account owner or an explicitly authorized account admin, through
+ * a separate admin process. The pilot is a documented manual process.
+ * Until that process exists this entry point stays locked. The verify API
+ * key and X-Sentinel-Agent-Id are not authority. Nothing is written.
  */
 export function registerPrincipalKey(
   attempt: PrincipalRegistrationAttempt,
@@ -451,6 +534,15 @@ export async function verifyPrincipalMandate(
   if (!parsed.ok) return parsed.result;
   if (parsed.proof.account_id !== accountId) return block('account_mismatch');
   if (!isPlainObject(input.mandate)) return block('malformed_proof');
+  if (!isPrincipalEnvironment(parsed.proof.environment)) {
+    return block('environment_rejected');
+  }
+  if (!isPrincipalEnvironment(input.targetEnvironment)) {
+    return unavailable('TARGET_ENVIRONMENT_UNAVAILABLE');
+  }
+  if (parsed.proof.environment !== input.targetEnvironment) {
+    return block('environment_mismatch');
+  }
 
   const times = checkMandateProofTimes(
     { iat: parsed.proof.iat, exp: parsed.proof.exp },
@@ -462,7 +554,10 @@ export async function verifyPrincipalMandate(
 
   let loaded: unknown;
   try {
-    loaded = await input.store.load(accountId);
+    loaded = await withDeadline(
+      Promise.resolve(input.store.load(accountId)),
+      PRINCIPAL_MANIFEST_LOAD_DEADLINE_MS,
+    );
   } catch {
     return unavailable('MANIFEST_UNAVAILABLE');
   }

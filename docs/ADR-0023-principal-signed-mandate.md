@@ -50,9 +50,20 @@ Registration is separately authorized. The principal generates the key pair and 
 
 A trustworthy key-to-manifest mapping is a prerequisite. `validateApiKey` today returns `platform` and `agent_id`, not a stable account id. The manifest is loaded for the account that mapping identifies. The request must not select the account. A signed account id may be included in `mandate_proof`, and it must exactly equal the server-side authenticated account id. A mismatch gives BLOCK. `X-Sentinel-Agent-Id` must not select the account either.
 
+The manifest document carries `accountId` in addition to the store key. The load uses only the authenticated account. A delivered document whose `accountId` is not that account is an invalid manifest. It does not select another account.
+
 ## Envelope
 
-Transport and verify the same fields. The signed message is JCS of a versioned object, UTF-8, then Ed25519, under a domain separator distinct from `thoughtproof.sentinel.export.v1`:
+Transport and verify the same fields. Ed25519 is over the UTF-8 signed input below. The domain is distinct from `thoughtproof.sentinel.export.v1`, and it is not optional. There is no fallback that verifies a signature over unprefixed JCS.
+
+```
+signed_input =
+  UTF-8("thoughtproof.sentinel.mandate.v1")
+  || 0x00
+  || UTF-8(JCS(envelope))
+```
+
+`envelope` is the versioned object below. `signature` is not a field of that object. One 0x00 byte separates the domain from the JCS. A signature over the export domain, over an evidence payload, or over the JCS alone does not verify.
 
 - schema version
 - normalized mandate, including `action`
@@ -66,7 +77,7 @@ Purpose and schema version are audience binding. Evidence types keep their own v
 
 ### Request format
 
-The envelope travels as one additive object, `mandate_proof`, beside the existing `mandate`. It is not two loose fields `mandate_sig` and `principal_kid`. `mandate` stays the mandate. `mandate_proof` carries the envelope and the signature. The signature is over the JCS bytes of the normalized mandate plus every `mandate_proof` field except `signature`.
+The envelope travels as one additive object, `mandate_proof`, beside the existing `mandate`. It is not two loose fields `mandate_sig` and `principal_kid`. `mandate` stays the mandate. `mandate_proof` carries the envelope and the signature. The signature is over `thoughtproof.sentinel.mandate.v1`, one 0x00 byte, and the JCS bytes of the normalized mandate plus every `mandate_proof` field except `signature`.
 
 | Field | Role |
 |---|---|
@@ -74,7 +85,7 @@ The envelope travels as one additive object, `mandate_proof`, beside the existin
 | `nonce` | Single-use CSPRNG value. |
 | `iat`, `exp` | Unix seconds. Checked against server receipt time as below. |
 | `account_id` | Must equal the authenticated account id. It does not select the account. |
-| `environment` | Target environment. |
+| `environment` | Target environment. v1 is exactly `production`, `preview`, or `development`. Compared, exactly, with the trusted server-side target injected beside the check. It is not taken from the manifest or the proof. Any other proof value, including whitespace, is BLOCK. A mismatch is BLOCK. A missing or non-exact server target is HTTP 503. |
 | `purpose` | Purpose string. `action_authorization` for this path. |
 | `principal_kid` | Kid in the server-pinned manifest. |
 | `signature` | Ed25519 over the signed message, hex. |
@@ -103,7 +114,7 @@ Placeholder example only. These values are not a vector and not a key.
     "iat": 1780000000,
     "exp": 1780000300,
     "account_id": "placeholder-account",
-    "environment": "placeholder-env",
+    "environment": "production",
     "purpose": "action_authorization",
     "principal_kid": "placeholder-kid",
     "signature": "placeholder-signature"
@@ -124,7 +135,9 @@ Let `now` be the server receipt time in unix seconds. Skew is 30 seconds. Accept
 - `exp > now - 30`
 - `exp - iat <= 300`
 
-The key must be `active` at receipt time: `now` inside `notBefore` / `notAfter`. `iat` does not choose that window. A signer-chosen `iat` does not make a retired or not-yet-valid key active.
+The key must be `active` at receipt time: `notBefore <= now < notAfter` for each bound that is set. `notAfter` is exclusive. A null bound is open on that side. The 30-second proof skew does not apply to this window. `iat` does not choose it. A signer-chosen `iat` does not make a retired or not-yet-valid key active. If both bounds are set, `notAfter` must be greater than `notBefore`. Otherwise the manifest is invalid.
+
+`notBefore` and `notAfter` are strict RFC3339 UTC timestamps with second resolution (`YYYY-MM-DDTHH:MM:SSZ`). The text must round-trip through the calendar. A date `Date.parse` would normalize, including `2026-02-30T00:00:00Z`, is not that instant. An invalid timestamp makes the manifest invalid.
 
 After the signature verifies, consume the nonce in the shared store atomically, before any paid call or other relevant side effect. That step re-checks expiry against server time with the same 30-second skew (`exp > now - 30`). A proof that expired between validation and consumption is BLOCK. It is never ALLOW. Two parallel requests with the same nonce must not both pass. Do not retry a proof from the start. A lost response needs a new proof.
 
@@ -134,8 +147,8 @@ The manifest may hold more than one kid so a replacement key can be registered b
 
 | Status | New authorization request |
 |---|---|
-| `active` | Verify. The key window is receipt time (`now`), not `iat`. The time checks above must hold. |
-| `retired` | BLOCK for a new authorization request. An `iat` the signer chose does not prove the proof was made while the key was active. |
+| `active` | Verify. The key window is `notBefore <= now < notAfter` (`notAfter` exclusive), not `iat`, and not the 30-second proof skew. |
+| `retired` | BLOCK for any new authorization. Historical verification is a separate case and is out of scope on this path. An `iat` the signer chose does not prove the proof was made while the key was active. |
 | `revoked` | BLOCK, including inside any old window. |
 
 An unknown kid, once the store has answered, is known-invalid and is BLOCK. A store that does not answer is the unverifiable case in decision 2.
@@ -177,7 +190,7 @@ A failed principal check must not become ALLOW, including when v2 issuance fails
 
 Only after a separate implementation GO, and not as part of accepting this ADR:
 
-- Crypto vectors for a valid signature, a wrong key, a tampered byte, expiry, skew, replay, and a domain separator that does not verify as an export or as evidence.
+- Crypto vectors for a valid signature, a wrong key, a tampered byte, expiry, skew, replay, and a domain separator that does not verify as an export, as evidence, or as unprefixed JCS. The mandate vector is `thoughtproof.sentinel.mandate.v1`, one 0x00 byte, then UTF-8 JCS of the envelope.
 - Offline normalization vectors for aliases, unknown fields, and `__proto__`, showing the signer, the gate, and the digest see the same representation.
 - Negative matrix: protection on and `mandate_proof` omitted, a required `mandate_proof` field missing, `account_id` not equal to the authenticated account, unknown kid, revoked kid, retired kid presented as a new request, replay store down, two parallel uses of one nonce, and a nonce entry dropped before `exp + skew`. Known-invalid cases are BLOCK. Store-down is UNCERTAIN or 503. None is ALLOW, and none turns a BLOCK into UNCERTAIN.
 - Verdict invariance across the P3 gate matrix with `mandate_source` varied, including a valid signature on a case that is already BLOCK or UNCERTAIN.
