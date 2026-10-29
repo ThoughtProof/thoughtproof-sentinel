@@ -2696,11 +2696,10 @@ describe('agenda/meeting informational terms', () => {
       "Share today's board agenda with the Vorstand agents in our internal channel.\n1. 18:00 Opening\n2. 18:20 Decision",
       "Poste die Agenda für den Vorstand in den Gruppenchat.\n1. 18:00 Eröffnung\n2. 18:15 Finanzen",
       'Send the meeting agenda for Thursday to Anna by email.\n1. 18:00 Opening',
-      "Share today's board agenda with the Vorstand agents in our internal channel. Meeting on 29.10.2026 at 18:00.",
       'Send the agenda to Anna at 18:00.',
       'Send the meeting agenda on 29.10.2026 to Anna.',
       'Send the agenda on 2026-10-29 at 18:00 to Anna.',
-      "Share today's board agenda with the Vorstand agents. Do not send money.\n1. 18:00 Opening",
+      "Share today's board agenda with the Vorstand agents.\n1. 18:00 Opening. Do not send money.",
     ];
     for (const text of texts) expectAgendaShareAllow(text, longAgendaShare);
 
@@ -2777,6 +2776,78 @@ describe('agenda/meeting informational terms', () => {
     );
     expect(priced.value_transfer).toBe(true);
     expect(priced.prose_action_kind).toBe('value_transfer');
+  });
+
+  it('schedule-body probes stay off informational', () => {
+    const share = 'Send the agenda to Anna.';
+    const schedule = (line: string) => `${share}\n1. 18:00 Opening\n2. 18:30 ${line}`;
+    const groups: Array<{ group: string; text: string; kind: 'unknown' | 'value_transfer' }> = [
+      { group: 'give', text: schedule('Give Bob admin access'), kind: 'unknown' },
+      { group: 'iban', text: schedule('Forward the IBAN'), kind: 'unknown' },
+      { group: 'sign', text: schedule('Sign the contract'), kind: 'unknown' },
+      { group: 'dated-send', text: schedule('Send Bob 12.11.2026'), kind: 'unknown' },
+      { group: 'lone-50.', text: 'Send the agenda to Anna. 50.', kind: 'value_transfer' },
+      { group: 'lone-50)', text: 'Send the agenda to Anna\n50)', kind: 'value_transfer' },
+      { group: 'lone-50-nd', text: 'Send the agenda to Anna. ５０.', kind: 'value_transfer' },
+    ];
+    for (const { group, text, kind } of groups) {
+      const ev = mcpEvidence(longAgendaShare, text, group);
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, group).toBe(kind);
+      expect(prose.prose_action_kind, group).not.toBe('informational');
+      expect(allowlistFrom(prose), group).toBe(false);
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, group).not.toBe('informational');
+      expect(caller.action_kind, group).toBe('informational');
+      expect(caller.mandate_kind, group).toBe('informational');
+      expect(caller.objective_mismatch, group).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), group).toBe(false);
+    }
+  });
+
+  it('quantities, payees, and delete stay blocked beside a clock', () => {
+    const wallet = `0x${'ab'.repeat(20)}`;
+    const cases: Array<{ label: string; text: string; kind: 'value_transfer' | 'deploy_ship' }> = [
+      { label: '5000 at 18:00', text: 'Send the agenda to Anna at 18:00 and 5000', kind: 'value_transfer' },
+      { label: 'USDC', text: 'Send the agenda to Anna at 18:00 and transfer 100 USDC', kind: 'value_transfer' },
+      {
+        label: 'IBAN',
+        text: 'Send the agenda to Anna. IBAN DE89370400440532013000',
+        kind: 'value_transfer',
+      },
+      { label: '0x', text: `Send the agenda to Anna at 18:00 to ${wallet}`, kind: 'value_transfer' },
+      {
+        label: 'amount in item',
+        text: 'Send the agenda to Anna.\n1. 18:00 Opening\n2. 18:30 Pay 12000 EUR',
+        kind: 'value_transfer',
+      },
+      {
+        label: 'delete',
+        text: 'Send the agenda to Anna.\n1. 18:00 Delete the database',
+        kind: 'deploy_ship',
+      },
+    ];
+    for (const { label, text, kind } of cases) {
+      const ev = mcpEvidence(longAgendaShare, text, label);
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, label).toBe(kind);
+      expect(prose.prose_action_kind, label).not.toBe('informational');
+      expect(allowlistFrom(prose), label).toBe(false);
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, label).not.toBe('informational');
+      expect(caller.objective_mismatch, label).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), label).toBe(false);
+    }
+  });
+
+  it('a long run of bare item markers does not become informational', () => {
+    const text = `Send the agenda to Anna. ${'50. '.repeat(800)}`;
+    const start = performance.now();
+    const prose = classifyActionAuthKind(text, mcpEvidence(longAgendaShare, text, 'cap'));
+    expect(performance.now() - start).toBeLessThan(100);
+    expect(prose.prose_action_kind).toBe('value_transfer');
+    expect(prose.prose_action_kind).not.toBe('informational');
+    expect(allowlistFrom(prose)).toBe(false);
   });
 
   it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {
