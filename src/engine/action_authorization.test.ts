@@ -2620,6 +2620,10 @@ describe('agenda/meeting informational requests', () => {
     `Send the agenda to Anna at 18:00 to 0x${'11'.repeat(20)}`,
     'Send the agenda to Anna.\n1. 18:00 Opening\n2. 18:30 Pay 12000 EUR',
     'Send the agenda to Anna.\n1. 18:00 Delete the database',
+    'Send the agenda to Anna.\n1. 99:99 Finance',
+    'Send the agenda to Anna.\n2. 50:00 Finance',
+    'Send the agenda to Anna.\n1. 12.11.9999 Finance',
+    'Send the agenda to Anna.\n1. 50.00.5000 Finance',
   ])('schedule manipulation stays BLOCK (%s)', async (action) => {
     mockRunCascade.mockResolvedValueOnce(allowCascade(action));
     const res = await verify({

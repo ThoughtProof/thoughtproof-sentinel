@@ -806,20 +806,82 @@ const AGENDA_CLOCK_RE = new RegExp(AGENDA_CLOCK_SRC, 'gu');
 const AGENDA_DATE_RE = new RegExp(AGENDA_DATE_SRC, 'gu');
 const AGENDA_ND_RE = new RegExp(ND, 'u');
 
+const AGENDA_CLOCK_PART_RE = new RegExp(`^(${ND}{1,2}):(${ND}{2})(?::(${ND}{2}))?$`, 'u');
+const AGENDA_ISO_DATE_RE = new RegExp(`^(${ND}{4})-(${ND}{2})-(${ND}{2})$`, 'u');
+const AGENDA_DMY_DATE_RE = new RegExp(`^(${ND}{1,2})\\.(${ND}{1,2})\\.(${ND}{4})$`, 'u');
+const AGENDA_FOLLOW_RE = new RegExp(
+  `^(?:${AGENDA_CLOCK_SRC}|${AGENDA_DATE_SRC}|${AGENDA_TITLE_SRC})\\b`,
+  'iu',
+);
+
+function ndNumber(raw: string): number {
+  return Number(raw);
+}
+
+/** Hour 0–23, minute 0–59, optional seconds 0–59. `99:99` and `50:00` are not clocks. */
+function isValidAgendaClock(raw: string): boolean {
+  const match = AGENDA_CLOCK_PART_RE.exec(raw);
+  if (!match) return false;
+  const hour = ndNumber(match[1] ?? '');
+  const minute = ndNumber(match[2] ?? '');
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return false;
+  if (hour > 23 || minute > 59) return false;
+  if (match[3] !== undefined) {
+    const second = ndNumber(match[3]);
+    if (!Number.isInteger(second) || second > 59) return false;
+  }
+  return true;
+}
+
+/** Day 1–31, month 1–12, year 2000–2100. `12.11.9999` and `50.00.5000` are not dates. */
+function isValidAgendaDate(raw: string): boolean {
+  const iso = AGENDA_ISO_DATE_RE.exec(raw);
+  const dmy = iso ? null : AGENDA_DMY_DATE_RE.exec(raw);
+  const match = iso ?? dmy;
+  if (!match) return false;
+  const year = ndNumber(iso ? (match[1] ?? '') : (match[3] ?? ''));
+  const month = ndNumber(iso ? (match[2] ?? '') : (match[2] ?? ''));
+  const day = ndNumber(iso ? (match[3] ?? '') : (match[1] ?? ''));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  return year >= 2000 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+function isAgendaTitleWord(word: string): boolean {
+  return (AGENDA_TITLE_NOUNS as readonly string[]).includes(word.toLowerCase());
+}
+
+/** Shape match plus the same numeric bounds as the residual token path. */
+function isAgendaScheduleToken(raw: string): boolean {
+  if (isAgendaTitleWord(raw)) return true;
+  if (AGENDA_CLOCK_PART_RE.test(raw)) return isValidAgendaClock(raw);
+  if (AGENDA_ISO_DATE_RE.test(raw) || AGENDA_DMY_DATE_RE.test(raw)) return isValidAgendaDate(raw);
+  return false;
+}
+
 /**
  * Clocks, calendar dates, and real list markers are not amounts.
  * `send` is both a share verb and a transfer verb, so a clock in
  * "send the agenda … 18:00" must not become a value transfer.
- * A bare quantity (`send 5000`, `item 3`, `50.`, `12000`) still counts.
+ * An out-of-range clock or date is not a schedule token, so its digits
+ * stay. A bare quantity (`send 5000`, `item 3`, `50.`, `99:99`) still counts.
  */
 function digitsOutsideSchedule(text: string): boolean {
   AGENDA_LIST_MARKER_RE.lastIndex = 0;
   AGENDA_CLOCK_RE.lastIndex = 0;
   AGENDA_DATE_RE.lastIndex = 0;
-  const stripped = text
-    .replace(AGENDA_LIST_MARKER_RE, ' ')
-    .replace(AGENDA_CLOCK_RE, ' ')
-    .replace(AGENDA_DATE_RE, ' ');
+  const withoutMarkers = text.replace(AGENDA_LIST_MARKER_RE, (match, offset: number) => {
+    const following = text.slice(offset + match.length).trimStart();
+    AGENDA_FOLLOW_RE.lastIndex = 0;
+    const token = AGENDA_FOLLOW_RE.exec(following);
+    if (!token || !isAgendaScheduleToken(token[0])) return match;
+    return ' ';
+  });
+  const withoutClocks = withoutMarkers.replace(AGENDA_CLOCK_RE, (match) =>
+    isValidAgendaClock(match) ? ' ' : match,
+  );
+  const stripped = withoutClocks.replace(AGENDA_DATE_RE, (match) =>
+    isValidAgendaDate(match) ? ' ' : match,
+  );
   return AGENDA_ND_RE.test(stripped);
 }
 
@@ -1090,7 +1152,7 @@ const AGENDA_BODY_OPERATIVE_RE =
   /\b(?:give|grant(?:ing)?|access|admin|forward(?:ing)?|sign(?:ing)?|approve|approving|send(?:ing)?|pay(?:ing)?|transfer(?:ring)?|delete|book(?:ing)?|wire|wiring|publish(?:ing)?|merge|cancel(?:led|ed)?|upload|revoke|drop|rm)\b/iu;
 
 const AGENDA_SCHEDULE_LINE_RE = new RegExp(
-  `^${ND}{1,2}\\.\\s+(?:${AGENDA_CLOCK_SRC}|${AGENDA_DATE_SRC})\\s+(${AGENDA_TITLE_SRC})\\.?$`,
+  `^${ND}{1,2}\\.\\s+((?:${AGENDA_CLOCK_SRC})|(?:${AGENDA_DATE_SRC}))\\s+(${AGENDA_TITLE_SRC})\\.?$`,
   'iu',
 );
 
@@ -1131,7 +1193,9 @@ function isAgendaSchedulePayload(suffix: string): boolean {
   for (const line of lines) {
     const match = AGENDA_SCHEDULE_LINE_RE.exec(line);
     if (!match) return false;
-    const title = (match[1] ?? '').toLowerCase();
+    const when = match[1] ?? '';
+    if (!isValidAgendaClock(when) && !isValidAgendaDate(when)) return false;
+    const title = (match[2] ?? '').toLowerCase();
     if (!(AGENDA_TITLE_NOUNS as readonly string[]).includes(title)) return false;
   }
   return true;

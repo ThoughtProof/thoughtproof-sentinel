@@ -2805,6 +2805,28 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  it('impossible clocks and dates are not schedule lines', () => {
+    const lines = [
+      '1. 99:99 Finance',
+      '2. 50:00 Finance',
+      '1. 12.11.9999 Finance',
+      '1. 50.00.5000 Finance',
+    ];
+    for (const line of lines) {
+      const text = `Send the agenda to Anna.\n${line}`;
+      const ev = mcpEvidence(longAgendaShare, text, line);
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, line).toBe('value_transfer');
+      expect(prose.prose_action_kind, line).not.toBe('informational');
+      expect(prose.value_transfer, line).toBe(true);
+      expect(allowlistFrom(prose), line).toBe(false);
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, line).not.toBe('informational');
+      expect(caller.objective_mismatch, line).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), line).toBe(false);
+    }
+  });
+
   it('quantities, payees, and delete stay blocked beside a clock', () => {
     const wallet = `0x${'ab'.repeat(20)}`;
     const cases: Array<{ label: string; text: string; kind: 'value_transfer' | 'deploy_ship' }> = [
