@@ -29,6 +29,28 @@ describe('parseNumericClaim', () => {
     expect(c.is_numericish).toBe(false);
     expect(c.relation).toBeNull();
   });
+
+  it('does not treat a clock, a date, or an agenda line as a numeric claim', () => {
+    for (const text of ['18:00', '1. 18:00 Opening', 'Meeting on 29.10.2026 at 18:00.']) {
+      const claim = parseNumericClaim(text);
+      expect(claim.is_numericish, text).toBe(false);
+      const bound = bindObjectionText(text, { claim: text, evidence: text });
+      expect(bound.status, text).toBe('non_numeric');
+      expect(bound.safe_reason, text).not.toMatch(/numeric claim without bound evidence/);
+    }
+  });
+
+  it('treats the step-0 exceed template as numeric even with no action amount', () => {
+    const template =
+      'there is then no amount/asset/approval scope to exceed. Identifiers such as 33 or 0.8.10. FAIL on MAX_UINT256.';
+    expect(parseNumericClaim(template).is_numericish).toBe(true);
+    const bound = bindObjectionText(template, {
+      claim: 'Share the agenda',
+      evidence: '1. 18:00 Opening',
+    });
+    expect(bound.status).toBe('unverified_insufficient_bounds');
+    expect(bound.safe_reason).toMatch(/numeric claim without bound evidence/);
+  });
 });
 
 describe('bindObjectionText — issue-number identifiers are not spend', () => {

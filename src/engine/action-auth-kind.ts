@@ -78,11 +78,18 @@
  * Zugangsdaten senden.") is removed before the filler check. The share
  * verb must still be in what remains. Amounts, wire, ship, and
  * destructive signals are read on the full text first. Those constraint
- * words are not fillers. Anything else stays
+ * words are not fillers. A clock (`18:00`) or a calendar date
+ * (`29.10.2026` / `2026-10-29`) inside that sentence is not a transfer
+ * amount. A trailing schedule is the same share only line by line,
+ * `<n>. <clock|date> <closed title noun>`. An operative word in that
+ * body (`give`, `forward`, `sign`, `send`, `pay`, `delete`, …) stays
+ * unknown. A lone `50.` / `50)` is a quantity, not an item marker.
+ * `send` plus a real quantity still is a transfer. Anything else stays
  * `unknown` (text-only UNCERTAIN; declared informational still
  * fail-closes). A pure agenda-share *mandate* does not unlock the
  * #38/#47 informational allow path for a different action: the action
- * must also be a pure agenda share. Otherwise an undeclared pair
+ * must also be a pure agenda share (a schedule payload counts as that
+ * share). Otherwise an undeclared pair
  * abstains (unknown/unknown → UNCERTAIN). Caller-declared kinds keep
  * main's outcome: that mandate was unknown, so a declared
  * informational pair does not agree and fail-closes
@@ -760,8 +767,126 @@ function hasEthAddress(text: string): boolean {
   return ETH_ADDR_RE.test(text);
 }
 
+/** Decimal digits, including non-ASCII Nd. ASCII `\d` would miss them. */
+const ND = '\\p{Nd}';
+const AGENDA_CLOCK_SRC = `${ND}{1,2}:${ND}{2}(?::${ND}{2})?`;
+const AGENDA_DATE_SRC = `${ND}{4}-${ND}{2}-${ND}{2}|${ND}{1,2}\\.${ND}{1,2}\\.${ND}{4}`;
+
+/**
+ * Closed nouns that may title one schedule line. Not a deny-list:
+ * anything else, including an operative verb, is not a title.
+ */
+const AGENDA_TITLE_NOUNS = [
+  'opening',
+  'eröffnung',
+  'eroeffnung',
+  'decision',
+  'entscheidung',
+  'finanzen',
+  'finance',
+  'pause',
+  'closing',
+  'attendance',
+  'minutes',
+  'protokoll',
+  'protocol',
+  'quorum',
+] as const;
+const AGENDA_TITLE_SRC = AGENDA_TITLE_NOUNS.join('|');
+
+/**
+ * A list marker counts only when a clock, a date, or a title noun
+ * follows. Lone `50.` / `50)` is a quantity and stays a digit.
+ */
+const AGENDA_LIST_MARKER_RE = new RegExp(
+  `(?:^|[\\n.;])\\s*${ND}{1,2}[.)](?=\\s+(?:${AGENDA_CLOCK_SRC}|${AGENDA_DATE_SRC}|${AGENDA_TITLE_SRC})\\b)`,
+  'gu',
+);
+const AGENDA_CLOCK_RE = new RegExp(AGENDA_CLOCK_SRC, 'gu');
+const AGENDA_DATE_RE = new RegExp(AGENDA_DATE_SRC, 'gu');
+const AGENDA_ND_RE = new RegExp(ND, 'u');
+
+const AGENDA_CLOCK_PART_RE = new RegExp(`^(${ND}{1,2}):(${ND}{2})(?::(${ND}{2}))?$`, 'u');
+const AGENDA_ISO_DATE_RE = new RegExp(`^(${ND}{4})-(${ND}{2})-(${ND}{2})$`, 'u');
+const AGENDA_DMY_DATE_RE = new RegExp(`^(${ND}{1,2})\\.(${ND}{1,2})\\.(${ND}{4})$`, 'u');
+const AGENDA_FOLLOW_RE = new RegExp(
+  `^(?:${AGENDA_CLOCK_SRC}|${AGENDA_DATE_SRC}|${AGENDA_TITLE_SRC})\\b`,
+  'iu',
+);
+
+function ndNumber(raw: string): number {
+  return Number(raw);
+}
+
+/** Hour 0–23, minute 0–59, optional seconds 0–59. `99:99` and `50:00` are not clocks. */
+function isValidAgendaClock(raw: string): boolean {
+  const match = AGENDA_CLOCK_PART_RE.exec(raw);
+  if (!match) return false;
+  const hour = ndNumber(match[1] ?? '');
+  const minute = ndNumber(match[2] ?? '');
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) return false;
+  if (hour > 23 || minute > 59) return false;
+  if (match[3] !== undefined) {
+    const second = ndNumber(match[3]);
+    if (!Number.isInteger(second) || second > 59) return false;
+  }
+  return true;
+}
+
+/** Day 1–31, month 1–12, year 2000–2100. `12.11.9999` and `50.00.5000` are not dates. */
+function isValidAgendaDate(raw: string): boolean {
+  const iso = AGENDA_ISO_DATE_RE.exec(raw);
+  const dmy = iso ? null : AGENDA_DMY_DATE_RE.exec(raw);
+  const match = iso ?? dmy;
+  if (!match) return false;
+  const year = ndNumber(iso ? (match[1] ?? '') : (match[3] ?? ''));
+  const month = ndNumber(iso ? (match[2] ?? '') : (match[2] ?? ''));
+  const day = ndNumber(iso ? (match[3] ?? '') : (match[1] ?? ''));
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  return year >= 2000 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31;
+}
+
+function isAgendaTitleWord(word: string): boolean {
+  return (AGENDA_TITLE_NOUNS as readonly string[]).includes(word.toLowerCase());
+}
+
+/** Shape match plus the same numeric bounds as the residual token path. */
+function isAgendaScheduleToken(raw: string): boolean {
+  if (isAgendaTitleWord(raw)) return true;
+  if (AGENDA_CLOCK_PART_RE.test(raw)) return isValidAgendaClock(raw);
+  if (AGENDA_ISO_DATE_RE.test(raw) || AGENDA_DMY_DATE_RE.test(raw)) return isValidAgendaDate(raw);
+  return false;
+}
+
+/**
+ * Clocks, calendar dates, and real list markers are not amounts.
+ * `send` is both a share verb and a transfer verb, so a clock in
+ * "send the agenda … 18:00" must not become a value transfer.
+ * An out-of-range clock or date is not a schedule token, so its digits
+ * stay. A bare quantity (`send 5000`, `item 3`, `50.`, `99:99`) still counts.
+ */
+function digitsOutsideSchedule(text: string): boolean {
+  AGENDA_LIST_MARKER_RE.lastIndex = 0;
+  AGENDA_CLOCK_RE.lastIndex = 0;
+  AGENDA_DATE_RE.lastIndex = 0;
+  const withoutMarkers = text.replace(AGENDA_LIST_MARKER_RE, (match, offset: number) => {
+    const following = text.slice(offset + match.length).trimStart();
+    AGENDA_FOLLOW_RE.lastIndex = 0;
+    const token = AGENDA_FOLLOW_RE.exec(following);
+    if (!token || !isAgendaScheduleToken(token[0])) return match;
+    return ' ';
+  });
+  const withoutClocks = withoutMarkers.replace(AGENDA_CLOCK_RE, (match) =>
+    isValidAgendaClock(match) ? ' ' : match,
+  );
+  const stripped = withoutClocks.replace(AGENDA_DATE_RE, (match) =>
+    isValidAgendaDate(match) ? ' ' : match,
+  );
+  return AGENDA_ND_RE.test(stripped);
+}
+
 function hasTransferVerbWithNumber(text: string): boolean {
-  return TRANSFER_VERB_RE.test(text) && /\d/.test(text);
+  return TRANSFER_VERB_RE.test(text) && digitsOutsideSchedule(text);
 }
 
 function leadingKind(text: string): ActionKind {
@@ -923,11 +1048,47 @@ function isAgendaShareRecipientWord(token: string): boolean {
  */
 const AGENDA_CHANNEL_NOUN_TOKEN = new Set(['channel', 'chat', 'gruppenchat', 'kanal']);
 
+/** `18` + `00` from `18:00`, optional seconds. Not `500` and not `99:99`. */
+function agendaClockTokenLen(tokens: readonly string[], index: number): number {
+  const hourTok = tokens[index];
+  const minuteTok = tokens[index + 1];
+  if (!hourTok || !minuteTok || !/^\d{1,2}$/.test(hourTok) || !/^\d{2}$/.test(minuteTok)) {
+    return 0;
+  }
+  const hour = Number(hourTok);
+  const minute = Number(minuteTok);
+  if (hour > 23 || minute > 59) return 0;
+  const secondTok = tokens[index + 2];
+  if (secondTok && /^\d{2}$/.test(secondTok) && Number(secondTok) <= 59) return 3;
+  return 2;
+}
+
+/** `29` `10` `2026` or `2026` `10` `29`. A lone number is not a date. */
+function agendaDateTokenLen(tokens: readonly string[], index: number): number {
+  const a = tokens[index];
+  const b = tokens[index + 1];
+  const c = tokens[index + 2];
+  if (!a || !b || !c || !/^\d+$/.test(a) || !/^\d+$/.test(b) || !/^\d+$/.test(c)) return 0;
+  const inMonth = (month: number) => month >= 1 && month <= 12;
+  const inDay = (day: number) => day >= 1 && day <= 31;
+  if (/^\d{4}$/.test(a) && /^\d{2}$/.test(b) && /^\d{2}$/.test(c)) {
+    const year = Number(a);
+    if (year >= 2000 && year <= 2100 && inMonth(Number(b)) && inDay(Number(c))) return 3;
+  }
+  if (/^\d{1,2}$/.test(a) && /^\d{1,2}$/.test(b) && /^\d{4}$/.test(c)) {
+    const year = Number(c);
+    if (year >= 2000 && year <= 2100 && inMonth(Number(b)) && inDay(Number(a))) return 3;
+  }
+  return 0;
+}
+
 /**
  * Fillers, plus one recipient after to/with, plus closed channel
- * phrases. The recipient is one content word (optional determiner).
- * A second name, "and Bob", or "the client list" as extra payload
- * does not pass. Residual tokens themselves are not rewritten.
+ * phrases, plus a clock or calendar date already split into numeric
+ * tokens (`18:00` → `18`,`00`; `at` / `um` may introduce the clock).
+ * The recipient is one content word (optional determiner).
+ * A second name, "and Bob", a lone quantity, or "the client list" as
+ * extra payload does not pass. Residual tokens themselves are not rewritten.
  */
 function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
   let recipientUsed = false;
@@ -940,6 +1101,23 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
       continue;
     }
     const token = tokens[i] ?? '';
+    const clock = agendaClockTokenLen(tokens, i);
+    if (clock > 0) {
+      i += clock;
+      prep = false;
+      continue;
+    }
+    const date = agendaDateTokenLen(tokens, i);
+    if (date > 0) {
+      i += date;
+      prep = false;
+      continue;
+    }
+    if ((token === 'at' || token === 'um') && agendaClockTokenLen(tokens, i + 1) > 0) {
+      i += 1 + agendaClockTokenLen(tokens, i + 1);
+      prep = false;
+      continue;
+    }
     if (AGENDA_SHARE_FILLER.has(token)) {
       if (AGENDA_SHARE_RECIPIENT_PREP.has(token)) prep = true;
       else if (!(prep && AGENDA_SHARE_RECIPIENT_DET.has(token))) prep = false;
@@ -962,19 +1140,103 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
   return true;
 }
 
+/** Schedule-payload path only. Longer text stays on the one closed-share check. */
+const AGENDA_SCHEDULE_MAX = 4096;
+
 /**
- * True only for a pure agenda share. Closed filler list, one recipient,
- * and closed channel phrases: when in doubt, unknown. Does not treat
- * "schick" as covering "schicken". Operative signals are decided on
- * the full text. A closed trailing constraint is ignored only after
- * that, and the share verb has to remain after that clause is removed.
+ * Operative words in a schedule body. Their presence makes the whole
+ * text unknown on the share path — never informational. `send` here is
+ * the body, not the share sentence, which is checked separately.
  */
-function isAgendaShareRequest(text: string): boolean {
+const AGENDA_BODY_OPERATIVE_RE =
+  /\b(?:give|grant(?:ing)?|access|admin|forward(?:ing)?|sign(?:ing)?|approve|approving|send(?:ing)?|pay(?:ing)?|transfer(?:ring)?|delete|book(?:ing)?|wire|wiring|publish(?:ing)?|merge|cancel(?:led|ed)?|upload|revoke|drop|rm)\b/iu;
+
+const AGENDA_SCHEDULE_LINE_RE = new RegExp(
+  `^${ND}{1,2}\\.\\s+((?:${AGENDA_CLOCK_SRC})|(?:${AGENDA_DATE_SRC}))\\s+(${AGENDA_TITLE_SRC})\\.?$`,
+  'iu',
+);
+
+function isDecimalDigit(c: string): boolean {
+  return /^\p{Nd}$/u.test(c);
+}
+
+/**
+ * First sentence end. A period between digits and a short list marker
+ * (`1.` before a clock) are not ends. One pass, one cut.
+ */
+function firstAgendaSentenceCut(text: string): number {
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] ?? '';
+    if (c === '\n' || c === '!' || c === '?') return i + 1;
+    if (c !== '.') continue;
+    const prev = text[i - 1] ?? '';
+    const next = text[i + 1] ?? '';
+    if (isDecimalDigit(prev) && isDecimalDigit(next)) continue;
+    if (isDecimalDigit(prev) && (next === '' || isJsWhitespace(next))) {
+      const before = text.slice(Math.max(0, i - 4), i);
+      if (/(?:^|[^\p{Nd}])\p{Nd}{1,2}$/u.test(before)) continue;
+    }
+    return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * Every line is `<n>. <clock|date> <title noun>`. Titles are the closed
+ * noun list. An operative word anywhere in the body rejects the body.
+ */
+function isAgendaSchedulePayload(suffix: string): boolean {
+  const body = suffix.trim();
+  if (!body || AGENDA_BODY_OPERATIVE_RE.test(body)) return false;
+  const lines = body.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0 || lines.length > 24) return false;
+  for (const line of lines) {
+    const match = AGENDA_SCHEDULE_LINE_RE.exec(line);
+    if (!match) return false;
+    const when = match[1] ?? '';
+    if (!isValidAgendaClock(when) && !isValidAgendaDate(when)) return false;
+    const title = (match[2] ?? '').toLowerCase();
+    if (!(AGENDA_TITLE_NOUNS as readonly string[]).includes(title)) return false;
+  }
+  return true;
+}
+
+/**
+ * Closed filler list on this span alone. Does not look for a trailing
+ * schedule — the caller does that, so this stays non-recursive.
+ * Callers invoke it once per request, not once per sentence.
+ */
+function isClosedAgendaShare(text: string): boolean {
   if (!text || !AGENDA_ANY_RE.test(text)) return false;
   if (textHasAgendaOperativeSignal(text)) return false;
   const shareText = withoutTrailingAgendaConstraints(text);
   if (!AGENDA_ANY_RE.test(shareText) || !AGENDA_SHARE_VERB_RE.test(shareText)) return false;
   return agendaShareResidualsAreClosed(agendaShareResidualTokens(text));
+}
+
+/**
+ * True only for a pure agenda share, including one whose trailing
+ * payload is a strict schedule. Closed filler list, one recipient,
+ * closed channel phrases, a clock, or a calendar date: when in doubt,
+ * unknown. Does not treat "schick" as covering "schicken". Operative
+ * signals are decided on the full text. A closed trailing constraint
+ * is ignored only after that, and the share verb has to remain after
+ * that clause is removed. `isClosedAgendaShare` runs once.
+ */
+function isAgendaShareRequest(text: string): boolean {
+  if (!text || !AGENDA_ANY_RE.test(text)) return false;
+  if (textHasAgendaOperativeSignal(text)) return false;
+  if (text.length > AGENDA_SCHEDULE_MAX) return isClosedAgendaShare(text);
+  const shareText = withoutTrailingAgendaConstraints(text);
+  const cut = firstAgendaSentenceCut(shareText);
+  if (cut > 0) {
+    const suffix = shareText.slice(cut).trim();
+    if (suffix) {
+      const prefix = shareText.slice(0, cut).trim();
+      return isClosedAgendaShare(prefix) && isAgendaSchedulePayload(suffix);
+    }
+  }
+  return isClosedAgendaShare(shareText);
 }
 
 /**
