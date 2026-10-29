@@ -78,11 +78,15 @@
  * Zugangsdaten senden.") is removed before the filler check. The share
  * verb must still be in what remains. Amounts, wire, ship, and
  * destructive signals are read on the full text first. Those constraint
- * words are not fillers. Anything else stays
+ * words are not fillers. A clock (`18:00`), a calendar date
+ * (`29.10.2026` / `2026-10-29`), or a trailing numbered schedule is
+ * part of the same share, not a second action and not a transfer
+ * amount. `send` plus a real quantity still is. Anything else stays
  * `unknown` (text-only UNCERTAIN; declared informational still
  * fail-closes). A pure agenda-share *mandate* does not unlock the
  * #38/#47 informational allow path for a different action: the action
- * must also be a pure agenda share. Otherwise an undeclared pair
+ * must also be a pure agenda share (a schedule payload counts as that
+ * share). Otherwise an undeclared pair
  * abstains (unknown/unknown → UNCERTAIN). Caller-declared kinds keep
  * main's outcome: that mandate was unknown, so a declared
  * informational pair does not agree and fail-closes
@@ -760,8 +764,22 @@ function hasEthAddress(text: string): boolean {
   return ETH_ADDR_RE.test(text);
 }
 
+/**
+ * Clocks, calendar dates, and list indexes are not amounts.
+ * `send` is both a share verb and a transfer verb, so a digit anywhere
+ * in "send the agenda … 18:00" must not become a value transfer.
+ * A bare quantity (`send 5000`, `item 3`, `12000`) still counts.
+ */
+function digitsOutsideSchedule(text: string): boolean {
+  const stripped = text
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
+    .replace(/\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}\.\d{1,2}\.\d{2,4})\b/g, ' ')
+    .replace(/(?:^|[\n.;])\s*\d{1,2}[.)](?=\s|$)/g, ' ');
+  return /\d/.test(stripped);
+}
+
 function hasTransferVerbWithNumber(text: string): boolean {
-  return TRANSFER_VERB_RE.test(text) && /\d/.test(text);
+  return TRANSFER_VERB_RE.test(text) && digitsOutsideSchedule(text);
 }
 
 function leadingKind(text: string): ActionKind {
@@ -923,11 +941,47 @@ function isAgendaShareRecipientWord(token: string): boolean {
  */
 const AGENDA_CHANNEL_NOUN_TOKEN = new Set(['channel', 'chat', 'gruppenchat', 'kanal']);
 
+/** `18` + `00` from `18:00`, optional seconds. Not `500` and not `99:99`. */
+function agendaClockTokenLen(tokens: readonly string[], index: number): number {
+  const hourTok = tokens[index];
+  const minuteTok = tokens[index + 1];
+  if (!hourTok || !minuteTok || !/^\d{1,2}$/.test(hourTok) || !/^\d{2}$/.test(minuteTok)) {
+    return 0;
+  }
+  const hour = Number(hourTok);
+  const minute = Number(minuteTok);
+  if (hour > 23 || minute > 59) return 0;
+  const secondTok = tokens[index + 2];
+  if (secondTok && /^\d{2}$/.test(secondTok) && Number(secondTok) <= 59) return 3;
+  return 2;
+}
+
+/** `29` `10` `2026` or `2026` `10` `29`. A lone number is not a date. */
+function agendaDateTokenLen(tokens: readonly string[], index: number): number {
+  const a = tokens[index];
+  const b = tokens[index + 1];
+  const c = tokens[index + 2];
+  if (!a || !b || !c || !/^\d+$/.test(a) || !/^\d+$/.test(b) || !/^\d+$/.test(c)) return 0;
+  const inMonth = (month: number) => month >= 1 && month <= 12;
+  const inDay = (day: number) => day >= 1 && day <= 31;
+  if (/^\d{4}$/.test(a) && /^\d{2}$/.test(b) && /^\d{2}$/.test(c)) {
+    const year = Number(a);
+    if (year >= 2000 && year <= 2100 && inMonth(Number(b)) && inDay(Number(c))) return 3;
+  }
+  if (/^\d{1,2}$/.test(a) && /^\d{1,2}$/.test(b) && /^\d{4}$/.test(c)) {
+    const year = Number(c);
+    if (year >= 2000 && year <= 2100 && inMonth(Number(b)) && inDay(Number(a))) return 3;
+  }
+  return 0;
+}
+
 /**
  * Fillers, plus one recipient after to/with, plus closed channel
- * phrases. The recipient is one content word (optional determiner).
- * A second name, "and Bob", or "the client list" as extra payload
- * does not pass. Residual tokens themselves are not rewritten.
+ * phrases, plus a clock or calendar date already split into numeric
+ * tokens (`18:00` → `18`,`00`; `at` / `um` may introduce the clock).
+ * The recipient is one content word (optional determiner).
+ * A second name, "and Bob", a lone quantity, or "the client list" as
+ * extra payload does not pass. Residual tokens themselves are not rewritten.
  */
 function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
   let recipientUsed = false;
@@ -940,6 +994,23 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
       continue;
     }
     const token = tokens[i] ?? '';
+    const clock = agendaClockTokenLen(tokens, i);
+    if (clock > 0) {
+      i += clock;
+      prep = false;
+      continue;
+    }
+    const date = agendaDateTokenLen(tokens, i);
+    if (date > 0) {
+      i += date;
+      prep = false;
+      continue;
+    }
+    if ((token === 'at' || token === 'um') && agendaClockTokenLen(tokens, i + 1) > 0) {
+      i += 1 + agendaClockTokenLen(tokens, i + 1);
+      prep = false;
+      continue;
+    }
     if (AGENDA_SHARE_FILLER.has(token)) {
       if (AGENDA_SHARE_RECIPIENT_PREP.has(token)) prep = true;
       else if (!(prep && AGENDA_SHARE_RECIPIENT_DET.has(token))) prep = false;
@@ -963,18 +1034,126 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
 }
 
 /**
- * True only for a pure agenda share. Closed filler list, one recipient,
- * and closed channel phrases: when in doubt, unknown. Does not treat
- * "schick" as covering "schicken". Operative signals are decided on
- * the full text. A closed trailing constraint is ignored only after
- * that, and the share verb has to remain after that clause is removed.
+ * Sentence ends. A period between digits (`29.10.2026`, `10.50`) and a
+ * short list marker (`1.`) are not ends, so a schedule is not sliced
+ * into a fake second action.
  */
-function isAgendaShareRequest(text: string): boolean {
+function agendaSentenceCutIndexes(text: string): number[] {
+  const cuts: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] ?? '';
+    if (c === '\n' || c === '!' || c === '?') {
+      cuts.push(i + 1);
+      continue;
+    }
+    if (c !== '.') continue;
+    const prev = text[i - 1] ?? '';
+    const next = text[i + 1] ?? '';
+    if (/\d/.test(prev) && /\d/.test(next)) continue;
+    if (/\d/.test(prev) && (next === '' || isJsWhitespace(next))) {
+      const before = text.slice(Math.max(0, i - 4), i);
+      if (/(?:^|[^0-9])\d{1,2}$/.test(before)) continue;
+    }
+    cuts.push(i + 1);
+  }
+  return cuts;
+}
+
+function agendaPieces(text: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (const cut of agendaSentenceCutIndexes(text)) {
+    parts.push(text.slice(start, cut));
+    start = cut;
+  }
+  if (start < text.length) parts.push(text.slice(start));
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+/** Numbered item, clock, or calendar date. Not a bare quantity. */
+function hasAgendaScheduleMarker(text: string): boolean {
+  return (
+    /(?:^|[\n.;])\s*\d{1,2}[.)](?=\s|$)/.test(text) ||
+    /\b\d{1,2}:\d{2}\b/.test(text) ||
+    /\b\d{4}-\d{2}-\d{2}\b/.test(text) ||
+    /\b\d{1,2}\.\d{1,2}\.\d{2,4}\b/.test(text)
+  );
+}
+
+/**
+ * Title words on a schedule line are the agenda, not a new objective.
+ * Denied operative words (pay, password, book, wallet, …) still fail.
+ * Digit tokens are the item index, the clock, or the date.
+ */
+function agendaScheduleTokensAreSafe(suffix: string): boolean {
+  const tokens = suffix
+    .replace(/['’]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9äöü]+/)
+    .filter(Boolean);
+  for (const token of tokens) {
+    if (/^\d+$/.test(token)) continue;
+    if (AGENDA_SHARE_FILLER.has(token)) continue;
+    if (token === 'at' || token === 'um') continue;
+    if (AGENDA_RECIPIENT_DENY.has(token)) return false;
+  }
+  return true;
+}
+
+function isAgendaSchedulePayload(suffix: string): boolean {
+  const body = suffix.trim();
+  if (!body || !hasAgendaScheduleMarker(body)) return false;
+  if (!agendaScheduleTokensAreSafe(body)) return false;
+  const pieces = agendaPieces(body);
+  if (pieces.length === 0) return false;
+  return pieces.every((piece) => hasAgendaScheduleMarker(piece));
+}
+
+/**
+ * Closed filler list on this span alone. Does not look for a trailing
+ * schedule — the caller does that, so this stays non-recursive.
+ */
+function isClosedAgendaShare(text: string): boolean {
   if (!text || !AGENDA_ANY_RE.test(text)) return false;
   if (textHasAgendaOperativeSignal(text)) return false;
   const shareText = withoutTrailingAgendaConstraints(text);
   if (!AGENDA_ANY_RE.test(shareText) || !AGENDA_SHARE_VERB_RE.test(shareText)) return false;
   return agendaShareResidualsAreClosed(agendaShareResidualTokens(text));
+}
+
+/**
+ * A pure share sentence followed by the agenda itself (numbered lines,
+ * clocks, dates). The body is payload. A second instruction in that
+ * body is not. Operative signals are decided on the full text first.
+ */
+function agendaShareWithSchedulePayload(text: string): boolean {
+  if (textHasAgendaOperativeSignal(text)) return false;
+  const shareText = withoutTrailingAgendaConstraints(text);
+  for (const cut of agendaSentenceCutIndexes(shareText)) {
+    const prefix = shareText.slice(0, cut).trim();
+    const suffix = shareText.slice(cut).trim();
+    if (!suffix) continue;
+    if (!isClosedAgendaShare(prefix)) continue;
+    if (!isAgendaSchedulePayload(suffix)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True only for a pure agenda share, including one whose trailing
+ * payload is a schedule. Closed filler list, one recipient, closed
+ * channel phrases, a clock, or a calendar date: when in doubt, unknown.
+ * Does not treat "schick" as covering "schicken". Operative signals
+ * are decided on the full text. A closed trailing constraint is
+ * ignored only after that, and the share verb has to remain after
+ * that clause is removed.
+ */
+function isAgendaShareRequest(text: string): boolean {
+  if (!text || !AGENDA_ANY_RE.test(text)) return false;
+  if (textHasAgendaOperativeSignal(text)) return false;
+  if (isClosedAgendaShare(text)) return true;
+  return agendaShareWithSchedulePayload(text);
 }
 
 /**

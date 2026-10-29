@@ -2197,7 +2197,6 @@ describe('agenda/meeting informational terms', () => {
 
   it('agenda-body prose, money, and den-window leaks stay off the share path', () => {
     const blocked = [
-      "Post today's board agenda into the internal Vorstand agents channel. 1. 10:00 Opening.",
       `${longAgendaShare} Budget discussion only.`,
       'Post the board agenda into the internal Vorstand channel. Reserve 12000 EUR.',
       'Send the agenda item 3 to the team',
@@ -2689,6 +2688,95 @@ describe('agenda/meeting informational terms', () => {
       expect(financialRecipientAuthorized(spendMandate, spendAction)).toBe(false);
       expect(performance.now() - spendStart, `spend span ${n}`).toBeLessThan(boundMs);
     }
+  });
+
+  it('a clock, a calendar date, or a trailing schedule stays a pure agenda share', () => {
+    const texts = [
+      "Post today's board agenda into the internal Vorstand agents channel. 1. 10:00 Opening.",
+      "Share today's board agenda with the Vorstand agents in our internal channel.\n1. 18:00 Opening\n2. 18:20 Decision",
+      "Poste die Agenda für den Vorstand in den Gruppenchat.\n1. 18:00 Eröffnung\n2. 18:15 Finanzen",
+      'Send the meeting agenda for Thursday to Anna by email.\n1. 18:00 Opening',
+      "Share today's board agenda with the Vorstand agents in our internal channel. Meeting on 29.10.2026 at 18:00.",
+      'Send the agenda to Anna at 18:00.',
+      'Send the meeting agenda on 29.10.2026 to Anna.',
+      'Send the agenda on 2026-10-29 at 18:00 to Anna.',
+      "Share today's board agenda with the Vorstand agents. Do not send money.\n1. 18:00 Opening",
+    ];
+    for (const text of texts) expectAgendaShareAllow(text, longAgendaShare);
+
+    const clock = classifyActionAuthKind(
+      'Send the agenda to Anna at 18:00.',
+      mcpEvidence(longAgendaShare, 'Send the agenda to Anna at 18:00.', 'Time is not a quantity.'),
+      declaredInfo,
+    );
+    expect(clock.value_transfer).toBe(false);
+    expect(clock.prose_action_kind).toBe('informational');
+    expect(clock.prose_mandate_kind).toBe('informational');
+    expect(clock.objective_mismatch).toBe(false);
+  });
+
+  it('a schedule does not launder an amount, a credential, or a second instruction', () => {
+    const cases: Array<{ text: string; kind: 'unknown' | 'value_transfer' | 'deploy_ship' }> = [
+      {
+        text: "Post today's board agenda into the internal Vorstand agents channel. 1. Transfer 12000 EUR.",
+        kind: 'value_transfer',
+      },
+      {
+        text: 'Share the agenda with the team.\n1. 18:00 Opening\n2. Wire the vendor payment',
+        kind: 'value_transfer',
+      },
+      {
+        text: 'Send the agenda to Anna at 18:00 and transfer 500 EUR',
+        kind: 'value_transfer',
+      },
+      { text: 'Send the agenda item 3 to the team', kind: 'value_transfer' },
+      { text: 'Send 5000 to Anna', kind: 'value_transfer' },
+      { text: 'Post the board agenda to the Vorstand chat.\n1. Book a room', kind: 'unknown' },
+      {
+        text: 'Post the board agenda to the Vorstand chat.\n1. Forward the password',
+        kind: 'unknown',
+      },
+      {
+        text: 'Post the board agenda to the Vorstand chat.\n1. 18:00 Opening\nInvite the press.',
+        kind: 'unknown',
+      },
+      {
+        text: 'Post the board agenda to the Vorstand chat. 1. Deploy the release',
+        kind: 'deploy_ship',
+      },
+      {
+        text: 'Post the board agenda to the Vorstand chat.\n1. 18:00 Opening. Do not send money unless the board asks.',
+        kind: 'unknown',
+      },
+    ];
+    for (const { text, kind } of cases) {
+      const ev = mcpEvidence(longAgendaShare, text, 'Schedule must not widen.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe(kind);
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+
+    const quantity = classifyActionAuthKind(
+      'Send the agenda item 3 to the team',
+      mcpEvidence(longAgendaShare, 'Send the agenda item 3 to the team', 'Quantity.'),
+      declaredInfo,
+    );
+    expect(quantity.value_transfer).toBe(true);
+    const priced = classifyActionAuthKind(
+      'Send the agenda to Anna at 18:00 and transfer 500 EUR',
+      mcpEvidence(longAgendaShare, 'Send the agenda to Anna at 18:00 and transfer 500 EUR', 'Price.'),
+      declaredInfo,
+    );
+    expect(priced.value_transfer).toBe(true);
+    expect(priced.prose_action_kind).toBe('value_transfer');
   });
 
   it('FYI/notify still wins over ship (agenda list does not change that exception)', () => {

@@ -377,14 +377,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   // MAX_UINT256. Checkpoint often omits per-step prose, and the fallback
   // embeds that criterion. The numeric-claim gate then rewrites it to
   // "[objection_unverified] numeric claim without bound evidence" even
-  // when the pair is a pure informational share with no spend. Omit the
-  // criterion body only for that positive informational pair. Every other
-  // kind still embeds it, so the gate is unchanged for them. Model-written
-  // numeric reasons are still bound.
+  // when both resolved kinds are informational and there is no spend.
+  // That rewrite is the criterion template, not a number in the action.
+  // Omit the criterion body for every informational/informational pair,
+  // including one that still fail-closes as objective_mismatch. Every
+  // other kind still embeds it, so the gate is unchanged for them.
+  // Model-written numeric reasons are still bound. The verdict is not.
   const omitInformationalCriterionBody =
     actionAuthKind?.action_kind === 'informational' &&
-    actionAuthKind?.mandate_kind === 'informational' &&
-    !objectiveMismatch;
+    actionAuthKind?.mandate_kind === 'informational';
 
   // Cite/normalize against the same string the cascade saw. For
   // action_authorization that is sanitized evidence (caller structural_fact
