@@ -135,6 +135,18 @@
   `false_ALLOW=0`, `FALSE_BLOCK_BASELINE=0`, engine errors still fail.
 
 ### Changed
+- Pin `pot-cli` to npm `0.8.13` (commit `a8c569a4aacad895774bb6411a83fc8d2b9b07e5`,
+  [pot-cli v0.8.13](https://github.com/ThoughtProof/pot-cli/releases/tag/v0.8.13)).
+  The release contains the
+  [pot-cli PR #55](https://github.com/ThoughtProof/pot-cli/pull/55)
+  mandate-label and boundary fixes. `@pot-sdk2/bridge` stays `1.2.0` and
+  Node.js stays `>=22`. No vendored patch is applied on install. The
+  historical `0.8.10-tp.2` tarball remains a rollback artifact; its quote
+  and reasoning markers are already in the published package, and
+  reapplying that tarball would drop the `0.8.13` mandate fixes.
+  `/sentinel/health` reports `pot_cli: 0.8.13`. Package evidence is in
+  `vendor/PATCHES.md`. Committed canonical v2 fixtures keep `potCli`
+  `0.8.12`; live exports still read the installed version.
 - **A board agenda post is a pure share.** `post` / `poste` / `posten` /
   `posting` count as share verbs, and a closed destination set
   (`in` / `im`, `chat`, `Gruppenchat`, `Vorstand`, `board`, `group`)
