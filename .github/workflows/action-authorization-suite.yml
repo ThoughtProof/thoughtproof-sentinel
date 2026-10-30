@@ -14,6 +14,21 @@
 # base_url is explicitly set to a Preview that has
 # VERCEL_AUTOMATION_BYPASS_SECRET configured).
 #
+# pull_request does not resolve a Vercel Preview URL. The event has no
+# deployment URL; github.sha is the merge commit while Vercel deploys
+# the head SHA; the deploy status races this job; a protection 401 is
+# an errors hard-fail. No preview lookup is attempted and no secrets
+# are added.
+# On pull_request, when the measured origin is production, false_BLOCK
+# above FALSE_BLOCK_BASELINE (named constant = 0) is informational:
+# the job does not fail. false_ALLOW > 0 and transport/parse /
+# engine-degraded errors > 0 still fail. An explicit non-production
+# SENTINEL_BASE_URL keeps the false_BLOCK gate. schedule and
+# workflow_dispatch still fail when false_BLOCK > FALSE_BLOCK_BASELINE.
+# Example: PR #117 failed false_BLOCK=2>0 (UNCERTAIN
+# conditional_allow_no_machine_proof) against production with
+# false_ALLOW=0 and errors=0. That variance is not the PR branch.
+#
 # Required repository secrets (do not hardcode keys):
 #   SENTINEL_NIGHTLY_API_KEY     dedicated X-Sentinel-Key for this job
 #                                (preferred; keep organic/customer keys
@@ -31,6 +46,9 @@
 # Gate:
 #   fail if false_ALLOW > 0 or transport/parse / engine-degraded errors > 0
 #   fail if false_BLOCK > FALSE_BLOCK_BASELINE (named constant = 0).
+#   pull_request against production: false_BLOCK does not fail the job
+#   (informational). false_ALLOW > 0 and errors > 0 still do.
+#   schedule and workflow_dispatch keep this gate intact.
 #   Engine degradation (promotion=engine_budget_exhausted / degradedMode)
 #   increments errors — not false_BLOCK. false_ALLOW is never swallowed
 #   by the degraded→errors remap. Night is not evaluable; fail reason
@@ -193,7 +211,51 @@ jobs:
           fi
           # Prefer nightly-named env for the runner's resolveApiKey order.
           export SENTINEL_NIGHTLY_API_KEY="$KEY"
+          set +e
           node scripts/action-authorization-suite.mjs
+          suite_ec=$?
+          set -e
+          # schedule and workflow_dispatch: the suite exit code is the job.
+          # pull_request success, and any exit other than the quality gate,
+          # pass through unchanged (missing key already exited above).
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$suite_ec" -eq 0 ]; then
+            exit "$suite_ec"
+          fi
+          if [ "$suite_ec" -ne 1 ]; then
+            echo "::error::PR live suite exited ${suite_ec}. Informational false_BLOCK applies only to gate exit 1."
+            exit "$suite_ec"
+          fi
+          REPORT="${ACTION_AUTH_SUITE_REPORT_PATH}"
+          if [ ! -f "$REPORT" ]; then
+            echo "::error::PR live suite exited 1 without a report; failing closed."
+            exit 1
+          fi
+          # Do not echo SENTINEL_BASE_URL. Origin comparison stays in the helper.
+          node --input-type=module - "$REPORT" <<'EOF'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { resolveBaseUrl } from './scripts/action-authorization-suite.mjs';
+          import {
+            PRODUCTION_SUITE_ORIGIN,
+            pullRequestProductionFalseBlockExit,
+          } from './scripts/lib/action-auth-suite-metrics.mjs';
+
+          const report = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+          const origin = resolveBaseUrl(process.env);
+          const code = pullRequestProductionFalseBlockExit({ origin, report });
+          const reasons = Array.isArray(report?.gate?.fail_reasons)
+            ? report.gate.fail_reasons.map((reason) => String(reason)).join(', ')
+            : '(none)';
+          if (code === 0) {
+            const line = `PR live suite informational: measured ${PRODUCTION_SUITE_ORIGIN}; false_BLOCK does not fail this job (${reasons}). false_ALLOW=${report.false_ALLOW} errors=${report.errors}. schedule and workflow_dispatch still fail when false_BLOCK > FALSE_BLOCK_BASELINE.`;
+            console.log(`::warning::${line}`);
+            if (process.env.GITHUB_STEP_SUMMARY) {
+              appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${line}\n`);
+            }
+            process.exit(0);
+          }
+          console.error(`::error::PR live suite hard fail: false_ALLOW=${report?.false_ALLOW} errors=${report?.errors} reasons=${reasons}`);
+          process.exit(1);
+          EOF
 
       - name: Retain suite receipts even when the quality gate fails
         if: always()

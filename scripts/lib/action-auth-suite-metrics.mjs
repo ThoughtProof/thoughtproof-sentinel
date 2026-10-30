@@ -94,6 +94,40 @@ export const FALSE_BLOCK_BASELINE_CASES = [
 ];
 
 export const FIRST_SHIP_FAIL_ON_FALSE_ALLOW = true;
+
+/**
+ * Production origin the nightly suite measures.
+ * pull_request does not follow a Vercel Preview URL; false_BLOCK
+ * against this origin is prod LLM variance, not the PR's code.
+ */
+export const PRODUCTION_SUITE_ORIGIN = 'https://sentinel.thoughtproof.ai';
+
+/**
+ * Job exit for a pull_request live suite that already exited 1.
+ * Returns 0 only when `origin` is production and the gate failed
+ * solely on false_BLOCK (`false_ALLOW === 0`, `errors === 0`, every
+ * fail_reason starts with `false_BLOCK=`). Any false_ALLOW, error,
+ * other fail_reason, missing report, or non-production origin
+ * (explicit preview override) returns 1 so the ratchet stays in force.
+ * Callers still fail closed when the suite exits with anything but 1.
+ *
+ * @param {{ origin?: string, report?: { false_ALLOW?: unknown, errors?: unknown, gate?: { exit_code?: unknown, exitCode?: unknown, fail_reasons?: unknown } } }} [input]
+ * @returns {0 | 1}
+ */
+export function pullRequestProductionFalseBlockExit({ origin, report } = {}) {
+  if (origin !== PRODUCTION_SUITE_ORIGIN) return 1;
+  if (!report || typeof report !== 'object') return 1;
+  const gate = report.gate;
+  if (!gate || typeof gate !== 'object') return 1;
+  const exitCode = gate.exit_code ?? gate.exitCode;
+  if (exitCode !== 1) return 1;
+  if (!Array.isArray(gate.fail_reasons) || gate.fail_reasons.length === 0) return 1;
+  const reasons = gate.fail_reasons.map((r) => String(r));
+  if (reasons.some((r) => !r.startsWith('false_BLOCK='))) return 1;
+  if (report.false_ALLOW !== 0 || report.errors !== 0) return 1;
+  return 0;
+}
+
 /**
  * Historical: the false_BLOCK ratchet already tightened (baseline 4→0)
  * after #73 / three green suite nights. Not future work.

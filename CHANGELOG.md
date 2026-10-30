@@ -58,6 +58,15 @@
   the old release. It is not evidence of a v2 regression.
 
 ### Fixed
+- **Live suite on `pull_request`:** the job still measures production
+  (`https://sentinel.thoughtproof.ai` unless `SENTINEL_BASE_URL` is an
+  explicit non-production override). It does not resolve the PR's
+  Vercel Preview URL. When the measured origin is production,
+  `false_BLOCK` above `FALSE_BLOCK_BASELINE` is informational and does
+  not fail the job (prod LLM variance, as on #117: `false_BLOCK=2>0`,
+  `false_ALLOW=0`, `errors=0`). `false_ALLOW > 0` and errors still
+  fail. `schedule` and `workflow_dispatch` gates are unchanged,
+  including `false_BLOCK`. No new secrets.
 - A near-miss after a negated agenda guard no longer stalls classification.
   `Do not send money` plus a long run of spaces (inside the request size)
   used to backtrack on overlapping whitespace in the guard pattern, the
