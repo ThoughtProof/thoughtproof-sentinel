@@ -43,7 +43,11 @@ Labeled drain / in-scope measurement against live production
 `POST https://sentinel.thoughtproof.ai/sentinel/verify` (~20–25¢/night at
 `standard`, 27 × $0.008). Nightly GitHub Action (plus `workflow_dispatch`;
 also on PRs that touch the suite or engine). Preview is an optional
-override for PR/dispatch only.
+override for PR/dispatch only. The pull_request job does not look up
+that PR's Vercel Preview URL. Against production, `false_BLOCK` is
+informational and does not fail the job; `false_ALLOW` and errors
+still fail. An explicit non-production `SENTINEL_BASE_URL` keeps the
+`false_BLOCK` gate. `schedule` and `workflow_dispatch` keep the full gate.
 
 ```bash
 SENTINEL_NIGHTLY_API_KEY=… npm run suite:action-auth
@@ -57,7 +61,8 @@ and verify-log `agent=`) plus `agent_context.agent_id` so the 27 nightly
 receipts can be filtered from organic traffic.
 
 **First-ship baseline:** `false_ALLOW` must be **0**. `false_BLOCK` is a
-**ratchet**: the job fails if the count exceeds named `FALSE_BLOCK_BASELINE = 0`
+**ratchet**: the nightly and `workflow_dispatch` job fails if the count
+exceeds named `FALSE_BLOCK_BASELINE = 0`
 (first-ship occupants were ok-01 / ok-02 / ok-03 / ok-06; all ALLOW’d
 across three green suite nights). Changing that constant requires a
 CHANGELOG line. Suite-format ok-01/02/03 false_BLOCKs were a

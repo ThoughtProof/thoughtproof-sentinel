@@ -22,6 +22,8 @@ import {
   nightsSince,
   parseFailOnFalseBlock,
   parseIsoDate,
+  PRODUCTION_SUITE_ORIGIN,
+  pullRequestProductionFalseBlockExit,
   resolveGate,
   scoreRows,
 } from '../../scripts/lib/action-auth-suite-metrics.mjs';
@@ -650,6 +652,110 @@ describe('suite file + runner helpers', () => {
     expect(legacyMcp?.claim).not.toContain(suffix);
   });
 
+  it('pull_request production false_BLOCK is informational; false_ALLOW and errors still fail', () => {
+    expect(PRODUCTION_SUITE_ORIGIN).toBe('https://sentinel.thoughtproof.ai');
+
+    const reportFor = (score, extra = {}) => {
+      const gate = resolveGate(score, extra);
+      return {
+        false_ALLOW: score.false_ALLOW,
+        errors: score.errors,
+        gate: { exit_code: gate.exitCode, fail_reasons: gate.failReasons },
+      };
+    };
+
+    const prodFalseBlock = reportFor({
+      errors: 0,
+      false_ALLOW: 0,
+      false_BLOCK: 2,
+      error_failures: [],
+    });
+    expect(prodFalseBlock.gate.fail_reasons).toEqual(['false_BLOCK=2>0']);
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: PRODUCTION_SUITE_ORIGIN,
+        report: prodFalseBlock,
+      }),
+    ).toBe(0);
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: 'https://sentinel.thoughtproof.ai/',
+        report: prodFalseBlock,
+      }),
+    ).toBe(1);
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: 'https://thoughtproof-sentinel-preview.vercel.app',
+        report: prodFalseBlock,
+      }),
+    ).toBe(1);
+
+    const leak = reportFor({
+      errors: 0,
+      false_ALLOW: 1,
+      false_BLOCK: 2,
+      error_failures: [],
+    });
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: PRODUCTION_SUITE_ORIGIN,
+        report: leak,
+      }),
+    ).toBe(1);
+
+    const degraded = reportFor({
+      errors: 1,
+      false_ALLOW: 0,
+      false_BLOCK: 0,
+      error_failures: [{ promotion_reason: 'engine_budget_exhausted' }],
+    });
+    expect(degraded.gate.fail_reasons).toContain('errors=1 engine_degraded');
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: PRODUCTION_SUITE_ORIGIN,
+        report: degraded,
+      }),
+    ).toBe(1);
+
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: PRODUCTION_SUITE_ORIGIN,
+        report: {
+          false_ALLOW: 0,
+          errors: 0,
+          gate: { exit_code: 1, fail_reasons: ['false_BLOCK=2>0', 'false_ALLOW=1'] },
+        },
+      }),
+    ).toBe(1);
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: PRODUCTION_SUITE_ORIGIN,
+        report: {
+          false_ALLOW: '0',
+          errors: 0,
+          gate: { exit_code: 1, fail_reasons: ['false_BLOCK=1>0'] },
+        },
+      }),
+    ).toBe(1);
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: PRODUCTION_SUITE_ORIGIN,
+        report: {
+          false_ALLOW: 0,
+          errors: 0,
+          gate: { exit_code: 0, fail_reasons: ['false_BLOCK=1>0'] },
+        },
+      }),
+    ).toBe(1);
+    expect(pullRequestProductionFalseBlockExit()).toBe(1);
+    expect(
+      pullRequestProductionFalseBlockExit({
+        origin: PRODUCTION_SUITE_ORIGIN,
+        report: { false_ALLOW: 0, errors: 0, gate: { exit_code: 1, fail_reasons: [] } },
+      }),
+    ).toBe(1);
+  });
+
   it('workflow defaults to production and documents the ratchet + dedicated key', () => {
     const yml = readFileSync(join(root, '.github/workflows/action-authorization-suite.yml'), 'utf8');
     expect(yml).toContain('cron:');
@@ -667,6 +773,14 @@ describe('suite file + runner helpers', () => {
     expect(yml).toContain('engine_degraded');
     expect(yml).toContain('false_ALLOW is never swallowed by the degraded→errors remap');
     expect(yml).toContain('PR runs always measure production by default');
+    expect(yml).toContain('pull_request does not resolve a Vercel Preview URL');
+    expect(yml).toContain('pullRequestProductionFalseBlockExit');
+    expect(yml).toContain(
+      'schedule and workflow_dispatch still fail when false_BLOCK > FALSE_BLOCK_BASELINE',
+    );
+    expect(yml).toContain(
+      "SENTINEL_BASE_URL: ${{ github.event_name == 'schedule' && 'https://sentinel.thoughtproof.ai' || (github.event.inputs.base_url || vars.SENTINEL_BASE_URL || 'https://sentinel.thoughtproof.ai') }}",
+    );
     expect(yml).not.toContain('echo "SUITE_TARGET=${SENTINEL_BASE_URL}"');
     expect(yml).not.toContain('ok-01/02/03 + ok-06');
     expect(yml).not.toContain('remaining named baseline case is primarily ok-06');
