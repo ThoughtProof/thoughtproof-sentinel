@@ -68,10 +68,14 @@
  * Agenda/meeting terms are not FYI markers. They classify as
  * informational only for a pure share request (`share` / `send` /
  * `sende` / `schick` / `schicke` / `teile` / `post` / `poste` /
- * `posten` / `posting`, optionally "with the team" / "an das Team" /
- * "in den Gruppenchat" / "to the Vorstand chat", one recipient after
- * `to` / `with`, a weekday qualifier, or a closed channel phrase such
- * as "by email" / "as a text message") with no other action verb.
+ * `posten` / `posting`, or a leading `email` (`Email the Thursday
+ * agenda to Anna` — not `email` later in the sentence), optionally
+ * "with the team" / "an das Team" / "in den Gruppenchat" / "to the
+ * Vorstand chat", one recipient after `to` / `with`, a weekday
+ * qualifier, the filler `document` ("agenda document"), a closed
+ * channel phrase such as "by email" / "via email" / "as a text
+ * message", or the closed phrase "an email to <one name> containing
+ * the <agenda>") with no other action verb.
  * A trailing sentence that is only a closed negated constraint
  * ("Do not send money, credentials, or anything outside the internal
  * channel.", "Never share credentials.", "Kein Geld, keine
@@ -305,11 +309,14 @@ const AGENDA_ANY_RE = new RegExp(
  * "by text", "as a text message", "as a message") are tolerated on
  * top of that set. A second name, a second recipient, or any other
  * token stays unknown. `post` / `poste` / `posten` / `posting` are
- * share verbs, not a separate class. Ship, merge, delete, rm,
- * payment, and wire still fail the request before the filler check.
+ * share verbs, not a separate class. `email` is a share verb only
+ * when it leads the text (a start-of-string lookbehind on that
+ * alternative). "by email" / "via email" do not match it, so they
+ * stay channel phrases. Ship, merge, delete, rm, payment, and wire
+ * still fail the request before the filler check.
  */
 const AGENDA_SHARE_VERB =
-  '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting)';
+  '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting|(?<=^\\s*)email)';
 const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
 /**
  * "into the internal Vorstand agent channel" / "to the Vorstand chat" /
@@ -352,6 +359,9 @@ const AGENDA_SHARE_FILLER = new Set([
   // filler. The leftover tokens are `as` and `message`. `message` is
   // not a share verb.
   'as', 'message',
+  // QA: "Send the Thursday team agenda document to Anna via email."
+  // The leftover noun on "agenda document". Not a share verb.
+  'document',
   // Weekday/date qualifiers on the agenda ("for Thursday",
   // "Thursday's"). `tuesday` / `today` / `tomorrow` are already
   // fillers. The possessive form is what the apostrophe strip leaves
@@ -982,6 +992,16 @@ const AGENDA_SHARE_CHANNEL_PHRASES: readonly (readonly string[])[] = [
   ['by', 'text'],
 ];
 
+/**
+ * "Send an email to Anna containing the Thursday team meeting agenda."
+ * Closed shape: `an` `email`, optional `to` plus one recipient
+ * (optional determiner), then `containing the`. The agenda noun is
+ * already stripped, so `the` is the word that introduced it. Not a
+ * channel phrase — `by email` / `via email` stay in the list above.
+ * A second name (`to Anna and Bob`) does not match.
+ */
+const AGENDA_EMAIL_CONTAINING_PHRASE = ['an', 'email', 'containing', 'the'] as const;
+
 /** Recipient introducer. `an` / `für` / `mit` are fillers, not this set. */
 const AGENDA_SHARE_RECIPIENT_PREP = new Set(['to', 'with']);
 
@@ -1048,6 +1068,37 @@ function isAgendaShareRecipientWord(token: string): boolean {
  */
 const AGENDA_CHANNEL_NOUN_TOKEN = new Set(['channel', 'chat', 'gruppenchat', 'kanal']);
 
+/**
+ * `an email [to <one recipient>] containing the`, or null.
+ * The recipient is the same one-word slot as the share path (optional
+ * determiner, not a channel noun). Anything else between `email` and
+ * `containing` — including a second name — fails the phrase.
+ */
+function agendaEmailContainingPhrase(
+  tokens: readonly string[],
+  index: number,
+): { length: number; recipient: boolean } | null {
+  const [an, email, containing, theWord] = AGENDA_EMAIL_CONTAINING_PHRASE;
+  if (tokens[index] !== an || tokens[index + 1] !== email) return null;
+  let n = 2;
+  let recipient = false;
+  if (tokens[index + n] === 'to') {
+    let nameAt = n + 1;
+    if (AGENDA_SHARE_RECIPIENT_DET.has(tokens[index + nameAt] ?? '')) nameAt += 1;
+    const name = tokens[index + nameAt] ?? '';
+    if (
+      !isAgendaShareRecipientWord(name) ||
+      AGENDA_CHANNEL_NOUN_TOKEN.has(tokens[index + nameAt + 1] ?? '')
+    ) {
+      return null;
+    }
+    n = nameAt + 1;
+    recipient = true;
+  }
+  if (tokens[index + n] !== containing || tokens[index + n + 1] !== theWord) return null;
+  return { length: n + 2, recipient };
+}
+
 /** `18` + `00` from `18:00`, optional seconds. Not `500` and not `99:99`. */
 function agendaClockTokenLen(tokens: readonly string[], index: number): number {
   const hourTok = tokens[index];
@@ -1084,8 +1135,9 @@ function agendaDateTokenLen(tokens: readonly string[], index: number): number {
 
 /**
  * Fillers, plus one recipient after to/with, plus closed channel
- * phrases, plus a clock or calendar date already split into numeric
- * tokens (`18:00` → `18`,`00`; `at` / `um` may introduce the clock).
+ * phrases, plus `an email [to <name>] containing the`, plus a clock
+ * or calendar date already split into numeric tokens (`18:00` →
+ * `18`,`00`; `at` / `um` may introduce the clock).
  * The recipient is one content word (optional determiner).
  * A second name, "and Bob", a lone quantity, or "the client list" as
  * extra payload does not pass. Residual tokens themselves are not rewritten.
@@ -1097,6 +1149,14 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
     const channel = agendaChannelPhraseLength(tokens, i);
     if (channel > 0) {
       i += channel;
+      prep = false;
+      continue;
+    }
+    const emailContaining = agendaEmailContainingPhrase(tokens, i);
+    if (emailContaining) {
+      if (emailContaining.recipient && recipientUsed) return false;
+      if (emailContaining.recipient) recipientUsed = true;
+      i += emailContaining.length;
       prep = false;
       continue;
     }

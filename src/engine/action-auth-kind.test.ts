@@ -2364,6 +2364,172 @@ describe('agenda/meeting informational terms', () => {
     );
   });
 
+  it('by email and via email stay channel phrases when email is only a leading share verb', () => {
+    expect(agendaShareResidualTokens('Send the meeting agenda for Thursday to Anna by email')).toEqual([
+      'the',
+      'for',
+      'thursday',
+      'to',
+      'anna',
+      'by',
+      'email',
+    ]);
+    expect(agendaShareResidualTokens('Send the agenda to Anna via email')).toEqual([
+      'the',
+      'to',
+      'anna',
+      'via',
+      'email',
+    ]);
+    expect(agendaShareResidualTokens('Email the Thursday agenda to Anna by email.')).toEqual([
+      'the',
+      'thursday',
+      'to',
+      'anna',
+      'by',
+      'email',
+    ]);
+    expect(agendaShareResidualTokens('Email the Thursday agenda to Anna.')).not.toContain('email');
+    expectAgendaShareAllow('Send the agenda to Anna by email');
+    expectAgendaShareAllow('Send the agenda to Anna via email');
+    expectAgendaShareAllow('Email the Thursday agenda to Anna by email.');
+
+    const midSentence = 'Please email the Thursday agenda to Anna.';
+    expect(agendaShareResidualTokens(midSentence)).toContain('email');
+    const ev = mcpEvidence(midSentence, midSentence, 'email is not the leading verb.');
+    const prose = classifyActionAuthKind(midSentence, ev);
+    expect(prose.prose_action_kind).toBe('unknown');
+    expect(prose.prose_mandate_kind).toBe('unknown');
+    expect(prose.objective_mismatch).toBe(false);
+    expect(prose.unclassified_abstention).toBe(true);
+    const caller = classifyActionAuthKind(midSentence, ev, declaredInfo);
+    expect(caller.prose_action_kind).toBe('unknown');
+    expect(caller.prose_mandate_kind).toBe('unknown');
+    expect(caller.objective_mismatch).toBe(true);
+    expect(allowlistFrom(caller, declaredInfo)).toBe(false);
+  });
+
+  it('QA email wordings of an agenda share are informational when declared informational', () => {
+    const pairs = [
+      ['Share the Thursday agenda with Anna by email.', 'Email the Thursday agenda to Anna.'],
+      [
+        'Share the Thursday team agenda with Anna by email.',
+        'Send the Thursday team agenda document to Anna via email.',
+      ],
+      [
+        'Please send the Thursday team meeting agenda to Anna by email.',
+        'Send an email to Anna containing the Thursday team meeting agenda.',
+      ],
+    ] as const;
+    expect(agendaShareResidualTokens('Email the Thursday agenda to Anna.')).toEqual([
+      'the',
+      'thursday',
+      'to',
+      'anna',
+    ]);
+    expect(agendaShareResidualTokens('Send the Thursday team agenda document to Anna via email.')).toEqual([
+      'the',
+      'thursday',
+      'team',
+      'document',
+      'to',
+      'anna',
+      'via',
+      'email',
+    ]);
+    expect(
+      agendaShareResidualTokens('Send an email to Anna containing the Thursday team meeting agenda.'),
+    ).toEqual(['an', 'email', 'to', 'anna', 'containing', 'the', 'thursday', 'team']);
+    for (const [mandate, action] of pairs) {
+      expectAgendaShareAllow(action, mandate);
+    }
+  });
+
+  it('email plus delete, pay, or ship stays an objective mismatch', () => {
+    const operative: Array<{
+      text: string;
+      action: 'value_transfer' | 'deploy_ship';
+      mandate: 'value_transfer' | 'deploy_ship' | 'unknown';
+    }> = [
+      {
+        text: 'Email the Thursday agenda to Anna and delete the production database',
+        action: 'deploy_ship',
+        mandate: 'unknown',
+      },
+      {
+        text: 'Email the Thursday agenda to Anna and pay 500 EUR',
+        action: 'value_transfer',
+        mandate: 'value_transfer',
+      },
+      {
+        text: 'Email the Thursday agenda to Anna and ship the release',
+        action: 'deploy_ship',
+        mandate: 'deploy_ship',
+      },
+      {
+        text: 'Send an email to Anna containing the Thursday agenda and delete the database',
+        action: 'deploy_ship',
+        mandate: 'unknown',
+      },
+      {
+        text: 'Send an email to Anna containing the Thursday agenda and pay 500 EUR',
+        action: 'value_transfer',
+        mandate: 'value_transfer',
+      },
+      {
+        text: 'Send an email to Anna containing the Thursday agenda and ship the release',
+        action: 'deploy_ship',
+        mandate: 'deploy_ship',
+      },
+    ];
+    for (const { text, action, mandate } of operative) {
+      const ev = mcpEvidence(text, text, 'Email wording plus an operative signal.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe(action);
+      expect(prose.prose_mandate_kind, text).toBe(mandate);
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(prose.prose_mandate_kind, text).not.toBe('informational');
+      expect(prose.objective_mismatch, text).toBe(true);
+      if (mandate !== action) expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe(action);
+      expect(caller.prose_mandate_kind, text).toBe(mandate);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+  });
+
+  it('a second recipient on an email agenda share stays unknown', () => {
+    const staysUnknown = [
+      'Email the Thursday agenda to Anna and Bob',
+      'Email the Thursday agenda to Anna and Bob by email',
+      'Send an email to Anna and Bob containing the Thursday team meeting agenda',
+      'Send an email to Anna containing the Thursday agenda and Bob',
+    ];
+    for (const text of staysUnknown) {
+      const ev = mcpEvidence(text, text, 'Second recipient.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+  });
+
   it('money, credentials, extra recipients, and operative signals stay off the agenda share', () => {
     const staysUnknown = [
       'Send the agenda to Anna and Bob',
