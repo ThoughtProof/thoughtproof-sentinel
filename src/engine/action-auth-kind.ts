@@ -63,8 +63,14 @@
  * structured `req.mandate`, so the financial gate never runs.
  *
  * Axis-selection keywords are English (`fyi`, `notify`, `tell`,
- * `inform`, `info`, `status ping`) plus a small DE informational set
- * (Informiere, Info an, Bescheid geben, Rückmeldung, Status an).
+ * `inform`, `info`, `informational only`, `status ping`) plus a small
+ * DE informational set (Informiere, Info an, Bescheid geben,
+ * Rückmeldung, Status an). Read-only verbs (`summarize` /
+ * `summarise`, `read`, `review`, `explain`, `describe`, and
+ * `zusammenfassen` / `lesen` / `erklären` / `prüfen`) are informational
+ * only when that same text has no value-transfer, permission-grant, or
+ * ship/deploy signal. They do not take the FYI-wins-over-ship exception.
+ * Caller-declared kinds still have to match the prose.
  * Agenda/meeting terms are not FYI markers. They classify as
  * informational only for a pure share request (`share` / `send` /
  * `sende` / `schick` / `schicke` / `teile` / `post` / `poste` /
@@ -85,7 +91,10 @@
  * words are not fillers. A clock (`18:00`) or a calendar date
  * (`29.10.2026` / `2026-10-29`) inside that sentence is not a transfer
  * amount. A trailing schedule is the same share only line by line,
- * `<n>. <clock|date> <closed title noun>`. An operative word in that
+ * `<n>. <clock|date> <closed title noun>` (meeting, review,
+ * strategy review, wrap-up, sync, standup, retro, planning, board
+ * meeting, Vorstand, Besprechung, plus the original opening/finance
+ * nouns). An operative word in that
  * body (`give`, `forward`, `sign`, `send`, `pay`, `delete`, …) stays
  * unknown. A lone `50.` / `50)` is a quantity, not an item marker.
  * `send` plus a real quantity still is a transfer. Anything else stays
@@ -232,7 +241,7 @@ const VALUE_RE =
   /\$\s*\d|\d[\d,.]*\s*(?:USDC|USD|ETH|EUR|WETH)\b|transfer\s+\d|swap\s+\d|bridge\s+\d|pay(?:ing)?\s+(?:invoice\s+)?\d|invoice\s*#?\s*\d|\bnotional\b|\bbudget\b|\bceiling\b/i;
 
 const PERMISSION_RE =
-  /MAX_UINT256|unlimited\s+approval|approve\s*\(|Permit2|blanket\s+permit|\ballowance\b|spend\s+authority/i;
+  /MAX_UINT256|unlimited\s+approval|approve\s*\(|Permit2|blanket\s+permit|\ballowance\b|spend\s+authority|\bgrant(?:ing)?\b(?:\s+\w+){0,5}\s+access\b/i;
 
 const DE_SHIP_VERBS = 'deploye|veröffentliche|veröffentlichen|ausliefern';
 
@@ -260,29 +269,72 @@ const SHIP_NEGATION_BEFORE_RE =
 const TEMPORAL_SHIP_BEFORE_RE =
   /(?:\bnach(?:\s+de[mnsr])?|\bafter(?:\s+the)?|\bfollowing(?:\s+the)?)\s+$/i;
 
+/**
+ * FYI heads. These still win over a ship mention ("Notify … we are
+ * shipping"). `informational only` is on this axis: `\binfo\b` does not
+ * match that phrase.
+ */
+const EN_FYI_HEAD =
+  '(?:informational\\s+only|fyi|notify|notifying|tell|telling|inform|info|status(?:\\s+ping)?|release\\s+notes)';
+
+/**
+ * Read-only verbs. Informational only when the same text has no
+ * value-transfer, permission-grant, or positive ship/deploy signal.
+ * They do not suppress ship the way FYI does.
+ */
+const EN_READONLY_VERB =
+  '(?:summari[sz]ing|summari[sz]e|reading|read|reviewing|review|explaining|explain|describing|describe)';
+
 /** English informational heads (no language-specific particles). */
-const EN_INFO_HEAD =
-  '(?:fyi|notify|notifying|tell|telling|inform|info|status(?:\\s+ping)?|release\\s+notes)';
+const EN_INFO_HEAD = `(?:${EN_FYI_HEAD}|${EN_READONLY_VERB})`;
 
 /**
  * Small DE informational set (issue #47) — not full i18n.
  * Informiere / Info an / Bescheid / Rückmeldung. "Status an" is covered
  * by the English `status` head (`status(?:\\s+ping)?` matches "Status an").
  */
-const DE_INFO_HEAD = '(?:informier(?:e|en|t)|bescheid|r[uü]ckmeldung)';
+const DE_FYI_HEAD = '(?:informier(?:e|en|t)|bescheid|r[uü]ckmeldung)';
+
+/** DE read-only verbs. Same signal gate as the English set. Not full i18n. */
+const DE_READONLY_VERB =
+  '(?:zusammenfassen|lesen|erkl(?:ä|ae)ren|pr(?:ü|ue)fen)';
+
+const DE_INFO_HEAD = `(?:${DE_FYI_HEAD}|${DE_READONLY_VERB})`;
 
 const INFO_HEAD_RE = new RegExp(
   `^(?:the\\s+proposed\\s+)?(?:${EN_INFO_HEAD}|${DE_INFO_HEAD})\\b`,
   'i',
 );
 
-const EN_INFO_ANY =
-  '(?:fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info|release\\s+notes)';
+const FYI_HEAD_RE = new RegExp(
+  `^(?:the\\s+proposed\\s+)?(?:${EN_FYI_HEAD}|${DE_FYI_HEAD})\\b`,
+  'i',
+);
 
-const DE_INFO_ANY =
+const READONLY_HEAD_RE = new RegExp(
+  `^(?:the\\s+proposed\\s+)?(?:${EN_READONLY_VERB}|${DE_READONLY_VERB})\\b`,
+  'i',
+);
+
+const EN_FYI_ANY =
+  '(?:informational\\s+only|fyi|status[- ]ping|notify(?:ing)?|tell(?:ing)?\\s+\\w+|inform|info|release\\s+notes)';
+
+const EN_INFO_ANY = `(?:${EN_FYI_ANY}|${EN_READONLY_VERB})`;
+
+const DE_FYI_ANY =
   '(?:informier(?:e|en|t)|info\\s+an|status\\s+an|r[uü]ckmeldung|bescheid(?:\\s+(?:geben|sagen))?|gib(?:st|t)?\\s+(?:\\w+\\s+){0,4}bescheid)';
 
+const DE_INFO_ANY = `(?:${DE_FYI_ANY}|${DE_READONLY_VERB})`;
+
 const INFO_ANY_RE = new RegExp(`\\b(?:${EN_INFO_ANY}|${DE_INFO_ANY})\\b`, 'i');
+
+/** FYI cue only. Read-only verbs are not in this set, so they cannot hide ship. */
+const FYI_ANY_RE = new RegExp(`\\b(?:${EN_FYI_ANY}|${DE_FYI_ANY})\\b`, 'i');
+
+const READONLY_ANY_RE = new RegExp(
+  `\\b(?:${EN_READONLY_VERB}|${DE_READONLY_VERB})\\b`,
+  'i',
+);
 
 /**
  * Agenda/meeting terms. Separate from INFO_ANY so they do not take the
@@ -785,8 +837,18 @@ const AGENDA_DATE_SRC = `${ND}{4}-${ND}{2}-${ND}{2}|${ND}{1,2}\\.${ND}{1,2}\\.${
 /**
  * Closed nouns that may title one schedule line. Not a deny-list:
  * anything else, including an operative verb, is not a title.
+ * Longer phrases are first so a short noun cannot hide one.
+ * Meeting titles that QA still saw blocked (`Meeting`, `Strategy review`,
+ * `Wrap-up`) sit in this list. Clocks, dates, `\p{Nd}`, the 4096 cap,
+ * and list-marker rules are unchanged.
  */
 const AGENDA_TITLE_NOUNS = [
+  'strategy review',
+  'board meeting',
+  'wrap-up',
+  'wrap up',
+  'stand-up',
+  'stand up',
   'opening',
   'eröffnung',
   'eroeffnung',
@@ -801,6 +863,14 @@ const AGENDA_TITLE_NOUNS = [
   'protokoll',
   'protocol',
   'quorum',
+  'meeting',
+  'review',
+  'sync',
+  'standup',
+  'retro',
+  'planning',
+  'vorstand',
+  'besprechung',
 ] as const;
 const AGENDA_TITLE_SRC = AGENDA_TITLE_NOUNS.join('|');
 
@@ -908,7 +978,9 @@ function leadingKind(text: string): ActionKind {
       : 'value_transfer';
   }
   if (DEPLOY_HEAD_RE.test(head)) return 'deploy_ship';
-  if (INFO_HEAD_RE.test(head)) return 'informational';
+  if (FYI_HEAD_RE.test(head)) return 'informational';
+  // Read-only heads do not hide a transfer, a grant, or a ship verb.
+  if (READONLY_HEAD_RE.test(head) && readonlyMayBeInformational(head)) return 'informational';
   return 'unknown';
 }
 
@@ -1300,15 +1372,16 @@ function isAgendaShareRequest(text: string): boolean {
 }
 
 /**
- * Info cue for kind selection. Without an agenda word, any INFO_ANY hit
- * counts. With an agenda word, a cue inside the ship-negation window
- * ("do not tell") does not count, so that sentence is not informational
- * unless the rest is a pure agenda share.
+ * FYI cue for kind selection. Read-only verbs are not in this set, so
+ * they do not take the FYI-wins-over-ship exception. Without an agenda
+ * word, any FYI hit counts. With an agenda word, a cue inside the
+ * ship-negation window ("do not tell") does not count, so that sentence
+ * is not informational unless the rest is a pure agenda share.
  */
 function hasAgendaAwareInfoCue(text: string): boolean {
-  if (!text || !INFO_ANY_RE.test(text)) return false;
+  if (!text || !FYI_ANY_RE.test(text)) return false;
   if (!AGENDA_ANY_RE.test(text)) return true;
-  const re = new RegExp(INFO_ANY_RE.source, 'gi');
+  const re = new RegExp(FYI_ANY_RE.source, 'gi');
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const before = text.slice(Math.max(0, m.index - 48), m.index);
@@ -1318,14 +1391,60 @@ function hasAgendaAwareInfoCue(text: string): boolean {
   return false;
 }
 
+/** A clock or date shape outside 0–23:00–59 / day-month-year 2000–2100. */
+function hasImpossibleAgendaClockOrDate(text: string): boolean {
+  const clock = new RegExp(AGENDA_CLOCK_SRC, 'gu');
+  let m: RegExpExecArray | null;
+  while ((m = clock.exec(text)) !== null) {
+    if (!isValidAgendaClock(m[0])) return true;
+  }
+  const date = new RegExp(AGENDA_DATE_SRC, 'gu');
+  while ((m = date.exec(text)) !== null) {
+    if (!isValidAgendaDate(m[0])) return true;
+  }
+  return false;
+}
+
+/**
+ * A read-only verb counts in ordinary prose. The same word used only as
+ * a schedule title (`1. 18:00 Strategy review`, `50. review`,
+ * `99:99 Wrap-up`) does not: that line is a title, not a verb, and a
+ * failed line must not become informational.
+ */
+function readonlyCueCounts(text: string): boolean {
+  if (!text || !READONLY_ANY_RE.test(text)) return false;
+  const titleLine = new RegExp(
+    `(?:^|[\\n.;])\\s*${ND}{1,2}[.)]\\s+(?:(?:${AGENDA_CLOCK_SRC})|(?:${AGENDA_DATE_SRC}))?\\s*(?:${AGENDA_TITLE_SRC})\\b`,
+    'giu',
+  );
+  const prose = text.replace(titleLine, ' ');
+  return READONLY_ANY_RE.test(prose);
+}
+
+/**
+ * Read-only text is informational only with no value, permission, or
+ * ship signal. Impossible clocks/dates and a leftover quantity on an
+ * agenda sentence stay off this path (#116).
+ */
+function readonlyMayBeInformational(text: string): boolean {
+  if (!readonlyCueCounts(text)) return false;
+  if (hasValueTransfer(text) || hasPermissionGrant(text)) return false;
+  if (hasPositiveShipInstruction(text)) return false;
+  if (hasAgendaDestructiveSignal(text) || hasAgendaPaymentSignal(text)) return false;
+  if (hasImpossibleAgendaClockOrDate(text)) return false;
+  if (AGENDA_ANY_RE.test(text) && digitsOutsideSchedule(text)) return false;
+  return true;
+}
+
 function classifyBlob(text: string): ActionKind {
   const lead = leadingKind(text);
   if (lead !== 'unknown') return lead;
   if (hasPermissionGrant(text)) return 'permission';
   if (hasValueTransfer(text)) return 'value_transfer';
   // Positive ship only — "kein Deploy" / "no deploy" must not win over FYI.
-  // Agenda/meeting words are not in INFO_ANY_RE, so they do not suppress ship.
-  // A negated tell/notify on an agenda sentence is not that FYI cue.
+  // Agenda/meeting words and read-only verbs are not FYI cues, so they
+  // do not suppress ship. A negated tell/notify on an agenda sentence
+  // is not that FYI cue.
   if (hasPositiveShipInstruction(text) && !hasAgendaAwareInfoCue(text)) return 'deploy_ship';
   if (hasAgendaAwareInfoCue(text) && !hasValueTransfer(text) && !hasPermissionGrant(text)) {
     return 'informational';
@@ -1336,6 +1455,10 @@ function classifyBlob(text: string): ActionKind {
   // Allowlist, not "agenda word minus a denylist". Any other agenda
   // sentence stays unknown.
   if (isAgendaShareRequest(text)) return 'informational';
+  // Read-only verbs confirm informational prose. A grant, a transfer,
+  // or a ship verb in the same text already returned above.
+  if (readonlyCueCounts(text) && hasPermissionGrant(text)) return 'permission';
+  if (readonlyMayBeInformational(text)) return 'informational';
   return 'unknown';
 }
 
