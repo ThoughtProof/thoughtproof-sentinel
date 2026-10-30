@@ -2530,6 +2530,303 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  it('German per-email and as-a-message agenda shares stay informational', () => {
+    expect(agendaShareResidualTokens('Schick Anna die Tagesordnung per E-Mail')).toEqual([
+      'anna',
+      'die',
+      'per',
+      'e',
+      'mail',
+    ]);
+    expect(agendaShareResidualTokens('Sende die Agenda für Donnerstag per E-Mail an Anna')).toEqual([
+      'die',
+      'für',
+      'donnerstag',
+      'per',
+      'e',
+      'mail',
+      'an',
+      'anna',
+    ]);
+    expect(agendaShareResidualTokens('E-Mail an Anna mit der Tagesordnung')).toEqual([
+      'an',
+      'anna',
+      'mit',
+      'der',
+    ]);
+    expect(agendaShareResidualTokens('Send the Thursday agenda to Anna as a text message')).toEqual([
+      'the',
+      'thursday',
+      'to',
+      'anna',
+      'as',
+      'a',
+      'text',
+      'message',
+    ]);
+    expect(agendaShareResidualTokens('Send the Thursday agenda to Anna as a message')).toEqual([
+      'the',
+      'thursday',
+      'to',
+      'anna',
+      'as',
+      'a',
+      'message',
+    ]);
+
+    const texts = [
+      'Schick Anna die Tagesordnung per E-Mail',
+      'Sende die Agenda für Donnerstag per E-Mail an Anna',
+      'E-Mail an Anna mit der Tagesordnung',
+      'Send the Thursday agenda to Anna as a text message',
+      'Send the Thursday agenda to Anna as a message',
+    ];
+    for (const text of texts) expectAgendaShareAllow(text);
+
+    const notLeading = 'Bitte E-Mail an Anna mit der Tagesordnung';
+    expect(agendaShareResidualTokens(notLeading)).toContain('mail');
+    const mid = classifyActionAuthKind(
+      notLeading,
+      mcpEvidence(notLeading, notLeading, 'E-Mail is not the leading verb.'),
+    );
+    expect(mid.prose_action_kind).toBe('unknown');
+    expect(mid.prose_mandate_kind).toBe('unknown');
+    expect(mid.unclassified_abstention).toBe(true);
+    expect(allowlistFrom(mid)).toBe(false);
+    const midCaller = classifyActionAuthKind(
+      notLeading,
+      mcpEvidence(notLeading, notLeading, 'E-Mail is not the leading verb.'),
+      declaredInfo,
+    );
+    expect(midCaller.prose_action_kind).toBe('unknown');
+    expect(midCaller.objective_mismatch).toBe(true);
+    expect(allowlistFrom(midCaller, declaredInfo)).toBe(false);
+  });
+
+  it('German per-email agenda share plus delete, pay, ship, IBAN, or credentials stays off the share', () => {
+    const bases = [
+      'Schick Anna die Tagesordnung per E-Mail',
+      'Sende die Agenda für Donnerstag per E-Mail an Anna',
+      'E-Mail an Anna mit der Tagesordnung',
+      'Send the Thursday agenda to Anna as a text message',
+      'Send the Thursday agenda to Anna as a message',
+    ];
+    const operative: Array<{
+      suffix: string;
+      action: 'value_transfer' | 'deploy_ship';
+      mandate: 'value_transfer' | 'deploy_ship' | 'unknown';
+    }> = [
+      { suffix: ' und delete die Datei', action: 'deploy_ship', mandate: 'unknown' },
+      { suffix: ' und lösche die Datei', action: 'deploy_ship', mandate: 'unknown' },
+      { suffix: ' und pay 500 EUR', action: 'value_transfer', mandate: 'value_transfer' },
+      { suffix: ' und zahle 500 EUR', action: 'value_transfer', mandate: 'value_transfer' },
+      { suffix: ' und überweise 500 EUR', action: 'value_transfer', mandate: 'value_transfer' },
+      { suffix: ' und ship the release', action: 'deploy_ship', mandate: 'deploy_ship' },
+      { suffix: ' und deploy the release', action: 'deploy_ship', mandate: 'deploy_ship' },
+    ];
+    for (const base of bases) {
+      for (const { suffix, action, mandate } of operative) {
+        const text = `${base}${suffix}`;
+        const ev = mcpEvidence(text, text, 'Agenda share plus an operative signal.');
+        const prose = classifyActionAuthKind(text, ev);
+        expect(prose.prose_action_kind, text).toBe(action);
+        expect(prose.prose_mandate_kind, text).toBe(mandate);
+        expect(prose.prose_action_kind, text).not.toBe('informational');
+        expect(prose.prose_mandate_kind, text).not.toBe('informational');
+        expect(prose.objective_mismatch, text).toBe(true);
+        if (mandate !== action) expect(allowlistFrom(prose), text).toBe(false);
+
+        const caller = classifyActionAuthKind(text, ev, declaredInfo);
+        expect(caller.prose_action_kind, text).toBe(action);
+        expect(caller.prose_mandate_kind, text).toBe(mandate);
+        expect(caller.prose_action_kind, text).not.toBe('informational');
+        expect(caller.objective_mismatch, text).toBe(true);
+        expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+      }
+    }
+
+    const staysUnknown = [
+      'Schick Anna die Tagesordnung per E-Mail und die Zugangsdaten',
+      'Sende die Agenda für Donnerstag per E-Mail an Anna und die Credentials',
+      'E-Mail an Anna mit der Tagesordnung und den API-Schlüssel',
+      'Send the Thursday agenda to Anna as a text message and the API key',
+      'Send the Thursday agenda to Anna as a message and the credentials',
+      'Tagesordnung und den API-Schlüssel',
+      'Schick Anna die Tagesordnung per E-Mail; auch die Notizen',
+      'Sende die Agenda für Donnerstag per E-Mail an Anna; auch die Notizen',
+      'E-Mail an Anna mit der Tagesordnung; auch die Notizen',
+      'Send the Thursday agenda to Anna as a text message; also the notes',
+      'Send the Thursday agenda to Anna as a message; also the notes',
+      'Schick Anna die Tagesordnung per E-Mail\nauch die Notizen',
+      'Sende die Agenda für Donnerstag per E-Mail an Anna\nauch die Notizen',
+      'E-Mail an Anna mit der Tagesordnung\nauch die Notizen',
+      'Send the Thursday agenda to Anna as a text message\nalso the notes',
+      'Send the Thursday agenda to Anna as a message\nalso the notes',
+      'Sende die Agenda für Donnerstag per E-Mail an Anna IBAN DE89370400440532013000',
+      'E-Mail an Anna mit der Tagesordnung IBAN DE89370400440532013000',
+      'Schick Anna die Tagesordnung per E-Mail IBAN DE89370400440532013000',
+    ];
+    for (const text of staysUnknown) {
+      const ev = mcpEvidence(text, text, 'Not a closed share.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+
+    const ibanOnSend = [
+      'Send the Thursday agenda to Anna as a text message IBAN DE89370400440532013000',
+      'Send the Thursday agenda to Anna as a message IBAN DE89370400440532013000',
+    ];
+    for (const text of ibanOnSend) {
+      const ev = mcpEvidence(text, text, 'IBAN digits on a send verb.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('value_transfer');
+      expect(prose.prose_action_kind, text).not.toBe('informational');
+      expect(allowlistFrom(prose), text).toBe(false);
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).not.toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+  });
+
+  it('a second recipient on a German per-email agenda share stays unknown', () => {
+    const staysUnknown = [
+      'Schick Anna und Bob die Tagesordnung per E-Mail',
+      'Schick Anna die Tagesordnung per E-Mail an Bob',
+      'Sende die Agenda für Donnerstag per E-Mail an Anna und Bob',
+      'E-Mail an Anna und Bob mit der Tagesordnung',
+      'E-Mail an Anna mit der Tagesordnung und Bob',
+      'Send the Thursday agenda to Anna and Bob as a text message',
+      'Send the Thursday agenda to Anna and Bob as a message',
+    ];
+    for (const text of staysUnknown) {
+      const ev = mcpEvidence(text, text, 'Second recipient.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+  });
+
+  it('German frame names that are not people stay off the agenda share', () => {
+    const nouns = [
+      'IBAN',
+      'Überweisung',
+      'Ueberweisung',
+      'Passwort',
+      'Admin',
+      'Administrator',
+      'Wallet',
+      'Konto',
+      'Zugangsdaten',
+      'Token',
+      'API',
+      'Schlüssel',
+      'Schluessel',
+    ];
+    const frames = (noun: string) => [
+      `E-Mail an ${noun} mit der Tagesordnung`,
+      `Sende die Tagesordnung per E-Mail an ${noun}`,
+      `Schick ${noun} die Tagesordnung`,
+    ];
+    const staysUnknown = nouns.flatMap((noun) => [
+      ...frames(noun),
+      ...frames(noun.toLowerCase()),
+    ]);
+    for (const text of staysUnknown) {
+      const ev = mcpEvidence(text, text, 'German frame name is not a person.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+
+    for (const noun of ['Zahlung', 'zahlung']) {
+      for (const text of frames(noun)) {
+        const ev = mcpEvidence(text, text, 'Zahlung is a payment signal.');
+        const prose = classifyActionAuthKind(text, ev);
+        expect(prose.prose_action_kind, text).toBe('value_transfer');
+        expect(prose.prose_mandate_kind, text).toBe('value_transfer');
+        expect(prose.prose_action_kind, text).not.toBe('informational');
+        expect(prose.objective_mismatch, text).toBe(true);
+
+        const caller = classifyActionAuthKind(text, ev, declaredInfo);
+        expect(caller.prose_action_kind, text).toBe('value_transfer');
+        expect(caller.prose_action_kind, text).not.toBe('informational');
+        expect(caller.objective_mismatch, text).toBe(true);
+        expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+      }
+    }
+  });
+
+  it('per E-Mail an with no recipient stays off the agenda share', () => {
+    const staysUnknown = [
+      'Sende die Tagesordnung per E-Mail an',
+      'sende die tagesordnung per e-mail an',
+    ];
+    for (const text of staysUnknown) {
+      const ev = mcpEvidence(text, text, 'Channel phrase with no recipient.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+  });
+
   it('money, credentials, extra recipients, and operative signals stay off the agenda share', () => {
     const staysUnknown = [
       'Send the agenda to Anna and Bob',

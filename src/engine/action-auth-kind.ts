@@ -68,14 +68,21 @@
  * Agenda/meeting terms are not FYI markers. They classify as
  * informational only for a pure share request (`share` / `send` /
  * `sende` / `schick` / `schicke` / `teile` / `post` / `poste` /
- * `posten` / `posting`, or a leading `email` (`Email the Thursday
- * agenda to Anna` — not `email` later in the sentence), optionally
- * "with the team" / "an das Team" / "in den Gruppenchat" / "to the
- * Vorstand chat", one recipient after `to` / `with`, a weekday
- * qualifier, the filler `document` ("agenda document"), a closed
- * channel phrase such as "by email" / "via email" / "as a text
- * message", or the closed phrase "an email to <one name> containing
- * the <agenda>") with no other action verb.
+ * `posten` / `posting`, or a leading `email` / `E-Mail` (`Email the
+ * Thursday agenda to Anna`, `E-Mail an Anna mit der Tagesordnung` —
+ * not `email` / `E-Mail` later in the sentence), optionally "with the
+ * team" / "an das Team" / "in den Gruppenchat" / "to the Vorstand
+ * chat", one recipient after `to` / `with`, a weekday qualifier
+ * (`Thursday`, `Donnerstag`), the filler `document` ("agenda
+ * document"), a closed channel phrase such as "by email" / "via
+ * email" / "per E-Mail" / "as a text message" / "as a message", the
+ * closed phrase "an email to <one name> containing the <agenda>", or
+ * the closed German frames `<one name> die <agenda>` ("Schick Anna
+ * die Tagesordnung"), "per E-Mail an <one name>", and "an <one name>
+ * mit der <agenda>") with no other action verb. That German name is
+ * one word and is not IBAN, Überweisung, Zahlung, Passwort, Admin,
+ * Administrator, Wallet, Konto, Zugangsdaten, Token, API, or
+ * Schlüssel. `per E-Mail an` with no name stays unknown.
  * A trailing sentence that is only a closed negated constraint
  * ("Do not send money, credentials, or anything outside the internal
  * channel.", "Never share credentials.", "Kein Geld, keine
@@ -309,14 +316,15 @@ const AGENDA_ANY_RE = new RegExp(
  * "by text", "as a text message", "as a message") are tolerated on
  * top of that set. A second name, a second recipient, or any other
  * token stays unknown. `post` / `poste` / `posten` / `posting` are
- * share verbs, not a separate class. `email` is a share verb only
- * when it leads the text (a start-of-string lookbehind on that
- * alternative). "by email" / "via email" do not match it, so they
- * stay channel phrases. Ship, merge, delete, rm, payment, and wire
- * still fail the request before the filler check.
+ * share verbs, not a separate class. `email` and hyphenated `e-mail`
+ * are share verbs only when they lead the text (a start-of-string
+ * lookbehind on those alternatives). "by email" / "via email" /
+ * "per E-Mail" do not match them, so they stay channel phrases.
+ * Ship, merge, delete, rm, payment, and wire still fail the request
+ * before the filler check.
  */
 const AGENDA_SHARE_VERB =
-  '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting|(?<=^\\s*)email)';
+  '(?:share|send|sende|schick|schicke|teile|post|poste|posten|posting|(?<=^\\s*)e-mail|(?<=^\\s*)email)';
 const AGENDA_SHARE_VERB_RE = new RegExp(`\\b${AGENDA_SHARE_VERB}\\b`, 'i');
 /**
  * "into the internal Vorstand agent channel" / "to the Vorstand chat" /
@@ -373,6 +381,9 @@ const AGENDA_SHARE_FILLER = new Set([
   'friday', 'fridays',
   'saturday', 'saturdays',
   'sunday', 'sundays',
+  // "Sende die Agenda für Donnerstag per E-Mail an Anna".
+  // Same closed weekday slot as `thursday`. Not a month and not a number.
+  'donnerstag',
 ]);
 
 /**
@@ -982,11 +993,14 @@ export function agendaShareResidualTokens(text: string): string[] {
  * listed first so a shorter one cannot consume the front of a longer
  * one. "as a text message" / "as a message" are also fillers; they
  * stay listed so the phrase, not the free words, is the contract.
+ * "per E-Mail" splits on the hyphen into `per` `e` `mail`. `per` /
+ * `e` / `mail` are not fillers.
  */
 const AGENDA_SHARE_CHANNEL_PHRASES: readonly (readonly string[])[] = [
   ['as', 'a', 'text', 'message'],
   ['as', 'a', 'message'],
   ['as', 'message'],
+  ['per', 'e', 'mail'],
   ['by', 'email'],
   ['via', 'email'],
   ['by', 'text'],
@@ -1037,6 +1051,29 @@ const AGENDA_RECIPIENT_DENY = new Set([
   'http', 'https', 'sendmoney',
 ]);
 
+/**
+ * Non-person nouns refused by the three German name frames only
+ * (`Schick <name> die`, `per E-Mail an <name>`, `an <name> mit der`).
+ * Case is already folded. ASCII umlaut spellings are the same words.
+ * The English `to` / `with` slot does not read this set.
+ */
+const AGENDA_DE_FRAME_RECIPIENT_DENY = new Set([
+  'iban',
+  'überweisung',
+  'ueberweisung',
+  'zahlung',
+  'passwort',
+  'admin',
+  'administrator',
+  'wallet',
+  'konto',
+  'zugangsdaten',
+  'token',
+  'api',
+  'schlüssel',
+  'schluessel',
+]);
+
 function agendaChannelPhraseLength(tokens: readonly string[], index: number): number {
   for (const phrase of AGENDA_SHARE_CHANNEL_PHRASES) {
     let matched = true;
@@ -1057,6 +1094,11 @@ function isAgendaShareRecipientWord(token: string): boolean {
   if (AGENDA_SHARE_FILLER.has(token)) return false;
   if (AGENDA_RECIPIENT_DENY.has(token)) return false;
   return true;
+}
+
+/** German-frame name. The English recipient slot does not call this. */
+function isAgendaGermanFrameRecipient(token: string): boolean {
+  return isAgendaShareRecipientWord(token) && !AGENDA_DE_FRAME_RECIPIENT_DENY.has(token);
 }
 
 /**
@@ -1099,6 +1141,59 @@ function agendaEmailContainingPhrase(
   return { length: n + 2, recipient };
 }
 
+/**
+ * "Sende die Agenda für Donnerstag per E-Mail an Anna."
+ * Longer than the `per e mail` channel phrase: `an` plus one
+ * recipient. No `an` means this is not the phrase (the channel list
+ * still matches `per E-Mail` alone). `an` with no following name is
+ * `'missing'` so the shorter channel phrase cannot drop the `an`.
+ * A denied noun or a second name does not match. `an` stays a filler
+ * outside this shape.
+ */
+function agendaGermanPerEmailAn(
+  tokens: readonly string[],
+  index: number,
+): { length: number; recipient: boolean } | 'missing' | null {
+  const phrase = ['per', 'e', 'mail'] as const;
+  for (let k = 0; k < phrase.length; k++) {
+    if (tokens[index + k] !== phrase[k]) return null;
+  }
+  if (tokens[index + phrase.length] !== 'an') return null;
+  const nameAt = index + phrase.length + 1;
+  const name = tokens[nameAt] ?? '';
+  if (!name) return 'missing';
+  if (
+    !isAgendaGermanFrameRecipient(name) ||
+    AGENDA_CHANNEL_NOUN_TOKEN.has(tokens[nameAt + 1] ?? '')
+  ) {
+    return null;
+  }
+  return { length: phrase.length + 2, recipient: true };
+}
+
+/**
+ * "E-Mail an Anna mit der Tagesordnung."
+ * Closed shape: `an` plus one recipient plus `mit der`. The agenda
+ * noun is already stripped, so `der` is the word that introduced it.
+ * Not a recipient preposition — `an` / `mit` stay fillers everywhere
+ * else. A second name (`an Anna und Bob mit der`) does not match.
+ */
+function agendaGermanAnMitDer(
+  tokens: readonly string[],
+  index: number,
+): { length: number; recipient: boolean } | null {
+  if (tokens[index] !== 'an') return null;
+  const name = tokens[index + 1] ?? '';
+  if (
+    !isAgendaGermanFrameRecipient(name) ||
+    tokens[index + 2] !== 'mit' ||
+    tokens[index + 3] !== 'der'
+  ) {
+    return null;
+  }
+  return { length: 4, recipient: true };
+}
+
 /** `18` + `00` from `18:00`, optional seconds. Not `500` and not `99:99`. */
 function agendaClockTokenLen(tokens: readonly string[], index: number): number {
   const hourTok = tokens[index];
@@ -1135,9 +1230,12 @@ function agendaDateTokenLen(tokens: readonly string[], index: number): number {
 
 /**
  * Fillers, plus one recipient after to/with, plus closed channel
- * phrases, plus `an email [to <name>] containing the`, plus a clock
- * or calendar date already split into numeric tokens (`18:00` →
- * `18`,`00`; `at` / `um` may introduce the clock).
+ * phrases, plus `per E-Mail an <name>`, plus `an <name> mit der`,
+ * plus one leading name only when the next token is `die`
+ * ("Schick Anna die Tagesordnung"), plus `an email [to <name>]
+ * containing the`, plus a clock or calendar date already split into
+ * numeric tokens (`18:00` → `18`,`00`; `at` / `um` may introduce
+ * the clock).
  * The recipient is one content word (optional determiner).
  * A second name, "and Bob", a lone quantity, or "the client list" as
  * extra payload does not pass. Residual tokens themselves are not rewritten.
@@ -1146,6 +1244,15 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
   let recipientUsed = false;
   let prep = false;
   for (let i = 0; i < tokens.length; ) {
+    const dePerEmail = agendaGermanPerEmailAn(tokens, i);
+    if (dePerEmail === 'missing') return false;
+    if (dePerEmail) {
+      if (dePerEmail.recipient && recipientUsed) return false;
+      if (dePerEmail.recipient) recipientUsed = true;
+      i += dePerEmail.length;
+      prep = false;
+      continue;
+    }
     const channel = agendaChannelPhraseLength(tokens, i);
     if (channel > 0) {
       i += channel;
@@ -1157,6 +1264,14 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
       if (emailContaining.recipient && recipientUsed) return false;
       if (emailContaining.recipient) recipientUsed = true;
       i += emailContaining.length;
+      prep = false;
+      continue;
+    }
+    const deAnMit = agendaGermanAnMitDer(tokens, i);
+    if (deAnMit) {
+      if (deAnMit.recipient && recipientUsed) return false;
+      if (deAnMit.recipient) recipientUsed = true;
+      i += deAnMit.length;
       prep = false;
       continue;
     }
@@ -1189,6 +1304,20 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
       !recipientUsed &&
       isAgendaShareRecipientWord(token) &&
       !AGENDA_CHANNEL_NOUN_TOKEN.has(tokens[i + 1] ?? '')
+    ) {
+      recipientUsed = true;
+      prep = false;
+      i += 1;
+      continue;
+    }
+    // "Schick Anna die Tagesordnung". The name is the first residual
+    // token only when `die` follows it. A name anywhere else, or a
+    // second name, stays unknown. `an` is not this slot.
+    if (
+      i === 0 &&
+      !recipientUsed &&
+      isAgendaGermanFrameRecipient(token) &&
+      tokens[1] === 'die'
     ) {
       recipientUsed = true;
       prep = false;
