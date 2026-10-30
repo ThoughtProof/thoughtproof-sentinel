@@ -1,7 +1,10 @@
 /**
  * ADR-0023 stage 2: one atomic nonce consume on the shared Redis store.
- * Not a verdict input. Not wired here. The request-path module is a
- * separate stage and is the only caller, and only when enforcement is on.
+ * Not a verdict input.
+ * api/sentinel/verify.ts calls evaluateMandateRequestPath, which calls
+ * consumeMandateNonce, only when SENTINEL_MANDATE_PROOF_ENFORCE is
+ * exactly `true`. This module adds no other call site and does not
+ * change that default.
  * There is no in-memory fallback. A store miss, a timeout, or an error
  * is HTTP 503, never ALLOW.
  *
@@ -33,8 +36,9 @@ const KEY_PREFIX = 'sentinel:mandate-replay:v1:';
 /**
  * EVAL runs the time check and SET NX PXAT together. The clock is Redis
  * TIME. A caller cannot pass a third argument to widen the skew or the
- * window. Retention is an absolute PXAT at exp + skew + 1 so the key is
- * still present throughout the second exp + skew.
+ * window. Physical key expiry is exp + skew + 1 seconds (exp + 31s).
+ * That extra second holds the key through the second exp + skew
+ * (exp + 30s). retainUntil is that minimum bound, not the PXAT instant.
  */
 export const MANDATE_REPLAY_CONSUME_SCRIPT = `
 local skew = ${MANDATE_REPLAY_SKEW_SECONDS}
