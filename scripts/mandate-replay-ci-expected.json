@@ -1,0 +1,27 @@
+{
+  "redisFile": "src/mandate-replay-store.test.ts",
+  "deadlineFile": "src/mandate-replay-deadline.test.ts",
+  "redis": [
+    "rejects a zero or reversed window inside the script and does not store the nonce",
+    "rejects the expiry boundary and the seconds on either side",
+    "rejects not-before on the second before, at, and after the skew",
+    "rejects a window longer than five minutes and does not store it",
+    "lets exactly one of eight overlapping client requests consume the same nonce",
+    "accepts eight overlapping consumes when each nonce is distinct",
+    "lets one shared client accept only one of eight parallel consumes",
+    "scopes one nonce to each server account id",
+    "keeps a consumed nonce through exp + skew and rejects it after the TTL",
+    "does not treat checkWindowThenConsume as consumption",
+    "rejects an expired proof even when a stale caller clock is attached",
+    "fails closed when the real client receives a store error",
+    "fails closed when the real client gets no response before the deadline",
+    "fails closed when the store port is closed",
+    "returns 503 when the success response is lost and does not retry into a replay",
+    "shows the SDK default retry can turn that lost success into replay"
+  ],
+  "deadline": [
+    "CONTROL a prompt valid store response is accepted",
+    "REGRESSION response processing after an event-loop pause cannot beat the elapsed deadline",
+    "REGRESSION synchronous command setup counts toward the deadline"
+  ]
+}

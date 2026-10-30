@@ -1,0 +1,26 @@
+name: Mandate replay Redis
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  mandate-replay-redis:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install redis-server
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+      - name: Require a runnable redis-server
+        run: bash scripts/require-redis-server.sh
+      - name: Run mandate replay tests
+        run: npx vitest run src/mandate-replay-store.test.ts src/mandate-replay-deadline.test.ts --reporter=json --outputFile=/tmp/mandate-replay-report.json
+      - name: Require every expected case passed
+        run: node scripts/verify-mandate-replay-report.mjs /tmp/mandate-replay-report.json

@@ -1,37 +1,57 @@
 /**
  * ADR-0023 stage 2: one atomic nonce consume on the shared Redis store.
- * Not a verdict input. The request-path module consumes a nonce only
- * after a proof verifies, and only when enforcement is on.
- * There is no in-memory fallback. A store miss or error is HTTP 503,
- * never ALLOW.
+ * Not a verdict input.
+ * api/sentinel/verify.ts calls evaluateMandateRequestPath, which calls
+ * consumeMandateNonce, only when SENTINEL_MANDATE_PROOF_ENFORCE is
+ * exactly `true`. This module adds no other call site and does not
+ * change that default.
+ * There is no in-memory fallback. A store miss, a timeout, or an error
+ * is HTTP 503, never ALLOW.
  *
- * Expiry uses Redis TIME inside the script. Callers cannot supply a clock.
- * The pure window helper is not consulted and does not consume a nonce.
- * The replay client is separate from the rate-limit client and does not
- * retry a lost transport response.
+ * Expiry and not-before use Redis TIME inside the script. Callers cannot
+ * supply a clock. The pure window helper is not consulted and does not
+ * consume a nonce. The replay client is separate from the rate-limit
+ * client and does not retry a lost transport response.
  */
 
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { Redis } from '@upstash/redis';
 import { resolveUpstashConfig } from './upstash-env.js';
 
 /** Same product decision as the proof window. Not a tunable default. */
 export const MANDATE_REPLAY_SKEW_SECONDS = 30;
 
+/** Same product decision as the proof window. Not a tunable default. */
+export const MANDATE_REPLAY_MAX_WINDOW_SECONDS = 300;
+
+/**
+ * A silent store past this deadline is the same as no answer.
+ * Matches the principal-manifest load deadline. Not a clock for expiry.
+ */
+export const MANDATE_REPLAY_DEADLINE_MS = 2_000;
+
 const KEY_PREFIX = 'sentinel:mandate-replay:v1:';
 
 /**
- * EVAL runs the check and SET NX together. Retention is EX until
- * exp + skew + 1 so the key is still present at exp + skew.
- * A caller cannot widen the skew: it is fixed in this script.
+ * EVAL runs the time check and SET NX PXAT together. The clock is Redis
+ * TIME. A caller cannot pass a third argument to widen the skew or the
+ * window. Physical key expiry is exp + skew + 1 seconds (exp + 31s).
+ * That extra second holds the key through the second exp + skew
+ * (exp + 30s). retainUntil is that minimum bound, not the PXAT instant.
  */
 export const MANDATE_REPLAY_CONSUME_SCRIPT = `
 local skew = ${MANDATE_REPLAY_SKEW_SECONDS}
+local maxWindow = ${MANDATE_REPLAY_MAX_WINDOW_SECONDS}
 local function intstr(s)
-  if type(s) ~= 'string' or string.match(s, '^-?%d+$') == nil then
+  if type(s) ~= 'string' or string.match(s, '^%d+$') == nil or #s > 15 then
     return nil
   end
-  return tonumber(s)
+  local n = tonumber(s)
+  if n == nil or n ~= math.floor(n) or n < 0 then
+    return nil
+  end
+  return n
 end
 local iat = intstr(ARGV[1])
 local exp = intstr(ARGV[2])
@@ -43,16 +63,22 @@ end
 if exp <= iat then
   return 'block:non_positive_window'
 end
+if exp - iat > maxWindow then
+  return 'block:window_too_long'
+end
+if iat > now + skew then
+  return 'block:not_yet_valid'
+end
 if exp <= now - skew then
   return 'block:expired'
 end
-local ttl = (exp + skew + 1) - now
-if ttl < 1 then
+local expireAt = exp + skew + 1
+if expireAt <= now then
   return 'block:expired'
 end
-local set = redis.call('SET', KEYS[1], '1', 'EX', ttl, 'NX')
+local set = redis.call('SET', KEYS[1], '1', 'PXAT', string.format('%.0f', expireAt * 1000), 'NX')
 if set then
-  return 'consumed:' .. tostring(exp + skew + 1)
+  return 'consumed:' .. string.format('%.0f', expireAt)
 end
 return 'block:replay'
 `.trim();
@@ -70,9 +96,19 @@ export interface MandateReplayConsumeInput {
   exp: number;
 }
 
+export const MANDATE_REPLAY_BLOCK_REASONS = [
+  'non_positive_window',
+  'window_too_long',
+  'not_yet_valid',
+  'expired',
+  'replay',
+] as const;
+
+export type MandateReplayBlockReason = (typeof MANDATE_REPLAY_BLOCK_REASONS)[number];
+
 export type MandateReplayConsumeResult =
   | { ok: true; consumed: true; retainUntil: number }
-  | { ok: false; verdict: 'BLOCK'; reason: 'non_positive_window' | 'expired' | 'replay' }
+  | { ok: false; verdict: 'BLOCK'; reason: MandateReplayBlockReason }
   | { ok: false; httpStatus: 503; code: 'ACCOUNT_UNAVAILABLE' | 'REPLAY_STORE_UNAVAILABLE' };
 
 /** Redis key for one account's nonce. The raw nonce is not the key. */
@@ -87,6 +123,57 @@ export function mandateReplayKey(accountId: string, nonce: string): string {
 
 function unavailable(code: 'ACCOUNT_UNAVAILABLE' | 'REPLAY_STORE_UNAVAILABLE'): MandateReplayConsumeResult {
   return { ok: false, httpStatus: 503, code };
+}
+
+function block(reason: MandateReplayBlockReason): MandateReplayConsumeResult {
+  return { ok: false, verdict: 'BLOCK', reason };
+}
+
+function isBlockReason(value: string): value is MandateReplayBlockReason {
+  return (MANDATE_REPLAY_BLOCK_REASONS as readonly string[]).includes(value);
+}
+
+/**
+ * Decimal seconds the script can compare exactly. Not a clock check.
+ * A negative, fractional, or oversized value is known-invalid.
+ */
+function canonicalSeconds(value: number): string | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) return null;
+  const text = String(value);
+  if (!/^\d{1,15}$/.test(text)) return null;
+  return text;
+}
+
+function withDeadline<T>(pending: Promise<T>, deadline: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  return new Promise<T>((resolve, reject) => {
+    const clear = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    const finish = (settle: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clear();
+      settle();
+    };
+    timer = setTimeout(() => {
+      timer = undefined;
+      finish(() => reject(new Error('mandate_replay_deadline')));
+    }, Math.max(0, deadline - performance.now()));
+    pending.then(
+      (value) => finish(() => {
+        // Timer callbacks can run after promise continuations following a
+        // paused event loop. Elapsed time, not callback order, decides expiry.
+        if (performance.now() >= deadline) reject(new Error('mandate_replay_deadline'));
+        else resolve(value);
+      }),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
 }
 
 /**
@@ -131,9 +218,7 @@ function commandFromDedicatedClient(): MandateReplayCommand | null {
 function parseReply(raw: string, exp: number): MandateReplayConsumeResult {
   if (raw.startsWith('block:')) {
     const reason = raw.slice('block:'.length);
-    if (reason === 'non_positive_window' || reason === 'expired' || reason === 'replay') {
-      return { ok: false, verdict: 'BLOCK', reason };
-    }
+    if (isBlockReason(reason)) return block(reason);
   }
   const marker = 'consumed:';
   if (raw.startsWith(marker)) {
@@ -149,14 +234,24 @@ function parseReply(raw: string, exp: number): MandateReplayConsumeResult {
 /**
  * Consume a nonce once, or reject it. Pass `command` in tests.
  * Omit `command` to use the dedicated no-retry Upstash client.
- * There is no memory store and no caller clock.
+ * There is no memory store and no caller clock. The script's Redis TIME
+ * is the authoritative expiry and not-before check. A deadline, a thrown
+ * client, or a missing client is HTTP 503 and is not ALLOW.
  */
 export async function consumeMandateNonce(
   input: MandateReplayConsumeInput,
   command?: MandateReplayCommand | null,
 ): Promise<MandateReplayConsumeResult> {
-  if (!input.accountId || !input.nonce) {
+  if (typeof input.accountId !== 'string' || input.accountId.trim() === '') {
     return unavailable('ACCOUNT_UNAVAILABLE');
+  }
+  if (typeof input.nonce !== 'string' || input.nonce.trim() === '') {
+    return unavailable('ACCOUNT_UNAVAILABLE');
+  }
+  const iat = canonicalSeconds(input.iat);
+  const exp = canonicalSeconds(input.exp);
+  if (iat === null || exp === null) {
+    return block('non_positive_window');
   }
 
   let redis: MandateReplayCommand | null;
@@ -168,10 +263,13 @@ export async function consumeMandateNonce(
   if (!redis) return unavailable('REPLAY_STORE_UNAVAILABLE');
 
   try {
-    const raw = await redis.eval(MANDATE_REPLAY_CONSUME_SCRIPT, [mandateReplayKey(input.accountId, input.nonce)], [
-      String(input.iat),
-      String(input.exp),
-    ]);
+    // Monotonic elapsed time is only for the client deadline. Proof validity
+    // still uses Redis TIME inside EVAL. Include synchronous command setup.
+    const deadline = performance.now() + MANDATE_REPLAY_DEADLINE_MS;
+    const raw = await withDeadline(
+      redis.eval(MANDATE_REPLAY_CONSUME_SCRIPT, [mandateReplayKey(input.accountId, input.nonce)], [iat, exp]),
+      deadline,
+    );
     if (typeof raw !== 'string') return unavailable('REPLAY_STORE_UNAVAILABLE');
     return parseReply(raw, input.exp);
   } catch {
