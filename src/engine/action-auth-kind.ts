@@ -79,7 +79,10 @@
  * closed phrase "an email to <one name> containing the <agenda>", or
  * the closed German frames `<one name> die <agenda>` ("Schick Anna
  * die Tagesordnung"), "per E-Mail an <one name>", and "an <one name>
- * mit der <agenda>") with no other action verb.
+ * mit der <agenda>") with no other action verb. That German name is
+ * one word and is not IBAN, Überweisung, Zahlung, Passwort, Admin,
+ * Administrator, Wallet, Konto, Zugangsdaten, Token, API, or
+ * Schlüssel. `per E-Mail an` with no name stays unknown.
  * A trailing sentence that is only a closed negated constraint
  * ("Do not send money, credentials, or anything outside the internal
  * channel.", "Never share credentials.", "Kein Geld, keine
@@ -1048,6 +1051,29 @@ const AGENDA_RECIPIENT_DENY = new Set([
   'http', 'https', 'sendmoney',
 ]);
 
+/**
+ * Non-person nouns refused by the three German name frames only
+ * (`Schick <name> die`, `per E-Mail an <name>`, `an <name> mit der`).
+ * Case is already folded. ASCII umlaut spellings are the same words.
+ * The English `to` / `with` slot does not read this set.
+ */
+const AGENDA_DE_FRAME_RECIPIENT_DENY = new Set([
+  'iban',
+  'überweisung',
+  'ueberweisung',
+  'zahlung',
+  'passwort',
+  'admin',
+  'administrator',
+  'wallet',
+  'konto',
+  'zugangsdaten',
+  'token',
+  'api',
+  'schlüssel',
+  'schluessel',
+]);
+
 function agendaChannelPhraseLength(tokens: readonly string[], index: number): number {
   for (const phrase of AGENDA_SHARE_CHANNEL_PHRASES) {
     let matched = true;
@@ -1068,6 +1094,11 @@ function isAgendaShareRecipientWord(token: string): boolean {
   if (AGENDA_SHARE_FILLER.has(token)) return false;
   if (AGENDA_RECIPIENT_DENY.has(token)) return false;
   return true;
+}
+
+/** German-frame name. The English recipient slot does not call this. */
+function isAgendaGermanFrameRecipient(token: string): boolean {
+  return isAgendaShareRecipientWord(token) && !AGENDA_DE_FRAME_RECIPIENT_DENY.has(token);
 }
 
 /**
@@ -1114,13 +1145,15 @@ function agendaEmailContainingPhrase(
  * "Sende die Agenda für Donnerstag per E-Mail an Anna."
  * Longer than the `per e mail` channel phrase: `an` plus one
  * recipient. No `an` means this is not the phrase (the channel list
- * still matches `per E-Mail` alone). A second name does not match.
- * `an` stays a filler outside this shape.
+ * still matches `per E-Mail` alone). `an` with no following name is
+ * `'missing'` so the shorter channel phrase cannot drop the `an`.
+ * A denied noun or a second name does not match. `an` stays a filler
+ * outside this shape.
  */
 function agendaGermanPerEmailAn(
   tokens: readonly string[],
   index: number,
-): { length: number; recipient: boolean } | null {
+): { length: number; recipient: boolean } | 'missing' | null {
   const phrase = ['per', 'e', 'mail'] as const;
   for (let k = 0; k < phrase.length; k++) {
     if (tokens[index + k] !== phrase[k]) return null;
@@ -1128,8 +1161,9 @@ function agendaGermanPerEmailAn(
   if (tokens[index + phrase.length] !== 'an') return null;
   const nameAt = index + phrase.length + 1;
   const name = tokens[nameAt] ?? '';
+  if (!name) return 'missing';
   if (
-    !isAgendaShareRecipientWord(name) ||
+    !isAgendaGermanFrameRecipient(name) ||
     AGENDA_CHANNEL_NOUN_TOKEN.has(tokens[nameAt + 1] ?? '')
   ) {
     return null;
@@ -1151,7 +1185,7 @@ function agendaGermanAnMitDer(
   if (tokens[index] !== 'an') return null;
   const name = tokens[index + 1] ?? '';
   if (
-    !isAgendaShareRecipientWord(name) ||
+    !isAgendaGermanFrameRecipient(name) ||
     tokens[index + 2] !== 'mit' ||
     tokens[index + 3] !== 'der'
   ) {
@@ -1211,6 +1245,7 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
   let prep = false;
   for (let i = 0; i < tokens.length; ) {
     const dePerEmail = agendaGermanPerEmailAn(tokens, i);
+    if (dePerEmail === 'missing') return false;
     if (dePerEmail) {
       if (dePerEmail.recipient && recipientUsed) return false;
       if (dePerEmail.recipient) recipientUsed = true;
@@ -1281,7 +1316,7 @@ function agendaShareResidualsAreClosed(tokens: readonly string[]): boolean {
     if (
       i === 0 &&
       !recipientUsed &&
-      isAgendaShareRecipientWord(token) &&
+      isAgendaGermanFrameRecipient(token) &&
       tokens[1] === 'die'
     ) {
       recipientUsed = true;

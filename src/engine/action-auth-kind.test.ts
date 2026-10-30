@@ -2736,6 +2736,97 @@ describe('agenda/meeting informational terms', () => {
     }
   });
 
+  it('German frame names that are not people stay off the agenda share', () => {
+    const nouns = [
+      'IBAN',
+      'Überweisung',
+      'Ueberweisung',
+      'Passwort',
+      'Admin',
+      'Administrator',
+      'Wallet',
+      'Konto',
+      'Zugangsdaten',
+      'Token',
+      'API',
+      'Schlüssel',
+      'Schluessel',
+    ];
+    const frames = (noun: string) => [
+      `E-Mail an ${noun} mit der Tagesordnung`,
+      `Sende die Tagesordnung per E-Mail an ${noun}`,
+      `Schick ${noun} die Tagesordnung`,
+    ];
+    const staysUnknown = nouns.flatMap((noun) => [
+      ...frames(noun),
+      ...frames(noun.toLowerCase()),
+    ]);
+    for (const text of staysUnknown) {
+      const ev = mcpEvidence(text, text, 'German frame name is not a person.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+
+    for (const noun of ['Zahlung', 'zahlung']) {
+      for (const text of frames(noun)) {
+        const ev = mcpEvidence(text, text, 'Zahlung is a payment signal.');
+        const prose = classifyActionAuthKind(text, ev);
+        expect(prose.prose_action_kind, text).toBe('value_transfer');
+        expect(prose.prose_mandate_kind, text).toBe('value_transfer');
+        expect(prose.prose_action_kind, text).not.toBe('informational');
+        expect(prose.objective_mismatch, text).toBe(true);
+
+        const caller = classifyActionAuthKind(text, ev, declaredInfo);
+        expect(caller.prose_action_kind, text).toBe('value_transfer');
+        expect(caller.prose_action_kind, text).not.toBe('informational');
+        expect(caller.objective_mismatch, text).toBe(true);
+        expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+      }
+    }
+  });
+
+  it('per E-Mail an with no recipient stays off the agenda share', () => {
+    const staysUnknown = [
+      'Sende die Tagesordnung per E-Mail an',
+      'sende die tagesordnung per e-mail an',
+    ];
+    for (const text of staysUnknown) {
+      const ev = mcpEvidence(text, text, 'Channel phrase with no recipient.');
+      const prose = classifyActionAuthKind(text, ev);
+      expect(prose.prose_action_kind, text).toBe('unknown');
+      expect(prose.prose_mandate_kind, text).toBe('unknown');
+      expect(prose.action_kind, text).toBe('unknown');
+      expect(prose.mandate_kind, text).toBe('unknown');
+      expect(prose.unclassified_abstention, text).toBe(true);
+      expect(prose.objective_mismatch, text).toBe(false);
+      expect(allowlistFrom(prose), text).toBe(false);
+
+      const caller = classifyActionAuthKind(text, ev, declaredInfo);
+      expect(caller.prose_action_kind, text).toBe('unknown');
+      expect(caller.prose_mandate_kind, text).toBe('unknown');
+      expect(caller.action_kind, text).toBe('informational');
+      expect(caller.mandate_kind, text).toBe('informational');
+      expect(caller.objective_mismatch, text).toBe(true);
+      expect(caller.unclassified_abstention, text).toBe(false);
+      expect(allowlistFrom(caller, declaredInfo), text).toBe(false);
+    }
+  });
+
   it('money, credentials, extra recipients, and operative signals stay off the agenda share', () => {
     const staysUnknown = [
       'Send the agenda to Anna and Bob',
