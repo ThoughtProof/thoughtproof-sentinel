@@ -12,6 +12,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { Redis } from '@upstash/redis';
 import { resolveUpstashConfig } from './upstash-env.js';
 
@@ -139,7 +140,7 @@ function canonicalSeconds(value: number): string | null {
   return text;
 }
 
-function withDeadline<T>(pending: Promise<T>, ms: number): Promise<T> {
+function withDeadline<T>(pending: Promise<T>, deadline: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let settled = false;
   return new Promise<T>((resolve, reject) => {
@@ -158,9 +159,14 @@ function withDeadline<T>(pending: Promise<T>, ms: number): Promise<T> {
     timer = setTimeout(() => {
       timer = undefined;
       finish(() => reject(new Error('mandate_replay_deadline')));
-    }, ms);
+    }, Math.max(0, deadline - performance.now()));
     pending.then(
-      (value) => finish(() => resolve(value)),
+      (value) => finish(() => {
+        // Timer callbacks can run after promise continuations following a
+        // paused event loop. Elapsed time, not callback order, decides expiry.
+        if (performance.now() >= deadline) reject(new Error('mandate_replay_deadline'));
+        else resolve(value);
+      }),
       (error: unknown) => finish(() => reject(error)),
     );
   });
@@ -253,9 +259,12 @@ export async function consumeMandateNonce(
   if (!redis) return unavailable('REPLAY_STORE_UNAVAILABLE');
 
   try {
+    // Monotonic elapsed time is only for the client deadline. Proof validity
+    // still uses Redis TIME inside EVAL. Include synchronous command setup.
+    const deadline = performance.now() + MANDATE_REPLAY_DEADLINE_MS;
     const raw = await withDeadline(
       redis.eval(MANDATE_REPLAY_CONSUME_SCRIPT, [mandateReplayKey(input.accountId, input.nonce)], [iat, exp]),
-      MANDATE_REPLAY_DEADLINE_MS,
+      deadline,
     );
     if (typeof raw !== 'string') return unavailable('REPLAY_STORE_UNAVAILABLE');
     return parseReply(raw, input.exp);
