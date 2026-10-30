@@ -1,8 +1,44 @@
 # pot-cli release and historical vendored patches
 
-## npm 0.8.12 (2026-10-10)
+## npm 0.8.13 (2026-10-30)
 
-Sentinel pins the published `pot-cli@0.8.12` exactly. It keeps the tp.2
+Sentinel pins the published `pot-cli@0.8.13` exactly. It keeps the tp.2
+quote and reasoning fixes from
+[pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52)
+and adds the mandate-label and boundary fixes from
+[pot-cli PR #55](https://github.com/ThoughtProof/pot-cli/pull/55).
+[pot-cli v0.8.13](https://github.com/ThoughtProof/pot-cli/releases/tag/v0.8.13)
+is commit `a8c569a4aacad895774bb6411a83fc8d2b9b07e5`. The install source
+is the npm tarball below, not a GitHub source archive.
+`@pot-sdk2/bridge` stays pinned to `1.2.0`. Engines stay Node.js `>=22`.
+`GET /sentinel/health` reports the installed package version as `pot_cli`.
+
+No vendor patch is applied. There is no `postinstall`, no `patch-package`,
+and no `file:` dependency on `vendor/`. `vendor/pot-cli-0.8.10-tp.2.tgz`
+is a historical rollback artifact (tp.1 was never shipped). The tp.2
+markers (`coerceQuote` rejecting `"undefined"` / `"null"`,
+`appendReasoningNote`, MCP `Principal mandate (verbatim quote):`, and
+suite `USER INSTRUCTION:` recovery) are already in the published `0.8.13`
+evaluator. Replacing `node_modules/pot-cli` with that tarball would
+downgrade off `0.8.13` and drop the #55 mandate fixes, so the vendored
+tarball is not needed and does not apply as a forward patch.
+
+- Registry tarball: `https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.13.tgz`
+- Registry sha256: `c5dc191e8166439ceb7c50bd604b9494d741727372dd59edb7f1d764cd5538d3`
+- npm shasum (sha1): `09fa062d9c24789b2112b224a21e7a9758716691`
+- Lockfile integrity:
+  `sha512-/n7JCI+fAUEDytCW/aPZQxhZm9IMeKr0KZM5+BBGJmhgRFyjaQUxByCD391AXkLX+DPk5xf5VfG0/fyXxS+PKA==`
+- Commit `a8c569a4aacad895774bb6411a83fc8d2b9b07e5` (tag `v0.8.13`)
+- Engines: Node.js `>=22`
+- Published file count: 619
+
+`src/pot-cli-quote-patch.test.ts` pins the exact dependency, registry URL,
+lockfile integrity, installed version, source markers, and behavior.
+Update that pin and this document together when upgrading.
+
+## npm 0.8.12 (2026-10-10, superseded)
+
+Sentinel pinned the published `pot-cli@0.8.12` exactly. It keeps the tp.2
 quote and reasoning fixes from
 [pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52).
 [pot-cli v0.8.12](https://github.com/ThoughtProof/pot-cli/releases/tag/v0.8.12)
@@ -30,7 +66,8 @@ Update that pin and this document together when upgrading.
 
 Published `pot-cli@0.8.11` contains the tp.2 quote and reasoning fixes from
 [pot-cli PR #52](https://github.com/ThoughtProof/pot-cli/pull/52).
-`0.8.12` is the release Sentinel installs. The `0.8.11` CLI bridge range
+`0.8.12` was the next release Sentinel installed. `0.8.13` is the release
+Sentinel installs. The `0.8.11` CLI bridge range
 selects `@pot-sdk2/bridge@1.3.0`, which lacks an export required by the CLI
 entry point.
 

@@ -16,10 +16,10 @@ import { coerceQuote as sentinelCoerceQuote } from './step-quote-provenance.js';
 import { getPotCliVersion } from './runtime-versions.js';
 
 /** Must match vendor/PATCHES.md — bump both together. */
-export const POT_CLI_VERSION = '0.8.12';
-export const POT_CLI_TARBALL = 'https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.12.tgz';
+export const POT_CLI_VERSION = '0.8.13';
+export const POT_CLI_TARBALL = 'https://registry.npmjs.org/pot-cli/-/pot-cli-0.8.13.tgz';
 export const POT_CLI_INTEGRITY =
-  'sha512-8hM8jsVtZXNW+rFdqQw0vD9UbFvSG6HINB8s5JtY7ZvH3pqH7wjgNDz3W2Y4g3rmsexGlv14J4gcojzOjIvMfA==';
+  'sha512-/n7JCI+fAUEDytCW/aPZQxhZm9IMeKr0KZM5+BBGJmhgRFyjaQUxByCD391AXkLX+DPk5xf5VfG0/fyXxS+PKA==';
 
 const COERCE_CASES: unknown[] = [
   undefined,
@@ -107,7 +107,10 @@ describe('published pot-cli quote patch behavior', () => {
       'Tell CoS host runs git main',
     ].join('\n');
     expect(recoverCiteableQuote(null, evidence)).toBe('Tell CoS host runs git main');
-    expect(recoverCiteableQuote.toString()).toContain('extractMandateVerbatimQuote');
+    // 0.8.13 routes recovery through inspectMandateVerbatimQuote.
+    // extractMandateVerbatimQuote is a wrapper over that inspector, not the callee.
+    expect(recoverCiteableQuote.toString()).toContain('inspectMandateVerbatimQuote');
+    expect(recoverCiteableQuote.toString()).not.toContain('extractMandateVerbatimQuote');
   });
 
   it('recoverCiteableQuote pulls suite USER INSTRUCTION when quote is null', () => {
