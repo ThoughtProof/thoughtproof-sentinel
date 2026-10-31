@@ -8,6 +8,8 @@
  * locks the two parsers together. Do not print a parse result.
  */
 
+import { createHash } from 'node:crypto';
+
 export const CENSUS_REPORT_FIELDS = [
   'deterministic',
   'authorizes_execution',
@@ -306,6 +308,15 @@ export function keysShareOneAccount(
   } catch {
     return false;
   }
+}
+
+/**
+ * Public fingerprint of one API key. Twelve lowercase hex characters:
+ * the leading bytes of SHA-256 over the UTF-8 key. Not the key, not an
+ * account id, and not authorization.
+ */
+export function key_fp(apiKey: string): string {
+  return createHash('sha256').update(apiKey, 'utf8').digest('hex').slice(0, 12);
 }
 
 export function isPublicCensusReport(value: unknown): value is KeyAccountCensus {

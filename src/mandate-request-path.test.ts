@@ -7,12 +7,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   MANDATE_PROOF_ENFORCE_ENV,
+  defaultMandateRequestDeps,
   evaluateMandateRequestPath,
   mandateProofEnforceEnabled,
   verdictAfterVerifiedMandate,
   type MandateRequestDeps,
   type MandateVerifiedContinuation,
 } from './mandate-request-path.js';
+import { readProductiveAccountPolicy } from './principal-manifest-store.js';
 import { normalizeMandate } from './mandate-normalize.js';
 import { MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE } from './mandate-no-auth.js';
 import {
@@ -562,6 +564,50 @@ describe('evaluateMandateRequestPath', () => {
       expect(decision.body).not.toHaveProperty('verdict');
     }
     expect(replay.calls).toBe(0);
+  });
+
+  it('reads legacy for a migration account when Redis answers missing, and fails closed on error', async () => {
+    const body = {
+      claim: 'FYI',
+      evidence: 'status',
+      mode: 'action_authorization',
+    };
+    const missing = {
+      environment: 'production' as const,
+      env: {},
+      command: { async eval() { return 'missing'; } },
+    };
+    const legacy = await evaluate(
+      body,
+      {
+        env: { SENTINEL_API_KEYS: `${API_KEY}:direct:v3api:acct_v3api` },
+        readPolicy: (accountId) => readProductiveAccountPolicy(accountId, missing),
+      },
+    );
+    expect(legacy).toEqual({ action: 'continue' });
+    expect(JSON.stringify(legacy)).not.toContain(API_KEY);
+    expect(JSON.stringify(legacy)).not.toContain('acct_v3api');
+
+    const other = await evaluate(body, {
+      readPolicy: (accountId) => readProductiveAccountPolicy(accountId, missing),
+    });
+    expect(other.action).toBe('unavailable');
+    if (other.action === 'unavailable') expect(other.body.code).toBe('POLICY_UNAVAILABLE');
+
+    const down = await evaluate(body, {
+      readPolicy: async () => {
+        throw new Error('redis token leaked-policy');
+      },
+    });
+    expect(down.action).toBe('unavailable');
+    if (down.action === 'unavailable') {
+      expect(down.body.code).toBe('POLICY_UNAVAILABLE');
+      expect(JSON.stringify(down.body)).not.toContain('leaked-policy');
+    }
+
+    const defaults = defaultMandateRequestDeps({});
+    expect(defaults.manifestStore).not.toBeNull();
+    expect(await defaults.manifestStore?.load('acct_v3api')).toEqual({ answered: false });
   });
 
   it('blocks a proof account id that does not equal the server account', async () => {

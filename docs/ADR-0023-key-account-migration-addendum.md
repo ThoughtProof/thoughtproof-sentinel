@@ -58,14 +58,19 @@ The report keys are `deterministic`, `authorizes_execution`, `records`, `distinc
 
 ## Activation
 
-Merging this draft and a deterministic census do not activate mandate enforcement. `defaultMandateRequestDeps` still supplies `manifestStore: null` and `readPolicy: () => 'unreadable'`. A protected check cannot load a pinned key from a null store, and an unreadable policy is HTTP 503 `POLICY_UNAVAILABLE`, not legacy and not protected.
+Merging the census and `pinPrincipalKeyAsAdmin` does not activate mandate enforcement. A later draft replaces the null manifest and the always-unreadable policy reader. `defaultMandateRequestDeps` now uses the Redis-backed manifest store and account-policy reader. `SENTINEL_MANDATE_PROOF_ENFORCE` stays unset. This is not an enablement GO.
 
-Activation additionally requires both of these, on top of a separate enablement GO:
+The store is the existing Upstash Redis, on key prefixes that are not the replay nonce and not the rate-limit key. A missing client, an invalid client, a bad reply, a throw, or a silent call past 2000 ms fails closed: manifest load is `{ answered: false }` and policy is `unreadable`. That is HTTP 503 when enforcement is on. It is not ALLOW and it is not an implicit legacy status.
 
-- A productive manifest store that answers for the account. The null default is not that store.
-- A readable account policy. The default reader does not return `legacy` or `protected`.
+When Redis answers that no policy row is stored, the three accounts Raul chose are an explicit `legacy` policy: `acct_v3api`, `acct_grokbot`, and `acct_nightly`. A stored `legacy` or `protected` row wins. Any other account with no row stays `unreadable`. `legacy` is not protected-account enablement. An error does not fall back to `legacy`.
 
-Until both exist, do not treat a merged pin function or a green census as permission to set `SENTINEL_MANDATE_PROOF_ENFORCE` or to enable an account.
+The census is deterministic only when every existing key has one account id in the record. A fixture with those three account ids reports `deterministic: true`. An unmapped fixture of the same three keys does not. This draft does not change `SENTINEL_API_KEYS`.
+
+## Operator pin
+
+`scripts/pin-key-account.ts` selects a key by `key_fp` from `SENTINEL_API_KEYS` in the process environment and, only with `--apply`, calls `pinPrincipalKeyAsAdmin`. Dry-run is the default. Run it with `node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/register-ts-extension.mjs`. The script prints fingerprints and status. It does not print key values, and it does not run against production from this repository. `--apply` reads `SENTINEL_PRINCIPAL_PUBLIC_KEY` from the environment, not from an argument. The approved fingerprints are `104867493888` (`acct_v3api`), `00f666d19701` (`acct_grokbot`), and `74541b14c65c` (`acct_nightly`). The agent id is not the account id.
+
+Do not treat this store, this policy, or a green census as permission to set `SENTINEL_MANDATE_PROOF_ENFORCE` or to mark an account protected.
 
 ## Non-goals
 
