@@ -8,6 +8,8 @@ This is the pilot manual process for pinning, rotating, retiring, and revoking a
 
 **Decided (founder review, 2026-10-28).** Merging this document does not permit manual pinning, does not unlock `registerPrincipalKey`, does not wire `verifyPrincipalMandate` into `POST /sentinel/verify`, and does not enable any account. `registerPrincipalKey` still returns `{ ok: false, httpStatus: 503, code: 'REGISTRATION_UNAUTHORIZED' }` and writes nothing. A later founder GO has to name this document and explicitly authorize the first pin, or explicitly authorize a change to that function, before anyone follows the execution steps below.
 
+**Code path (draft, 2026-10-31).** `pinPrincipalKeyAsAdmin` in `src/principal-key-admin.ts` is the only function that writes a pin. `registerPrincipalKey` is unchanged. The new function is not an HTTP route and is not called from `POST /sentinel/verify`. Calling it does not set `SENTINEL_MANDATE_PROOF_ENFORCE` and does not enable an account. The procedure below is still required before an operator invokes it. This draft does not execute a pin against a production store.
+
 Placeholder strings in the examples are not keys, not signatures, and not vectors.
 
 ## Who
@@ -22,7 +24,7 @@ Two roles, and they are not the same person acting as both sides of the check.
 
 The holder is the person or organization whose resources the account stands for, as in ADR-0023 decision 1. On ThoughtProof's own account, that is the legitimate ThoughtProof responsible. On a customer account, that is the customer. An intermediary account is not enough. The model, the MCP host, the agent, the verify API key, and `X-Sentinel-Agent-Id` are callers. They are not the holder, not the admin, and not the operator.
 
-The public API is not the execution path. `POST /sentinel/verify` is not the execution path. `registerPrincipalKey` is not the execution path. The operator uses a separate admin process: direct access to the manifest store for one environment, after the checks in this document.
+The public API is not the execution path. `POST /sentinel/verify` is not the execution path. `registerPrincipalKey` is not the execution path. After the checks in this document, the operator invokes `pinPrincipalKeyAsAdmin` for one environment. That function compare-and-sets the store it is given. A direct store edit that bypasses the function is not this path.
 
 ## Identity and admin authorization
 
@@ -293,15 +295,37 @@ These match the stage-3 checks. None of them is ALLOW. A valid signature does no
 | Store missing, store throws, load answers `{ answered: false }`, or the load stays silent past 2000 ms. | HTTP 503 `MANIFEST_UNAVAILABLE`. No memory fallback and no pass. |
 | Document does not parse (bad timestamp, private field, duplicate `kid`, export schema, unknown field, `notAfter <= notBefore`). | HTTP 503 `MANIFEST_MALFORMED`. |
 | Store answered and the `kid` is absent, or the answered manifest is empty. | BLOCK `unknown_kid`. |
-| `registerPrincipalKey` invoked by anyone, including an operator. | HTTP 503 `REGISTRATION_UNAUTHORIZED`. No write. |
+| `registerPrincipalKey` invoked by anyone, including an operator or an admin. | HTTP 503 `REGISTRATION_UNAUTHORIZED`. No write. |
+| `pinPrincipalKeyAsAdmin` with no grant, a non-admin role, the wrong account, or an action the grant does not list. | HTTP 503. `IDENTITY_UNCONFIRMED` or `ADMIN_UNAUTHORIZED`. No write. |
+| The same call with a duplicate active `kid` or `x`, or with a retired, revoked, or `rotated` key. | HTTP 503. `DUPLICATE_KEY` or `ROTATED_KEY`. No write. |
+| The store throws, the version does not match, the document is unreadable, or the audit callback throws. | HTTP 503. No success result. A thrown audit after a compare-and-set still returns failure. The caller must not treat that as success. |
 
-The operator's audit `reason` uses the admin enums in the audit section. The HTTP codes above are the verifier's codes once the check runs. This process does not add an HTTP route that returns them.
+The operator's audit `reason` uses the admin enums in the audit section. The HTTP codes above are the verifier's codes once the check runs, except the pin-function codes in the last three rows. This process does not add an HTTP route that returns them. `authorizesExecution` on a pin result is false. A pin is not ALLOW.
+
+## Admin pin function
+
+`pinPrincipalKeyAsAdmin` applies the checks that can be enforced in code. It does not place the out-of-band phone call. The operator passes a grant only after the holder or admin confirmation in this document.
+
+| Check | Failure |
+|---|---|
+| `grant` missing or not a plain object | `IDENTITY_UNCONFIRMED`. The verify API key and `X-Sentinel-Agent-Id` are ignored. |
+| `role` is not `account_holder` or `account_admin`, `accountId` differs, or `actions` does not include `pin` on an empty manifest or `rotate_add` when keys already exist | `ADMIN_UNAUTHORIZED` |
+| New key status is not `active`, or the `kid` or `x` is already retired or revoked, or the submitted status is `rotated` | `ROTATED_KEY` |
+| `kid` or `x` matches a key that is still `active` | `DUPLICATE_KEY` |
+| Private-key field present | `PRIVATE_KEY_PRESENT`. The field is not copied into the audit entry. |
+| Any throw, missing audit callback, store failure, version mismatch, or unreadable document | HTTP 503. No success result. |
+
+The audit entry is the status-and-counts object from the audit section. It does not include `accountId`, `kid`, `x`, a signature, a nonce, or an API key. On `state_unclear` the counts are omitted. A rejected write that changed nothing reports after-counts equal to before-counts when a read answered.
+
+An accepted rotate keeps the previous keys. A `retired` kid stays `retired`. A `revoked` kid stays `revoked`. The new key is a new `kid` and a new `x` with status `active`. Acceptance is `authorizesExecution: false`. It is not a verdict and it is not ALLOW.
+
+The manifest store adapter is still not chosen. Tests pass a fake store. No production store is wired.
 
 ## Non-goals
 
 - No self-service pin, rotation, retirement, or revocation.
 - No automated registration and no agent-registered key.
-- No change to `registerPrincipalKey`. It stays locked until a separate founder GO. Merging this document does not permit manual pinning, does not unlock that function, does not wire verification, and does not enable an account.
+- No change to `registerPrincipalKey`. It stays locked. `pinPrincipalKeyAsAdmin` is a separate function. Shipping it does not permit a production pin, does not wire verification, and does not enable an account.
 - No wiring into `POST /sentinel/verify`, no enablement, and no suite run.
 - No use of the verify API key or `X-Sentinel-Agent-Id` as registration authority.
 - No caller-supplied principal manifest and no caller-supplied JWKS URL.

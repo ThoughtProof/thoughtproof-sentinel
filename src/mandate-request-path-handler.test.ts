@@ -87,6 +87,7 @@ const ENV_KEYS = [
   'SENTINEL_AUTH_REQUIRED',
   'SENTINEL_MANDATE_PROOF_ENFORCE',
   'SENTINEL_API_KEYS',
+  'SENTINEL_GLOBAL_RATE_LIMIT',
   'SENTINEL_X402_ENABLED',
   'SENTINEL_EXPORT_PRIVATE_KEY',
 ] as const;
@@ -244,6 +245,7 @@ describe('POST /sentinel/verify mandate proof flag', () => {
     delete process.env.SENTINEL_AUTH_REQUIRED;
     delete process.env.SENTINEL_MANDATE_PROOF_ENFORCE;
     delete process.env.SENTINEL_API_KEYS;
+    delete process.env.SENTINEL_GLOBAL_RATE_LIMIT;
     delete process.env.SENTINEL_X402_ENABLED;
     delete process.env.SENTINEL_EXPORT_PRIVATE_KEY;
   });
@@ -309,6 +311,37 @@ describe('POST /sentinel/verify mandate proof flag', () => {
     expect(ctx.body).not.toHaveProperty('verdict');
     expect(JSON.stringify(ctx.body)).not.toContain('ALLOW');
     expect(JSON.stringify(ctx.body)).not.toContain('wire-invalid-key');
+    expect(verifyMock).not.toHaveBeenCalled();
+    expect(x402Mock).not.toHaveBeenCalled();
+    expect(billingMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when enforce is on and the request has no key', async () => {
+    process.env.SENTINEL_MANDATE_PROOF_ENFORCE = 'true';
+    process.env.SENTINEL_GLOBAL_RATE_LIMIT = '100000';
+    process.env.SENTINEL_API_KEYS = `${API_KEY}:direct:agent-h:${ACCOUNT}`;
+
+    process.env.SENTINEL_AUTH_REQUIRED = 'true';
+    const required = mockRes();
+    await handler(request(baseBody()) as never, required.res as never);
+    expect(required.statusCode).toBe(401);
+    expect(required.body).toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(required.body).not.toHaveProperty('verdict');
+    expect(JSON.stringify(required.body)).not.toContain('ALLOW');
+    expect(verifyMock).not.toHaveBeenCalled();
+    expect(x402Mock).not.toHaveBeenCalled();
+    expect(billingMock).not.toHaveBeenCalled();
+
+    delete process.env.SENTINEL_AUTH_REQUIRED;
+    const open = mockRes();
+    await handler(request(baseBody()) as never, open.res as never);
+    expect(open.statusCode).toBe(503);
+    expect(open.body).toMatchObject({
+      error: MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE,
+      code: 'ACCOUNT_UNAVAILABLE',
+    });
+    expect(open.body).not.toHaveProperty('verdict');
+    expect(JSON.stringify(open.body)).not.toContain('ALLOW');
     expect(verifyMock).not.toHaveBeenCalled();
     expect(x402Mock).not.toHaveBeenCalled();
     expect(billingMock).not.toHaveBeenCalled();
