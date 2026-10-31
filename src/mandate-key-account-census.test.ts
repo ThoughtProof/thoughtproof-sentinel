@@ -15,6 +15,7 @@ import {
   censusSentinelApiKeys,
   inspectKeyMapping,
   isPublicCensusReport,
+  key_fp,
   keysShareOneAccount,
   type KeyAccountCensus,
 } from './mandate-key-account-census.js';
@@ -216,6 +217,93 @@ describe('key to account census', () => {
     expect(JSON.stringify(required)).not.toContain('ALLOW');
     expect(JSON.stringify(open)).not.toContain(OLD_KEY);
     expect(JSON.stringify(required)).not.toContain(ACCOUNT);
+  });
+});
+
+describe('census once each key has one account', () => {
+  const V3 = 'sk_census_map_v3api_fixture';
+  const GROK = 'sk_census_map_grokbot_fixture';
+  const NIGHTLY = 'sk_census_map_nightly_fixture';
+  const AGENTS = ['v3api', 'grokbot', 'nightly-suite'] as const;
+  const ACCOUNTS = ['acct_v3api', 'acct_grokbot', 'acct_nightly'] as const;
+  const KEYS = [V3, GROK, NIGHTLY] as const;
+
+  function unmapped(): string {
+    return KEYS.map((key, index) => `${key}:direct:${AGENTS[index]}`).join(',');
+  }
+
+  function mappedFromFingerprints(): string {
+    const table = new Map(KEYS.map((key, index) => [key_fp(key), ACCOUNTS[index]]));
+    const records = parseSentinelApiKeyRecords(unmapped());
+    if (!records) throw new Error('fixture records were not parsed');
+    return records
+      .map((record) => {
+        const account = record.accountId ?? table.get(key_fp(record.key));
+        const agent = record.agent_id ?? '';
+        if (!account) return `${record.key}:${record.platform}:${agent}`;
+        return `${record.key}:${record.platform}:${agent}:${account}`;
+      })
+      .join(',');
+  }
+
+  it('stays non-deterministic while the three keys have no account field', () => {
+    const report = censusSentinelApiKeys(unmapped());
+    expect(report.deterministic).toBe(false);
+    expect(report.distinct_keys).toBe(3);
+    expect(report.mapped_keys).toBe(0);
+    expect(report.unmapped_keys).toBe(3);
+    expect(report.authorizes_execution).toBe(false);
+    expect(JSON.stringify(report)).not.toContain(V3);
+    expect(JSON.stringify(report)).not.toContain('acct_v3api');
+  });
+
+  it('reports deterministic true once the fingerprint mapping exists', () => {
+    const raw = mappedFromFingerprints();
+    const report = censusSentinelApiKeys(raw);
+    expect(report).toEqual({
+      deterministic: true,
+      authorizes_execution: false,
+      records: 3,
+      distinct_keys: 3,
+      mapped_keys: 3,
+      unmapped_keys: 0,
+      ambiguous_keys: 0,
+      empty_keys: 0,
+      distinct_accounts: 3,
+      overlap_accounts: 0,
+      rotation_overlap_keys: 0,
+      revoked_keys: 0,
+      revoked_absent: 0,
+      revoked_ambiguous: 0,
+      revoked_unmapped: 0,
+      duplicate_rows: 0,
+    } satisfies KeyAccountCensus);
+    expect(isPublicCensusReport(report)).toBe(true);
+    for (const key of KEYS) {
+      expect(inspectKeyMapping(raw, key)).toEqual({
+        maps: true,
+        revoked: false,
+        authorizesExecution: false,
+      });
+      expect(key_fp(key)).toMatch(/^[0-9a-f]{12}$/);
+      expect(key_fp(key)).not.toContain(key);
+    }
+    expect(keysShareOneAccount(raw, [...KEYS])).toBe(false);
+    const json = JSON.stringify(report);
+    expect(json).not.toContain(V3);
+    expect(json).not.toContain(GROK);
+    expect(json).not.toContain(NIGHTLY);
+    expect(json).not.toContain('acct_v3api');
+    expect(json).not.toContain('acct_grokbot');
+    expect(json).not.toContain('acct_nightly');
+    expect(json).not.toContain('v3api');
+    expect(json).not.toContain('ALLOW');
+  });
+
+  it('fingerprints a key without returning the key', () => {
+    expect(key_fp(V3)).toBe(key_fp(V3));
+    expect(key_fp(V3)).not.toBe(key_fp(GROK));
+    expect(key_fp('')).toMatch(/^[0-9a-f]{12}$/);
   });
 });
 

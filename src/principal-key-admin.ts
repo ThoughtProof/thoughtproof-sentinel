@@ -473,6 +473,14 @@ function parseNewKey(value: unknown, nowSeconds: number): NewKeyResult {
   return { ok: true, key };
 }
 
+/** Same checks as a pin. The returned key is not a grant to print `x`. */
+export function classifySubmittedPrincipalKey(
+  value: unknown,
+  nowSeconds: number,
+): NewKeyResult {
+  return parseNewKey(value, nowSeconds);
+}
+
 function readGrant(
   grant: unknown,
   accountId: string,
