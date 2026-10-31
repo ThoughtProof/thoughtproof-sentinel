@@ -5,14 +5,11 @@
 import { describe, expect, it } from 'vitest';
 import { defaultMandateRequestDeps } from './mandate-request-path.js';
 import {
-  ACCOUNT_POLICY_CAS_SCRIPT,
   ACCOUNT_POLICY_LOAD_SCRIPT,
-  MIGRATION_ACCOUNT_POLICIES,
   PRINCIPAL_MANIFEST_CAS_SCRIPT,
   PRINCIPAL_MANIFEST_LOAD_SCRIPT,
   PRINCIPAL_STORE_DEADLINE_MS,
   createProductiveManifestStore,
-  persistMigrationAccountPolicy,
   readProductiveAccountPolicy,
   type PrincipalRedisCommand,
 } from './principal-manifest-store.js';
@@ -40,10 +37,7 @@ function memoryRedis(): PrincipalRedisCommand & { keys: string[] } {
       const expected = args[0] ?? '';
       const document = args[1] ?? '';
       if (!/^\d+$/.test(expected) || document.length === 0) return 'bad';
-      if (script === ACCOUNT_POLICY_CAS_SCRIPT && document !== 'legacy' && document !== 'protected') {
-        return 'bad';
-      }
-      if (script !== PRINCIPAL_MANIFEST_CAS_SCRIPT && script !== ACCOUNT_POLICY_CAS_SCRIPT) return 'bad';
+      if (script !== PRINCIPAL_MANIFEST_CAS_SCRIPT) return 'bad';
       const version = hash.get('version') ?? '0';
       if (version !== expected) return 'mismatch';
       const next = String(Number(version) + 1);
@@ -131,21 +125,36 @@ describe('productive principal manifest store', () => {
     expect(Date.now() - started).toBeLessThan(PRINCIPAL_STORE_DEADLINE_MS + 2_000);
   }, 8_000);
 
-  it('reads legacy for the three accounts only when Redis answers, and fails closed on error', async () => {
+  it('treats a missing or deleted policy row as unreadable, including the migration accounts', async () => {
     const command = memoryRedis();
     const input = { environment: 'production' as const, command, env: {} };
-    expect(MIGRATION_ACCOUNT_POLICIES).toEqual({
-      acct_v3api: 'legacy',
-      acct_grokbot: 'legacy',
-      acct_nightly: 'legacy',
-    });
-    for (const accountId of Object.keys(MIGRATION_ACCOUNT_POLICIES)) {
-      expect(await readProductiveAccountPolicy(accountId, input)).toBe('legacy');
+    for (const accountId of [ACCOUNT, 'acct_grokbot', 'acct_nightly', OTHER]) {
+      expect(await readProductiveAccountPolicy(accountId, input)).toBe('unreadable');
     }
-    expect(await readProductiveAccountPolicy(OTHER, input)).toBe('unreadable');
-    expect(await persistMigrationAccountPolicy(ACCOUNT, input)).toBe(true);
-    expect(await readProductiveAccountPolicy(ACCOUNT, input)).toBe('legacy');
     expect(command.keys.every((key) => !key.includes(ACCOUNT) && !key.includes('v3api'))).toBe(true);
+
+    const storedLegacy = {
+      environment: 'production' as const,
+      env: {},
+      command: { async eval() { return 'doc\n1\nlegacy'; } },
+    };
+    expect(await readProductiveAccountPolicy(ACCOUNT, storedLegacy)).toBe('legacy');
+
+    let protectedPresent = true;
+    const deletable = {
+      environment: 'production' as const,
+      env: {},
+      command: {
+        async eval() {
+          return protectedPresent ? 'doc\n2\nprotected' : 'missing';
+        },
+      },
+    };
+    expect(await readProductiveAccountPolicy(ACCOUNT, deletable)).toBe('protected');
+    protectedPresent = false;
+    expect(await readProductiveAccountPolicy(ACCOUNT, deletable)).toBe('unreadable');
+    expect(await readProductiveAccountPolicy('acct_grokbot', deletable)).toBe('unreadable');
+    expect(await readProductiveAccountPolicy('acct_nightly', deletable)).toBe('unreadable');
 
     const down = {
       environment: 'production' as const,
@@ -157,7 +166,6 @@ describe('productive principal manifest store', () => {
       },
     };
     expect(await readProductiveAccountPolicy(ACCOUNT, down)).toBe('unreadable');
-    expect(await persistMigrationAccountPolicy(ACCOUNT, down)).toBe(false);
     expect(await readProductiveAccountPolicy(ACCOUNT, { environment: undefined, command, env: {} })).toBe(
       'unreadable',
     );
@@ -168,12 +176,5 @@ describe('productive principal manifest store', () => {
       command: { async eval() { return 'doc\n1\ncaller_declared'; } },
     };
     expect(await readProductiveAccountPolicy(ACCOUNT, garbage)).toBe('unreadable');
-
-    const protectedRow = {
-      environment: 'production' as const,
-      env: {},
-      command: { async eval() { return 'doc\n4\nprotected'; } },
-    };
-    expect(await readProductiveAccountPolicy(ACCOUNT, protectedRow)).toBe('protected');
   });
 });

@@ -8,16 +8,18 @@
 import { parseSentinelApiKeyRecords } from './server-account.js';
 import { key_fp } from './mandate-key-account-census.js';
 import {
+  classifySubmittedPrincipalKey,
   pinPrincipalKeyAsAdmin,
   type PrincipalAdminAuditEntry,
   type PrincipalAdminPinStore,
 } from './principal-key-admin.js';
-import {
-  persistMigrationAccountPolicy,
-  type PrincipalRedisCommand,
-  type ProductiveStoreInput,
-} from './principal-manifest-store.js';
 import type { PrincipalEnvironment } from './principal-key-manifest.js';
+
+/**
+ * What a deterministic census proves. It does not prove that a signer
+ * key is bound to the account.
+ */
+export const CENSUS_PROVES = 'api_key_account_mapping_only' as const;
 
 /**
  * Raul's choices. `key_fp` is the census fingerprint of the API key.
@@ -34,16 +36,6 @@ export type ApprovedKeyAccount = {
   accountId: string;
   agent_id?: string;
 };
-
-const PRIVATE_KEY_FIELDS = new Set([
-  'd',
-  'k',
-  'priv',
-  'private',
-  'privateKey',
-  'private_key',
-  'seed',
-]);
 
 export type PinSelectionStatus = 'approved' | 'unapproved' | 'ambiguous' | 'empty';
 
@@ -118,6 +110,25 @@ export function selectKeyAccounts(
   }
 }
 
+export type SigningKeyInspection =
+  | { ok: true; signer_fp: string; authorizesExecution: false }
+  | { ok: false; status: 'PRIVATE_KEY_PRESENT' | 'ROTATED_KEY' | 'MALFORMED_REQUEST' | 'WINDOW_INVALID'; authorizesExecution: false };
+
+/**
+ * Validate one submitted public key and return only its fingerprint.
+ * The fingerprint is `key_fp` of `x`. It is not the API-key census
+ * fingerprint and it does not prove the key is stored for an account.
+ */
+export function inspectSigningKey(value: unknown, nowSeconds: number): SigningKeyInspection {
+  try {
+    const parsed = classifySubmittedPrincipalKey(value, nowSeconds);
+    if (!parsed.ok) return { ok: false, status: parsed.code, authorizesExecution: false };
+    return { ok: true, signer_fp: key_fp(parsed.key.x), authorizesExecution: false };
+  } catch {
+    return { ok: false, status: 'MALFORMED_REQUEST', authorizesExecution: false };
+  }
+}
+
 export function publicPinRow(selection: PinSelection): PublicPinRow {
   const row: PublicPinRow = {
     status: selection.status,
@@ -158,16 +169,12 @@ export interface ApplyKeyPinInput {
   publicKey: unknown;
   store: PrincipalAdminPinStore;
   table?: readonly ApprovedKeyAccount[];
-  /** Required when policy persistence is on. */
-  storeInput?: ProductiveStoreInput;
-  command?: PrincipalRedisCommand | null;
-  /** Default true. False skips the policy write. */
-  persistPolicy?: boolean;
 }
 
 /**
- * Pin the approved public key for one fingerprint. Dry-run does not call
- * this. A result is fingerprints and status only.
+ * Pin the approved public key for one fingerprint. Does not create an
+ * account policy row. Dry-run does not call this. A result is
+ * fingerprints and status only.
  */
 export async function applyApprovedKeyPin(input: ApplyKeyPinInput): Promise<PublicApplyResult> {
   const table = input.table ?? APPROVED_KEY_ACCOUNTS;
@@ -181,26 +188,10 @@ export async function applyApprovedKeyPin(input: ApplyKeyPinInput): Promise<Publ
   }
   const accountId = match.accountId;
 
-  if (!isPlainObject(input.publicKey)) return applyResult(input.keyFp, 'malformed_request');
-  if (Object.keys(input.publicKey).some((name) => PRIVATE_KEY_FIELDS.has(name))) {
-    return applyResult(input.keyFp, 'private_key_present');
-  }
+  const signing = inspectSigningKey(input.publicKey, input.nowSeconds);
+  if (!signing.ok) return applyResult(input.keyFp, signing.status);
 
   const secrets = [...stringFields(input.publicKey), accountId];
-  const persist = input.persistPolicy !== false;
-  if (persist) {
-    const storeInput: ProductiveStoreInput = input.storeInput ?? {
-      environment: input.environment,
-      command: input.command ?? null,
-    };
-    let wrote = false;
-    try {
-      wrote = await persistMigrationAccountPolicy(accountId, storeInput);
-    } catch {
-      wrote = false;
-    }
-    if (!wrote) return applyResult(input.keyFp, 'policy_unwritten');
-  }
 
   let loaded: unknown;
   try {

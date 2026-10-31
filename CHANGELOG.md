@@ -3,13 +3,16 @@
 ### Added
 - ADR-0023 productive manifest store and account policy on the existing
   Upstash Redis. `defaultMandateRequestDeps` no longer uses a null
-  manifest. The three migration accounts are explicit `legacy` when
-  Redis answers that no policy row is stored. Any store or policy error
-  fails closed. `scripts/pin-key-account.ts` selects an API key by
-  `key_fp` and calls `pinPrincipalKeyAsAdmin` only with `--apply`
-  (dry-run is the default). It prints fingerprints and status, never
-  key values. `SENTINEL_MANDATE_PROOF_ENFORCE` stays unset. This does
-  not enable an account and does not run against production.
+  manifest. A missing or deleted policy row is unreadable for every
+  account, including the migration accounts, so enforcement does not
+  continue to an evaluation that can ALLOW. `--apply` does not create a
+  policy row. Dry-run validates `SENTINEL_PRINCIPAL_PUBLIC_KEY` and
+  prints its fingerprint. Census `deterministic: true` proves API-key
+  to account mapping only, not signer binding. Activation requires
+  signer binding, migration, deployment mapping, and an explicit
+  authorization, separately proven. `SENTINEL_MANDATE_PROOF_ENFORCE`
+  stays unset. This does not enable an account and does not run against
+  production.
 - `gate.checked` and `gate.skipped` on canonical verdict v2 only (ADR-0022
   P3 addendum). `runAuthorizationGate` reports which of the three checks
   ran and which were skipped because an input was missing or unparseable.

@@ -6,6 +6,8 @@
  *
  * The record grammar matches parseSentinelApiKeyRecords. A parity test
  * locks the two parsers together. Do not print a parse result.
+ * `deterministic: true` proves each API key has one account id. It does
+ * not prove a signer key is bound to that account.
  */
 
 import { createHash } from 'node:crypto';

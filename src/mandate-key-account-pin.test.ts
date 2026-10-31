@@ -10,19 +10,18 @@ import { describe, expect, it } from 'vitest';
 import { key_fp } from './mandate-key-account-census.js';
 import {
   APPROVED_KEY_ACCOUNTS,
+  CENSUS_PROVES,
   applyApprovedKeyPin,
+  inspectSigningKey,
   publicPinRow,
   selectKeyAccounts,
 } from './mandate-key-account-pin.js';
 import {
-  createProductiveManifestStore,
-  type PrincipalRedisCommand,
-} from './principal-manifest-store.js';
-import {
-  ACCOUNT_POLICY_CAS_SCRIPT,
   ACCOUNT_POLICY_LOAD_SCRIPT,
   PRINCIPAL_MANIFEST_CAS_SCRIPT,
   PRINCIPAL_MANIFEST_LOAD_SCRIPT,
+  createProductiveManifestStore,
+  type PrincipalRedisCommand,
 } from './principal-manifest-store.js';
 import type { PrincipalAdminPinStore } from './principal-key-admin.js';
 
@@ -77,7 +76,7 @@ function memoryRedis(): PrincipalRedisCommand {
       if (version !== expected) return 'mismatch';
       const next = String(Number(version) + 1);
       const field = script === PRINCIPAL_MANIFEST_CAS_SCRIPT ? 'manifest' : 'status';
-      if (script !== PRINCIPAL_MANIFEST_CAS_SCRIPT && script !== ACCOUNT_POLICY_CAS_SCRIPT) return 'bad';
+      if (script !== PRINCIPAL_MANIFEST_CAS_SCRIPT) return 'bad';
       hash.set('version', next);
       hash.set(field, document);
       hashes.set(redisKey, hash);
@@ -154,7 +153,7 @@ describe('applyApprovedKeyPin', () => {
     const order: string[] = [];
     const wrapped: PrincipalRedisCommand = {
       async eval(script, keys, args) {
-        order.push(script === ACCOUNT_POLICY_LOAD_SCRIPT || script === ACCOUNT_POLICY_CAS_SCRIPT ? 'policy' : 'manifest');
+        order.push(script === ACCOUNT_POLICY_LOAD_SCRIPT ? 'policy' : 'manifest');
         return command.eval(script, keys, args);
       },
     };
@@ -171,8 +170,6 @@ describe('applyApprovedKeyPin', () => {
       publicKey: key,
       store,
       table,
-      storeInput: { environment: 'production', command: wrapped, env: {} },
-      command: wrapped,
     });
     expect(result).toEqual({
       mode: 'apply',
@@ -180,8 +177,8 @@ describe('applyApprovedKeyPin', () => {
       status: 'ACCEPTED',
       authorizes_execution: false,
     });
-    expect(order[0]).toBe('policy');
-    expect(order).toContain('manifest');
+    expect(order.length).toBeGreaterThan(0);
+    expect(order.every((step) => step === 'manifest')).toBe(true);
     const json = JSON.stringify(result);
     expect(json).not.toContain(apiKey);
     expect(json).not.toContain(x);
@@ -197,7 +194,6 @@ describe('applyApprovedKeyPin', () => {
       publicKey: key,
       store,
       table,
-      persistPolicy: false,
     });
     expect(again.status).toBe('DUPLICATE_KEY');
     expect(JSON.stringify(again)).not.toContain(x);
@@ -221,7 +217,6 @@ describe('applyApprovedKeyPin', () => {
       nowSeconds: NOW,
       publicKey: { kty: 'OKP' },
       store,
-      persistPolicy: false,
     });
     expect(missing.status).toBe('absent');
     expect(loads).toBe(0);
@@ -235,50 +230,136 @@ describe('applyApprovedKeyPin', () => {
       publicKey: { kty: 'OKP', seed: 'not-a-real-seed-value' },
       store,
       table,
-      persistPolicy: false,
     });
-    expect(leaked.status).toBe('private_key_present');
+    expect(leaked.status).toBe('PRIVATE_KEY_PRESENT');
     expect(loads).toBe(0);
     expect(JSON.stringify(leaked)).not.toContain('not-a-real-seed-value');
     expect(JSON.stringify(leaked)).not.toContain(FIXTURE_KEY);
   });
 });
 
+function livePublicKey(over: Record<string, unknown> = {}): { json: string; x: string; kid: string } {
+  const pair = generateKeyPairSync('ed25519');
+  const x = okpX(pair.publicKey);
+  const kid = 'kid-dry-run-fixture';
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    x,
+    kid,
+    json: JSON.stringify({
+      kty: 'OKP',
+      crv: 'Ed25519',
+      alg: 'EdDSA',
+      x,
+      kid,
+      status: 'active',
+      notBefore: iso(now - 60),
+      notAfter: iso(now + 3600),
+      ...over,
+    }),
+  };
+}
+
+describe('signing key inspection', () => {
+  it('accepts an active Ed25519 key inside its window and prints only the fingerprint', () => {
+    const pair = generateKeyPairSync('ed25519');
+    const x = okpX(pair.publicKey);
+    const inspected = inspectSigningKey(publicKey(x, 'kid-inspect'), NOW);
+    expect(inspected).toEqual({
+      ok: true,
+      signer_fp: key_fp(x),
+      authorizesExecution: false,
+    });
+    expect(JSON.stringify(inspected)).not.toContain(x);
+    expect(JSON.stringify(inspected)).not.toContain('kid-inspect');
+
+    const expired = inspectSigningKey(
+      publicKey(x, 'kid-inspect', ),
+      NOW + 10_000,
+    );
+    expect(expired.ok).toBe(false);
+    if (!expired.ok) expect(expired.status).toBe('WINDOW_INVALID');
+
+    const inactive = inspectSigningKey({ ...publicKey(x, 'kid-inspect'), status: 'retired' }, NOW);
+    expect(inactive.ok).toBe(false);
+    if (!inactive.ok) expect(inactive.status).toBe('ROTATED_KEY');
+
+    const wrongType = inspectSigningKey({ ...publicKey(x, 'kid-inspect'), kty: 'EC' }, NOW);
+    expect(wrongType.ok).toBe(false);
+    if (!wrongType.ok) expect(wrongType.status).toBe('MALFORMED_REQUEST');
+  });
+});
+
 describe('pin-key-account script', () => {
-  it('dry-run is the default and prints fingerprints, not keys', () => {
+  it('dry-run requires a valid signing key and reports that census is not signer binding', () => {
+    const signer = livePublicKey();
     const ran = runScript(['--environment', 'production'], {
       SENTINEL_API_KEYS: `${FIXTURE_KEY}:direct:v3api`,
-      SENTINEL_PRINCIPAL_PUBLIC_KEY: CANARY,
+      SENTINEL_PRINCIPAL_PUBLIC_KEY: signer.json,
     });
     expect(ran.status).toBe(0);
-    const report = JSON.parse(ran.stdout) as { mode: string; keys: Array<{ key_fp: string; status: string }> };
+    const report = JSON.parse(ran.stdout) as {
+      mode: string;
+      signer_fp: string;
+      signer_status: string;
+      census_proves: string;
+      signer_binding_proven: boolean;
+      keys: Array<{ key_fp: string; status: string }>;
+    };
     expect(report.mode).toBe('dry_run');
+    expect(report.signer_status).toBe('valid');
+    expect(report.signer_fp).toBe(key_fp(signer.x));
+    expect(report.census_proves).toBe(CENSUS_PROVES);
+    expect(report.signer_binding_proven).toBe(false);
     expect(report.keys).toEqual([
       { key_fp: key_fp(FIXTURE_KEY), status: 'unapproved', authorizes_execution: false },
     ]);
     expect(ran.stdout).not.toContain(FIXTURE_KEY);
-    expect(ran.stdout).not.toContain(CANARY);
-    expect(ran.stderr).not.toContain(FIXTURE_KEY);
+    expect(ran.stdout).not.toContain(signer.x);
+    expect(ran.stdout).not.toContain(signer.kid);
     expect(ran.stdout).not.toContain('ALLOW');
+    expect(ran.stderr).not.toContain(FIXTURE_KEY);
 
-    const one = runScript(['--key-fp', '104867493888'], {
+    const missingSigner = runScript(['--key-fp', '104867493888'], {
       SENTINEL_API_KEYS: `${FIXTURE_KEY}:direct:v3api`,
     });
-    expect(one.status).toBe(0);
-    expect(JSON.parse(one.stdout)).toEqual({
+    expect(missingSigner.status).toBe(2);
+    expect(JSON.parse(missingSigner.stdout)).toMatchObject({
       mode: 'dry_run',
+      status: 'public_key_missing',
+      signer_status: 'public_key_missing',
+      census_proves: CENSUS_PROVES,
+      signer_binding_proven: false,
       authorizes_execution: false,
       keys: [{ key_fp: '104867493888', status: 'absent', authorizes_execution: false }],
     });
-    expect(one.stdout).not.toContain(FIXTURE_KEY);
+    expect(missingSigner.stdout).not.toContain(FIXTURE_KEY);
+
+    const notYet = livePublicKey({
+      notBefore: iso(Math.floor(Date.now() / 1000) + 3600),
+      notAfter: iso(Math.floor(Date.now() / 1000) + 7200),
+    });
+    const closed = runScript(['--environment', 'production'], {
+      SENTINEL_API_KEYS: `${FIXTURE_KEY}:direct:v3api`,
+      SENTINEL_PRINCIPAL_PUBLIC_KEY: notYet.json,
+    });
+    expect(closed.status).toBe(2);
+    expect(JSON.parse(closed.stdout)).toMatchObject({
+      signer_status: 'WINDOW_INVALID',
+      census_proves: 'api_key_account_mapping_only',
+      signer_binding_proven: false,
+    });
+    expect(closed.stdout).not.toContain(notYet.x);
+    expect(closed.stdout).not.toContain(FIXTURE_KEY);
   });
 
   it('refuses apply without a write when the fingerprint is absent, and hides arguments', () => {
+    const signer = livePublicKey();
     const absent = runScript(
       ['--apply', '--environment', 'production', '--key-fp', '104867493888'],
       {
         SENTINEL_API_KEYS: `${FIXTURE_KEY}:direct:v3api`,
-        SENTINEL_PRINCIPAL_PUBLIC_KEY: CANARY,
+        SENTINEL_PRINCIPAL_PUBLIC_KEY: signer.json,
       },
     );
     expect(absent.status).toBe(2);
@@ -286,10 +367,30 @@ describe('pin-key-account script', () => {
       mode: 'apply',
       key_fp: '104867493888',
       status: 'absent',
+      signer_status: 'valid',
+      signer_fp: key_fp(signer.x),
+      census_proves: 'api_key_account_mapping_only',
+      signer_binding_proven: false,
       authorizes_execution: false,
     });
     expect(absent.stdout).not.toContain(FIXTURE_KEY);
+    expect(absent.stdout).not.toContain(signer.x);
     expect(absent.stdout).not.toContain(CANARY);
+
+    const malformed = runScript(
+      ['--apply', '--environment', 'production', '--key-fp', '104867493888'],
+      {
+        SENTINEL_API_KEYS: `${FIXTURE_KEY}:direct:v3api`,
+        SENTINEL_PRINCIPAL_PUBLIC_KEY: CANARY,
+      },
+    );
+    expect(malformed.status).toBe(2);
+    expect(JSON.parse(malformed.stdout)).toMatchObject({
+      status: 'MALFORMED_REQUEST',
+      signer_binding_proven: false,
+    });
+    expect(malformed.stdout).not.toContain(CANARY);
+    expect(malformed.stdout).not.toContain(FIXTURE_KEY);
 
     const pasted = `sk_pasted_argument_${FIXTURE_KEY}`;
     const rejected = runScript(['--apply', pasted], {
@@ -311,7 +412,9 @@ describe('pin-key-account script', () => {
     expect(script).not.toContain('console.log');
     expect(script).not.toContain('[skip ci]');
     expect(moduleSource).toContain('pinPrincipalKeyAsAdmin');
+    expect(moduleSource).not.toContain('persistMigrationAccountPolicy');
     expect(moduleSource).not.toContain('registerPrincipalKey');
+    expect(script).not.toContain('persistMigrationAccountPolicy');
     expect(moduleSource).not.toContain('[skip ci]');
     const store = readFileSync(new URL('./principal-manifest-store.ts', import.meta.url), 'utf8');
     expect(store).not.toContain('registerPrincipalKey');

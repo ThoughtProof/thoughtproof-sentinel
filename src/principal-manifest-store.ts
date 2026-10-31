@@ -6,10 +6,8 @@
  * and it is not an empty manifest that verifies.
  *
  * This module does not set SENTINEL_MANDATE_PROOF_ENFORCE and it does
- * not authorize execution. `legacy` for the three migration accounts
- * is an explicit policy when Redis answers that no row is stored. It
- * is not protected-account enablement. An error does not use that
- * policy.
+ * not authorize execution. A missing policy row is unreadable for every
+ * account. It is not legacy. This module does not create a policy row.
  */
 
 import { createHash } from 'node:crypto';
@@ -26,19 +24,6 @@ export const PRINCIPAL_STORE_DEADLINE_MS = 2_000;
 const MANIFEST_PREFIX = 'sentinel:principal-manifest:v1:';
 const POLICY_PREFIX = 'sentinel:account-policy:v1:';
 
-/**
- * Owner-chosen accounts. Readable only after Redis answers. A stored
- * `legacy` or `protected` row wins. A missing row is this explicit
- * `legacy` status. Any error is unreadable, including for these accounts.
- * The agent id is not the account id.
- */
-export const MIGRATION_ACCOUNT_POLICIES = {
-  acct_v3api: 'legacy',
-  acct_grokbot: 'legacy',
-  acct_nightly: 'legacy',
-} as const;
-
-export type MigrationAccountId = keyof typeof MIGRATION_ACCOUNT_POLICIES;
 export type StoredAccountPolicy = 'legacy' | 'protected';
 export type AccountPolicyRead = StoredAccountPolicy | 'unreadable';
 
@@ -89,29 +74,6 @@ end
 return 'doc\\n' .. ver .. '\\n' .. status
 `.trim();
 
-export const ACCOUNT_POLICY_CAS_SCRIPT = `
-local expected = ARGV[1]
-local status = ARGV[2]
-if type(expected) ~= 'string' or string.match(expected, '^%d+$') == nil then
-  return 'bad'
-end
-if status ~= 'legacy' and status ~= 'protected' then
-  return 'bad'
-end
-local ver = redis.call('HGET', KEYS[1], 'version')
-if not ver then ver = '0' end
-if ver ~= expected then
-  return 'mismatch'
-end
-local n = tonumber(ver)
-if n == nil then
-  return 'bad'
-end
-local nxt = tostring(n + 1)
-redis.call('HSET', KEYS[1], 'version', nxt, 'status', status)
-return 'ok:' .. nxt
-`.trim();
-
 export interface PrincipalRedisCommand {
   eval(script: string, keys: string[], args: string[]): Promise<unknown>;
 }
@@ -160,10 +122,6 @@ function redisKey(prefix: string, environment: string, accountId: string): strin
     .update(accountId, 'utf8')
     .digest('hex');
   return prefix + digest;
-}
-
-export function isMigrationAccount(accountId: string): accountId is MigrationAccountId {
-  return Object.prototype.hasOwnProperty.call(MIGRATION_ACCOUNT_POLICIES, accountId);
 }
 
 function withDeadline<T>(pending: Promise<T>, deadline: number): Promise<T> {
@@ -356,10 +314,10 @@ async function loadPolicyRecord(
 }
 
 /**
- * Account policy. The three migration accounts are `legacy` when Redis
- * answers that the row is absent. A stored `legacy` or `protected` value
- * is returned as stored. Every error, including a timeout, is
- * `unreadable` for those accounts and for every other account.
+ * Account policy. Only a stored `legacy` or `protected` row is that
+ * status. A missing row, a deleted row, and every error are
+ * `unreadable` for every account, including the migration accounts.
+ * This function does not create a row.
  */
 export async function readProductiveAccountPolicy(
   accountId: string,
@@ -369,36 +327,6 @@ export async function readProductiveAccountPolicy(
   const command = resolveCommand(input);
   if (!input.environment || !command) return 'unreadable';
   const record = await loadPolicyRecord(accountId, input.environment, command);
-  if (!record.ok) return 'unreadable';
-  if (record.present) return record.status;
-  if (isMigrationAccount(accountId)) return MIGRATION_ACCOUNT_POLICIES[accountId];
-  return 'unreadable';
-}
-
-/**
- * Write `legacy` for one migration account when Redis has no row.
- * A stored `legacy` or `protected` row is left as it is. Failure is
- * false and writes nothing else.
- */
-export async function persistMigrationAccountPolicy(
-  accountId: string,
-  input: ProductiveStoreInput,
-): Promise<boolean> {
-  try {
-    if (!isMigrationAccount(accountId)) return false;
-    const command = resolveCommand(input);
-    if (!input.environment || !command) return false;
-    const record = await loadPolicyRecord(accountId, input.environment, command);
-    if (!record.ok) return false;
-    if (record.present) return true;
-    const raw = await evalWithin(
-      command,
-      ACCOUNT_POLICY_CAS_SCRIPT,
-      [redisKey(POLICY_PREFIX, input.environment, accountId)],
-      ['0', 'legacy'],
-    );
-    return raw === 'ok:1';
-  } catch {
-    return false;
-  }
+  if (!record.ok || !record.present) return 'unreadable';
+  return record.status;
 }
