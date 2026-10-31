@@ -56,6 +56,17 @@ node --experimental-strip-types --disable-warning=ExperimentalWarning \
 
 The report keys are `deterministic`, `authorizes_execution`, `records`, `distinct_keys`, `mapped_keys`, `unmapped_keys`, `ambiguous_keys`, `empty_keys`, `distinct_accounts`, `overlap_accounts`, `rotation_overlap_keys`, `revoked_keys`, `revoked_absent`, `revoked_ambiguous`, `revoked_unmapped`, and `duplicate_rows`. `authorizes_execution` is false. Any other shape is `unreadable`.
 
+## Activation
+
+Merging this draft and a deterministic census do not activate mandate enforcement. `defaultMandateRequestDeps` still supplies `manifestStore: null` and `readPolicy: () => 'unreadable'`. A protected check cannot load a pinned key from a null store, and an unreadable policy is HTTP 503 `POLICY_UNAVAILABLE`, not legacy and not protected.
+
+Activation additionally requires both of these, on top of a separate enablement GO:
+
+- A productive manifest store that answers for the account. The null default is not that store.
+- A readable account policy. The default reader does not return `legacy` or `protected`.
+
+Until both exist, do not treat a merged pin function or a green census as permission to set `SENTINEL_MANDATE_PROOF_ENFORCE` or to enable an account.
+
 ## Non-goals
 
 - No change to `SENTINEL_MANDATE_PROOF_ENFORCE` or any other environment variable.

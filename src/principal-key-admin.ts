@@ -4,18 +4,28 @@
  * for the account and the action. It is not an HTTP route and it is
  * not called from POST /sentinel/verify.
  *
- * A result never authorizes execution. Any thrown error is HTTP 503
- * and writes nothing further. The audit entry is counts and status
- * only: no account id, no kid, no public key, no API key.
+ * A result never authorizes execution. ACCEPTED is returned only after
+ * a read-back shows the new key stored, active, and matching. A lost
+ * write response is indeterminate: the audit omits counts and the call
+ * is HTTP 503. Store and audit calls each have a monotonic deadline.
+ * The audit entry is counts and status only: no account id, no kid,
+ * no public key, no API key.
  */
 
 import { createPublicKey } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import {
   isPrincipalEnvironment,
   type PrincipalEnvironment,
   type PrincipalKeyManifest,
   type PrincipalPublicKey,
 } from './principal-key-manifest.js';
+
+/**
+ * One store call or one audit call. Same budget as the manifest load
+ * and the replay client. Not a clock for key validity.
+ */
+export const PRINCIPAL_ADMIN_CALL_DEADLINE_MS = 2_000;
 
 const SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const RFC3339_UTC_SECOND = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
@@ -74,11 +84,16 @@ export type PrincipalAdminPinCode =
   | 'STORE_UNAVAILABLE'
   | 'VERSION_MISMATCH'
   | 'STATE_UNCLEAR'
+  | 'READBACK_FAILED'
   | 'FAILED';
 
 export interface PrincipalAdminAuditEntry {
   action: PrincipalAdminAction;
-  result: 'accepted' | 'rejected' | 'failed';
+  /**
+   * `indeterminate` means the post-write state was not observed.
+   * Counts are omitted. They are not the pre-write snapshot.
+   */
+  result: 'accepted' | 'rejected' | 'failed' | 'indeterminate';
   reason?: PrincipalAdminAuditReason;
   environment?: PrincipalEnvironment;
   keys_before?: number;
@@ -233,6 +248,8 @@ function reasonFor(code: PrincipalAdminPinCode): PrincipalAdminAuditReason {
       return 'private_key_present';
     case 'STORE_UNAVAILABLE':
       return 'store_unavailable';
+    case 'READBACK_FAILED':
+      return 'readback_failed';
     case 'VERSION_MISMATCH':
       return 'version_mismatch';
     case 'STATE_UNCLEAR':
@@ -253,6 +270,7 @@ function resultClass(code: PrincipalAdminPinCode): 'accepted' | 'rejected' | 'fa
     code === 'STORE_UNAVAILABLE' ||
     code === 'VERSION_MISMATCH' ||
     code === 'STATE_UNCLEAR' ||
+    code === 'READBACK_FAILED' ||
     code === 'FAILED'
   ) {
     return 'failed';
@@ -279,16 +297,74 @@ function buildEntry(
   return entry;
 }
 
+function withDeadline<T>(pending: Promise<T>, deadline: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  return new Promise<T>((resolve, reject) => {
+    const clear = (): void => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    };
+    const finish = (settle: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clear();
+      settle();
+    };
+    timer = setTimeout(() => {
+      timer = undefined;
+      finish(() => reject(new Error('principal_admin_deadline')));
+    }, Math.max(0, deadline - performance.now()));
+    pending.then(
+      (value) => finish(() => {
+        // A paused event loop can run this continuation after the timer.
+        // Elapsed time, not callback order, decides expiry.
+        if (performance.now() >= deadline) reject(new Error('principal_admin_deadline'));
+        else resolve(value);
+      }),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
+/** Deadline starts before `run`, so synchronous work counts. */
+async function withinDeadline<T>(run: () => Promise<T> | T): Promise<T> {
+  const deadline = performance.now() + PRINCIPAL_ADMIN_CALL_DEADLINE_MS;
+  return withDeadline(Promise.resolve(run()), deadline);
+}
+
 async function record(
   audit: (entry: PrincipalAdminAuditEntry) => void | Promise<void>,
   entry: PrincipalAdminAuditEntry,
 ): Promise<boolean> {
   try {
-    await Promise.resolve(audit(entry));
+    await withinDeadline(() => audit(entry));
     return true;
   } catch {
     return false;
   }
+}
+
+function sameActiveKey(stored: PrincipalPublicKey, expected: PrincipalPublicKey): boolean {
+  return stored.status === 'active'
+    && expected.status === 'active'
+    && stored.kid === expected.kid
+    && stored.x === expected.x
+    && stored.kty === expected.kty
+    && stored.crv === expected.crv
+    && stored.notBefore === expected.notBefore
+    && stored.notAfter === expected.notAfter
+    && (stored.alg ?? null) === (expected.alg ?? null);
+}
+
+function casCommitted(value: unknown, expectedVersion: string): boolean {
+  if (!isPlainObject(value)) return false;
+  return value.ok === true
+    && typeof value.version === 'string'
+    && value.version.length > 0
+    && value.version !== expectedVersion;
 }
 
 function parseBound(value: unknown, allowNull: boolean): { ok: true; text: string | null } | { ok: false } {
@@ -435,14 +511,26 @@ export async function pinPrincipalKeyAsAdmin(
   let action: PrincipalAdminAction = 'pin';
   let environment: PrincipalEnvironment | undefined;
   let counts: KeyCounts | undefined;
-  let wrote = false;
+  let attemptedWrite = false;
 
   const finish = async (code: PrincipalAdminPinCode): Promise<PrincipalAdminPinResult> => {
     if (code === 'STATE_UNCLEAR' || code === 'FAILED') counts = undefined;
     const entry = buildEntry(action, code, environment, counts);
     const recorded = await record(audit, entry);
-    if (code === 'ACCEPTED') return accepted(recorded ? 'recorded' : 'audit_failed');
-    return closed(code, recorded ? 'recorded' : 'audit_failed');
+    if (!recorded) return closed('FAILED', 'audit_failed');
+    if (code === 'ACCEPTED') return accepted('recorded');
+    return closed(code, 'recorded');
+  };
+
+  const indeterminate = async (
+    reason: 'state_unclear' | 'readback_failed',
+    code: PrincipalAdminPinCode,
+  ): Promise<PrincipalAdminPinResult> => {
+    const entry: PrincipalAdminAuditEntry = { action, result: 'indeterminate', reason };
+    if (environment) entry.environment = environment;
+    const recorded = await record(audit, entry);
+    if (!recorded) return closed('FAILED', 'audit_failed');
+    return closed(code, 'recorded');
   };
 
   try {
@@ -470,10 +558,11 @@ export async function pinPrincipalKeyAsAdmin(
     if (!parsedKey.ok) return finish(parsedKey.code);
 
     if (!input.store) return finish('STORE_UNAVAILABLE');
+    const store = input.store;
 
     let loaded: unknown;
     try {
-      loaded = await Promise.resolve(input.store.load(accountId));
+      loaded = await withinDeadline(() => store.load(accountId));
     } catch {
       return finish('STORE_UNAVAILABLE');
     }
@@ -510,27 +599,55 @@ export async function pinPrincipalKeyAsAdmin(
       keys: [...stored.keys, parsedKey.key],
     };
 
-    let written: { ok: true; version: string } | { ok: false };
+    let written: unknown;
+    attemptedWrite = true;
     try {
-      written = await Promise.resolve(input.store.compareAndSet(accountId, expectedVersion, next));
+      written = await withinDeadline(() => store.compareAndSet(accountId, expectedVersion, next));
     } catch {
-      return finish('STORE_UNAVAILABLE');
+      return indeterminate('state_unclear', 'STATE_UNCLEAR');
     }
-    if (!written || written.ok !== true || typeof written.version !== 'string' || written.version.length === 0) {
+    if (isPlainObject(written) && written.ok === false) {
+      counts = undefined;
       return finish('VERSION_MISMATCH');
     }
-    wrote = true;
-    if (written.version === expectedVersion) return finish('STATE_UNCLEAR');
+    if (!casCommitted(written, expectedVersion)) {
+      return indeterminate('state_unclear', 'STATE_UNCLEAR');
+    }
+
+    let again: unknown;
+    try {
+      again = await withinDeadline(() => store.load(accountId));
+    } catch {
+      return indeterminate('readback_failed', 'READBACK_FAILED');
+    }
+    if (!isLoad(again) || again.answered === false) {
+      return indeterminate('readback_failed', 'READBACK_FAILED');
+    }
+    const confirmed = parseStoredManifest(accountId, again.manifest);
+    if (!confirmed.ok) return indeterminate('state_unclear', 'STATE_UNCLEAR');
+    const found = confirmed.keys.find((key) => key.kid === parsedKey.key.kid);
+    if (!found || !sameActiveKey(found, parsedKey.key)) {
+      const observed = statusCounts(confirmed.keys);
+      counts = {
+        keys_before: current.keys,
+        keys_after: observed.keys,
+        active_after: observed.active,
+        retired_after: observed.retired,
+        revoked_after: observed.revoked,
+      };
+      return finish('READBACK_FAILED');
+    }
+    const observed = statusCounts(confirmed.keys);
     counts = {
       keys_before: current.keys,
-      keys_after: current.keys + 1,
-      active_after: current.active + 1,
-      retired_after: current.retired,
-      revoked_after: current.revoked,
+      keys_after: observed.keys,
+      active_after: observed.active,
+      retired_after: observed.retired,
+      revoked_after: observed.revoked,
     };
     return finish('ACCEPTED');
   } catch {
-    if (wrote) return closed('FAILED', 'audit_failed');
+    if (attemptedWrite) return indeterminate('state_unclear', 'STATE_UNCLEAR');
     try {
       const entry = buildEntry(action, 'FAILED', environment, undefined);
       const recorded = await record(audit, entry);

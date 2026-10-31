@@ -298,13 +298,13 @@ These match the stage-3 checks. None of them is ALLOW. A valid signature does no
 | `registerPrincipalKey` invoked by anyone, including an operator or an admin. | HTTP 503 `REGISTRATION_UNAUTHORIZED`. No write. |
 | `pinPrincipalKeyAsAdmin` with no grant, a non-admin role, the wrong account, or an action the grant does not list. | HTTP 503. `IDENTITY_UNCONFIRMED` or `ADMIN_UNAUTHORIZED`. No write. |
 | The same call with a duplicate active `kid` or `x`, or with a retired, revoked, or `rotated` key. | HTTP 503. `DUPLICATE_KEY` or `ROTATED_KEY`. No write. |
-| The store throws, the version does not match, the document is unreadable, or the audit callback throws. | HTTP 503. No success result. A thrown audit after a compare-and-set still returns failure. The caller must not treat that as success. |
+| The store throws, the version does not match, the document is unreadable, the read-back is missing or does not show the new key `active`, or the audit callback throws or hangs. | HTTP 503. No success result. A lost write response is `indeterminate` and does not report the pre-write key counts. The caller must not treat that as success. |
 
 The operator's audit `reason` uses the admin enums in the audit section. The HTTP codes above are the verifier's codes once the check runs, except the pin-function codes in the last three rows. This process does not add an HTTP route that returns them. `authorizesExecution` on a pin result is false. A pin is not ALLOW.
 
 ## Admin pin function
 
-`pinPrincipalKeyAsAdmin` applies the checks that can be enforced in code. It does not place the out-of-band phone call. The operator passes a grant only after the holder or admin confirmation in this document.
+`pinPrincipalKeyAsAdmin` applies the checks that can be enforced in code. It does not place the out-of-band phone call. The operator passes a grant only after the holder or admin confirmation in this document. It returns success only after a read-back shows that key stored, `active`, and matching the submitted public key. A missing, unavailable, or mismatched read-back, including a key that is `revoked` after the write, is HTTP 503. A lost write response does not reuse the pre-write counts: the audit result is `indeterminate`, the counts are omitted, and the call is HTTP 503. Each store call and the audit call has its own monotonic deadline (`performance.now()`, 2000 ms). A call that does not answer inside that budget is HTTP 503. A response that arrives after the deadline is ignored.
 
 | Check | Failure |
 |---|---|
