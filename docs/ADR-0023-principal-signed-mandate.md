@@ -44,7 +44,7 @@ P1's salted digest is not the signature payload. The salt is generated on the se
 
 Registration is separately authorized. The principal generates the key pair and holds the private key. Sentinel stores only the public key, in a server-pinned manifest for that account. The agent cannot have arbitrary mandates signed, and it cannot register its own key.
 
-The pilot manual process for a pin, a rotation, a retirement, and a revocation is [ADR-0023 key-pinning admin process](ADR-0023-key-pinning-admin-process.md). Merging that document does not permit manual pinning, does not unlock `registerPrincipalKey`, does not wire verification, and does not enable an account.
+The pilot manual process for a pin, a rotation, a retirement, and a revocation is [ADR-0023 key-pinning admin process](ADR-0023-key-pinning-admin-process.md). Merging that document does not permit manual pinning, does not unlock `registerPrincipalKey`, does not wire verification, and does not enable an account. The read-only proof that each API key maps to one account is the [key-to-account migration addendum](ADR-0023-key-account-migration-addendum.md).
 
 `principal_kid` selects one Ed25519 key in that manifest. The document is close to the existing key doc (OKP, `kid`, `status`, `notBefore`, `notAfter`) and is not the public export JWKS at `/.well-known/thoughtproof-keys.json`. The caller-supplied F1 `key_manifest` stays an evidence manifest. It is not the principal manifest. A caller-supplied JWKS URL is rejected: the request would choose its own trust anchor.
 
