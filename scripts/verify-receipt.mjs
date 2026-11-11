@@ -20,6 +20,8 @@
  *     "authority":{"status":"passed"|"failed"|"not_checked","code":...}}
  * `not_checked` means that stage did not run. A recognised approval that
  * fails signature, binding, or authority makes the process exit 1.
+ * Duplicate keys in raw_event JSON fail first, with code duplicate_json_key,
+ * using src/json-duplicate-keys.mjs (the same parser as the server).
  * Evidence that is not an approval leaves binding `not_checked` and keeps
  * the previous exit code.
  * After a signature and binding pass, signed payload `claims` are checked
@@ -55,6 +57,7 @@ import { createRequire } from 'module';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { checkActionBinding } from '../src/action-binding-core.mjs';
+import { DUPLICATE_JSON_KEY, parseJsonText } from '../src/json-duplicate-keys.mjs';
 import { readSignedClaims } from '../src/signed-claims.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -374,7 +377,30 @@ function recomputeEvidenceItem(item, index, trustedById, barePubkeys, proposedAc
   let rawEvent;
   try {
     const eventBytes = Buffer.from(item.raw_event, 'base64');
-    rawEvent = JSON.parse(eventBytes.toString('utf8'));
+    const parsed = parseJsonText(eventBytes.toString('utf8'));
+    if (!parsed.ok && parsed.code === DUPLICATE_JSON_KEY) {
+      return withChecks(
+        {
+          ...base,
+          status: 'failed',
+          code: DUPLICATE_JSON_KEY,
+          reason: 'Signed JSON contains a duplicate key',
+        },
+        unchecked,
+      );
+    }
+    if (!parsed.ok) {
+      return withChecks(
+        {
+          ...base,
+          status: 'failed',
+          code: 'evidence_malformed',
+          reason: 'raw_event is not valid base64 JSON',
+        },
+        unchecked,
+      );
+    }
+    rawEvent = parsed.value;
   } catch {
     return withChecks(
       {
