@@ -8,6 +8,20 @@
  *  2. Recompute ed25519 over the JCS-canonical payload inside
  *     signed_evidence[i].raw_event (F5) using caller-supplied trusted
  *     public keys — never trust server-emitted evidence_verification[].status
+ *  3. Action-binding: the same checkActionBinding predicate as the server
+ *     (src/action-binding-core.mjs). Signature, binding, and authority are
+ *     separate statuses. Authority here is the caller-supplied trusted key,
+ *     not the inline key manifest.
+ *
+ * Each evidence item prints one stable line:
+ *   PORTABLE_ITEM {"index":0,"status":"recomputed","code":null,
+ *     "signature":{"status":"passed","code":null},
+ *     "binding":{"status":"passed"|"failed"|"not_checked","code":...},
+ *     "authority":{"status":"passed"|"failed"|"not_checked","code":...}}
+ * `not_checked` means that stage did not run. A recognised approval that
+ * fails signature, binding, or authority makes the process exit 1.
+ * Evidence that is not an approval leaves binding `not_checked` and keeps
+ * the previous exit code.
  *
  * Usage:
  *   node scripts/verify-receipt.mjs <receipt.json> <original-request.json> \
@@ -32,6 +46,7 @@ import { createHash, createPublicKey, verify as cryptoVerify } from 'crypto';
 import { createRequire } from 'module';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { checkActionBinding } from '../src/action-binding-core.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -120,6 +135,9 @@ F5  offline ed25519 — over JCS-canonical payload inside raw_event
     --trusted-key binds key_id → pubkey; item must declare that key_id
       (item.key_id | item.key_manifest_ref | raw_event.key_id) and
       item.signer_pubkey must equal the bound pubkey
+    Action-binding uses the same predicate as the server. A recognised
+    approval fails the process when signature, binding, or the trusted-key
+    authority check fails. Other evidence leaves binding not_checked.
 
 Exit 0 = pass, 1 = verify fail, 2 = usage/load error.
 Never trusts receipt.meta.evidence_verification[].status.`);
@@ -265,33 +283,83 @@ function resolveTrustedKey(item, rawEvent, trustedById, barePubkeys) {
   };
 }
 
+function stage(status, code = null) {
+  return { status, code };
+}
+
+const STAGE_NOT_CHECKED = stage('not_checked');
+const STAGE_PASSED = stage('passed');
+
+/** Present only when the request object actually has the property. Same rule as the server. */
+function proposedActionSource(request) {
+  if (
+    request &&
+    typeof request === 'object' &&
+    !Array.isArray(request) &&
+    Object.prototype.hasOwnProperty.call(request, 'proposed_action')
+  ) {
+    return { present: true, value: request.proposed_action };
+  }
+  return { present: false, value: undefined };
+}
+
+function withChecks(result, checks) {
+  return { ...result, checks };
+}
+
 /**
  * Offline recompute one signed_evidence item.
  * Does NOT read evidence_verification status from the receipt.
  * Signature is over JCS-canonical payload inside raw_event (same as server).
+ *
+ * Authority is the caller-supplied trusted key. It is decided before the
+ * signature so an untrusted legacy item still fails with the existing
+ * authority code. Binding runs only after the signature verifies, and it
+ * calls the shared server predicate. A binding miss fails the item. Evidence
+ * that is not an approval leaves binding not_checked.
  */
-function recomputeEvidenceItem(item, index, trustedById, barePubkeys) {
+function recomputeEvidenceItem(item, index, trustedById, barePubkeys, proposedAction) {
   const base = { index, signer: item?.signer_pubkey ?? null };
+  const unchecked = {
+    signature: STAGE_NOT_CHECKED,
+    binding: STAGE_NOT_CHECKED,
+    authority: STAGE_NOT_CHECKED,
+  };
 
   if (!item || typeof item !== 'object') {
-    return { ...base, status: 'failed', code: 'evidence_malformed', reason: 'Missing evidence item' };
+    return withChecks(
+      { ...base, status: 'failed', code: 'evidence_malformed', reason: 'Missing evidence item' },
+      unchecked,
+    );
   }
   if (item.type !== 'signed_event') {
-    return { ...base, status: 'failed', code: 'unsupported_evidence_type', reason: `type=${item.type}` };
+    return withChecks(
+      { ...base, status: 'failed', code: 'unsupported_evidence_type', reason: `type=${item.type}` },
+      unchecked,
+    );
   }
   if (item.signature_scheme !== 'ed25519') {
-    return {
-      ...base,
-      status: 'failed',
-      code: 'unsupported_signature_scheme',
-      reason: `scheme=${item.signature_scheme}`,
-    };
+    return withChecks(
+      {
+        ...base,
+        status: 'failed',
+        code: 'unsupported_signature_scheme',
+        reason: `scheme=${item.signature_scheme}`,
+      },
+      unchecked,
+    );
   }
   if (typeof item.raw_event !== 'string' || !item.raw_event) {
-    return { ...base, status: 'failed', code: 'evidence_malformed', reason: 'Missing raw_event' };
+    return withChecks(
+      { ...base, status: 'failed', code: 'evidence_malformed', reason: 'Missing raw_event' },
+      unchecked,
+    );
   }
   if (typeof item.signer_pubkey !== 'string') {
-    return { ...base, status: 'failed', code: 'evidence_malformed', reason: 'Missing signer_pubkey' };
+    return withChecks(
+      { ...base, status: 'failed', code: 'evidence_malformed', reason: 'Missing signer_pubkey' },
+      unchecked,
+    );
   }
 
   let rawEvent;
@@ -299,68 +367,151 @@ function recomputeEvidenceItem(item, index, trustedById, barePubkeys) {
     const eventBytes = Buffer.from(item.raw_event, 'base64');
     rawEvent = JSON.parse(eventBytes.toString('utf8'));
   } catch {
-    return {
-      ...base,
-      status: 'failed',
-      code: 'evidence_malformed',
-      reason: 'raw_event is not valid base64 JSON',
-    };
+    return withChecks(
+      {
+        ...base,
+        status: 'failed',
+        code: 'evidence_malformed',
+        reason: 'raw_event is not valid base64 JSON',
+      },
+      unchecked,
+    );
   }
 
   if (!rawEvent || typeof rawEvent !== 'object' || !rawEvent.payload || typeof rawEvent.signature !== 'string') {
-    return {
-      ...base,
-      status: 'failed',
-      code: 'evidence_malformed',
-      reason: 'raw_event missing payload or signature',
-    };
+    return withChecks(
+      {
+        ...base,
+        status: 'failed',
+        code: 'evidence_malformed',
+        reason: 'raw_event missing payload or signature',
+      },
+      unchecked,
+    );
   }
 
   const trust = resolveTrustedKey(item, rawEvent, trustedById, barePubkeys);
   if (!trust.ok) {
-    return {
-      ...base,
-      signer: trust.pubkey,
-      status: 'failed',
-      code: trust.code,
-      reason: trust.reason,
-    };
+    return withChecks(
+      {
+        ...base,
+        signer: trust.pubkey,
+        status: 'failed',
+        code: trust.code,
+        reason: trust.reason,
+      },
+      {
+        signature: STAGE_NOT_CHECKED,
+        binding: STAGE_NOT_CHECKED,
+        authority: stage('failed', trust.code),
+      },
+    );
   }
   const signerHex = trust.pubkey;
+  const authority = STAGE_PASSED;
 
   let canonicalPayload;
   try {
     // Same bytes the server signs: JCS-canonical payload, not the raw_event envelope.
     canonicalPayload = canonicalizePayload(rawEvent.payload);
   } catch (err) {
-    return {
-      ...base,
-      signer: signerHex,
-      status: 'failed',
-      code: 'evidence_malformed',
-      reason: `canonicalize failed: ${err.message}`,
-    };
+    return withChecks(
+      {
+        ...base,
+        signer: signerHex,
+        status: 'failed',
+        code: 'evidence_malformed',
+        reason: `canonicalize failed: ${err.message}`,
+      },
+      {
+        signature: STAGE_NOT_CHECKED,
+        binding: STAGE_NOT_CHECKED,
+        authority,
+      },
+    );
   }
 
   const sigOk = verifyEd25519Signature(canonicalPayload, rawEvent.signature, signerHex);
   if (!sigOk) {
-    return {
-      ...base,
-      signer: signerHex,
-      status: 'failed',
-      code: 'evidence_signature_invalid',
-      reason: 'Invalid ed25519 signature over JCS-canonical payload',
+    return withChecks(
+      {
+        ...base,
+        signer: signerHex,
+        status: 'failed',
+        code: 'evidence_signature_invalid',
+        reason: 'Invalid ed25519 signature over JCS-canonical payload',
+      },
+      {
+        signature: stage('failed', 'evidence_signature_invalid'),
+        binding: STAGE_NOT_CHECKED,
+        authority,
+      },
+    );
+  }
+
+  let binding;
+  try {
+    binding = checkActionBinding(
+      rawEvent.payload,
+      Array.isArray(item.claims) ? item.claims : undefined,
+      proposedAction,
+    );
+  } catch (err) {
+    binding = {
+      ok: false,
+      code: 'action_binding_malformed',
+      reason: err instanceof Error ? err.message : 'Action-binding check failed',
     };
   }
 
+  if (!binding.ok) {
+    return withChecks(
+      {
+        ...base,
+        signer: signerHex,
+        status: 'failed',
+        code: binding.code,
+        reason: binding.reason,
+      },
+      {
+        signature: STAGE_PASSED,
+        binding: stage('failed', binding.code),
+        authority,
+      },
+    );
+  }
+
+  return withChecks(
+    {
+      ...base,
+      signer: signerHex,
+      status: 'recomputed',
+      code: null,
+      reason: null,
+      claims: Array.isArray(item.claims) ? item.claims : [],
+    },
+    {
+      signature: STAGE_PASSED,
+      binding: binding.checked ? STAGE_PASSED : STAGE_NOT_CHECKED,
+      authority,
+    },
+  );
+}
+
+function portableItemRecord(result) {
   return {
-    ...base,
-    signer: signerHex,
-    status: 'recomputed',
-    code: null,
-    reason: null,
-    claims: Array.isArray(item.claims) ? item.claims : [],
+    index: result.index,
+    status: result.status,
+    code: result.code ?? null,
+    signature: result.checks.signature,
+    binding: result.checks.binding,
+    authority: result.checks.authority,
   };
+}
+
+function formatStage(stageResult) {
+  if (!stageResult) return 'not_checked';
+  return stageResult.code ? `${stageResult.status}:${stageResult.code}` : stageResult.status;
 }
 
 // ─── Reporting ───────────────────────────────────────────────────────
@@ -414,11 +565,18 @@ function verifyEvidenceOffline(request, trustedById, barePubkeys) {
     return { ok: false, results: [], hadEvidence: true, missingTrust: true };
   }
 
-  const results = items.map((item, i) => recomputeEvidenceItem(item, i, trustedById, barePubkeys));
+  const proposedAction = proposedActionSource(request);
+  const results = items.map((item, i) =>
+    recomputeEvidenceItem(item, i, trustedById, barePubkeys, proposedAction),
+  );
   let allOk = true;
   for (const r of results) {
     const mark = r.status === 'recomputed' ? '✅' : '❌';
     console.log(`${mark} [${r.index}] status=${r.status}${r.code ? ` code=${r.code}` : ''}`);
+    console.log(
+      `      checks signature=${formatStage(r.checks.signature)} binding=${formatStage(r.checks.binding)} authority=${formatStage(r.checks.authority)}`,
+    );
+    console.log(`PORTABLE_ITEM ${JSON.stringify(portableItemRecord(r))}`);
     if (r.signer) console.log(`      signer: ${r.signer}`);
     if (r.reason) console.log(`      reason: ${r.reason}`);
     if (r.status !== 'recomputed') allOk = false;
