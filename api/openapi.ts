@@ -48,7 +48,7 @@ const spec = {
               checkpoint: { amount: '0.005000', cascade: ['serv-nano'] },
               standard: {
                 amount: '0.008000',
-                cascade: ['serv-nano', 'serv-swift'],
+                cascade: ['serv-pro', 'serv-swift'],
                 default: true,
               },
             },
@@ -60,7 +60,7 @@ const spec = {
           pricingMode: 'tiered',
           tiers: {
             checkpoint: { price: '0.005000', cascade: ['serv-nano'] },
-            standard: { price: '0.008000', cascade: ['serv-nano', 'serv-swift'], default: true },
+            standard: { price: '0.008000', cascade: ['serv-pro', 'serv-swift'], default: true },
           },
           asset: 'USDC',
           network: 'eip155:8453',
@@ -363,7 +363,7 @@ const spec = {
                         models_used: {
                           type: 'array',
                           items: { type: 'string' },
-                          example: ['serv-nano', 'serv-swift'],
+                          example: ['serv-pro', 'serv-swift'],
                         },
                         verified_at: { type: 'string', format: 'date-time' },
                       },
