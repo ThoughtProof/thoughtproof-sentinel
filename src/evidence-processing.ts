@@ -4,10 +4,12 @@
  * 
  * Processes signed evidence and applies verdict effects based on verification results.
  * Integrates with the verify handler to force verdict changes when evidence verification
- * fails for required items.
+ * fails for required items. Action-binding failures force BLOCK even if the item
+ * is optional; that override is applied here, after the engine returns.
  */
 
 import { verifySignedEvidence } from './signed-evidence.js';
+import type { ProposedActionSource } from './action-binding.js';
 import { computePackageDigest } from './package-digest.js';
 import type {
   SentinelVerifyRequest,
@@ -50,10 +52,16 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
     };
   }
 
-  // Verify the evidence items
-  const verificationResults = verifySignedEvidence(request.signed_evidence, request.key_manifest);
+  // Verify the evidence items. proposed_action is the only binding preimage.
+  const verificationResults = verifySignedEvidence(
+    request.signed_evidence,
+    request.key_manifest,
+    proposedActionSource(request),
+  );
   
-  // Convert to response format with indices
+  // Convert to response format with indices. claims_validated is copied only
+  // when the signed payload actually carried claims (empty is omitted so
+  // responses without signed claims stay the previous shape).
   const evidenceVerification: EvidenceVerificationResult[] = verificationResults.map((result, index) => ({
     index,
     status: result.status,
@@ -61,6 +69,9 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
     code: result.code,
     reason: result.reason,
     signer: result.signer,
+    ...(result.claims_validated && result.claims_validated.length > 0
+      ? { claims_validated: result.claims_validated }
+      : {}),
   }));
 
   // Check for required evidence failures — classification uses the STRUCTURED
@@ -73,11 +84,14 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
     const evidence = request.signed_evidence[i];
     const result = verificationResults[i];
 
-    if (evidence.verification === 'required') {
+    // Action-binding failures force BLOCK even when the caller marked the
+    // item optional. A cascade ALLOW must not survive a failed binding check.
+    const bindingForcesBlock = result.forcesBlock === true;
+    if (evidence.verification === 'required' || bindingForcesBlock) {
       if (result.status === 'failed') {
         const code = result.code ?? 'evidence_verification_error';
         const reason = result.reason ?? 'Evidence verification failed';
-        if (result.severity === 'block') {
+        if (result.severity === 'block' || bindingForcesBlock) {
           failedRequired.push({ index: i, code, reason });
         } else {
           // 'uncertain' or missing severity (defensive default = uncertain,
@@ -104,7 +118,7 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
       predicate: 'unsupported',
       quote: null,
       quote_source: null,
-      reasoning: `${failed.code}:${failed.index} — Evidence signature verification failed: ${failed.reason}`,
+      reasoning: `${failed.code}:${failed.index} — ${objectionLead(failed.code)}: ${failed.reason}`,
     });
   }
 
@@ -230,4 +244,20 @@ export function applyEvidenceEffects(
   };
 
   return modifiedResponse;
+}
+
+/** Existing block codes keep the previous sentence. Binding codes name the check. */
+function objectionLead(code: string): string {
+  if (code.startsWith('action_binding_') || code === 'signed_claims_malformed') {
+    return 'Evidence verification failed';
+  }
+  return 'Evidence signature verification failed';
+}
+
+/** Present only when the request object actually has the property. */
+function proposedActionSource(request: SentinelVerifyRequest): ProposedActionSource {
+  if (Object.prototype.hasOwnProperty.call(request, 'proposed_action')) {
+    return { present: true, value: request.proposed_action };
+  }
+  return { present: false, value: undefined };
 }

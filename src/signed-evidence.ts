@@ -10,15 +10,24 @@
  * - Invalid signature → BLOCK with evidence_signature_invalid:<index>
  * - Unauthorized signer → BLOCK with signer_not_authorized:<index>
  * - Manifest issues → UNCERTAIN with key_manifest_unverifiable:<index>
- * 
+ *
+ * An approval-digest claim (see action-binding.ts) fails closed with BLOCK
+ * even when the item is marked verification='optional'. The digest is read
+ * from the signed payload and compared to sha256(proposed_action).
+ *
+ * claims_validated is taken from payload.claims. Outer item.claims are not
+ * reported as validated. Manifest role matching still uses item.claims.
+ *
  * v0 supports ed25519 signatures only. Raw events must be JSON strings with
  * { payload, signature } where signature is ed25519 over JCS-canonicalized payload.
+ * BIP-340 is unsupported_signature_scheme. There is no re-signing bridge.
  */
 
-import { createHash, createPublicKey, verify as cryptoVerify } from 'crypto';
+import { createPublicKey, verify as cryptoVerify } from 'crypto';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - canonicalize types are loose; runtime export is the function
 import canonicalize from 'canonicalize';
+import { checkActionBinding, type ProposedActionSource } from './action-binding.js';
 
 /**
  * Evidence item type for cryptographically signed events.
@@ -86,8 +95,17 @@ export interface EvidenceVerificationResult {
   reason?: string;
   /** Verified signer public key when successful */
   signer?: string;
-  /** Claims that were validated */
+  /**
+   * Claims read from the signed payload. Empty when the payload has no
+   * `claims` array. Never copied from the outer evidence item.
+   * Omitted on failure — a failed item has not validated any claims.
+   */
   claims_validated?: string[];
+  /**
+   * Structured flag. Action-binding failures set this so processSignedEvidence
+   * forces BLOCK even when the caller marked the item optional.
+   */
+  forcesBlock?: boolean;
 }
 
 /** Truncate attacker-influenced text before it enters API responses. */
@@ -114,10 +132,11 @@ function failure(
 export function verifySignedEvidence(
   evidence: SignedEventEvidence[],
   keyManifest?: KeyManifest,
+  proposedAction: ProposedActionSource = { present: false, value: undefined },
 ): EvidenceVerificationResult[] {
   return evidence.map((item, index) => {
     try {
-      return verifySignedEvidenceItem(item, keyManifest);
+      return verifySignedEvidenceItem(item, keyManifest, proposedAction);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown verification error';
       console.error(`[signed-evidence] verification failed for item ${index}:`, message);
@@ -133,7 +152,8 @@ export function verifySignedEvidence(
  */
 function verifySignedEvidenceItem(
   item: SignedEventEvidence,
-  keyManifest?: KeyManifest,
+  keyManifest: KeyManifest | undefined,
+  proposedAction: ProposedActionSource,
 ): EvidenceVerificationResult {
   // Only ed25519 is supported in v0
   if (item.signature_scheme !== 'ed25519') {
@@ -169,6 +189,30 @@ function verifySignedEvidenceItem(
       'Invalid signature over canonical payload');
   }
 
+  // Binding uses the authenticated payload only. A failure here is BLOCK
+  // even if the caller marked the item optional (forcesBlock).
+  let binding: ReturnType<typeof checkActionBinding>;
+  try {
+    binding = checkActionBinding(rawEvent.payload, item.claims, proposedAction);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Action-binding check failed';
+    return {
+      ...failure('block', 'action_binding_malformed', message),
+      forcesBlock: true,
+    };
+  }
+  if (!binding.ok) {
+    return {
+      ...failure('block', binding.code, binding.reason),
+      forcesBlock: true,
+    };
+  }
+
+  const signedClaims = readSignedClaims(rawEvent.payload);
+  if (!signedClaims.ok) {
+    return failure('block', 'signed_claims_malformed', signedClaims.reason);
+  }
+
   // Check signer authorization if manifest is provided
   if (keyManifest) {
     const authResult = checkSignerAuthorization(item.signer_pubkey, item.claims, keyManifest);
@@ -187,8 +231,36 @@ function verifySignedEvidenceItem(
   return {
     status: 'recomputed',
     signer: item.signer_pubkey,
-    claims_validated: item.claims,
+    claims_validated: signedClaims.claims,
   };
+}
+
+/**
+ * Claims that may be reported as validated. Only an own `claims` array on
+ * the signed payload counts. A missing array is "no signed claims", not
+ * a copy of the outer item. A present but malformed array fails closed.
+ */
+function readSignedClaims(
+  payload: unknown,
+): { ok: true; claims: string[] } | { ok: false; reason: string } {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: true, claims: [] };
+  }
+  if (!Object.prototype.hasOwnProperty.call(payload, 'claims')) {
+    return { ok: true, claims: [] };
+  }
+  const raw = (payload as { claims?: unknown }).claims;
+  if (!Array.isArray(raw)) {
+    return { ok: false, reason: 'Signed payload claims must be an array of strings' };
+  }
+  const claims: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry.length === 0) {
+      return { ok: false, reason: 'Signed payload claims must be non-empty strings' };
+    }
+    claims.push(entry);
+  }
+  return { ok: true, claims };
 }
 
 /**

@@ -39,6 +39,8 @@ const ALLOWED_BODY_FIELDS = new Set([
   'agent_context', 'signed_evidence', 'key_manifest',
   // ADR-0020 shadow measurement (does not affect verdict)
   'required_conditions', 'action_hash',
+  // Action-binding preimage. Hashed by the evidence layer; not a digest.
+  'proposed_action',
 ]);
 const VALID_PROOF_REQUIREMENTS = new Set(['machine', 'any', 'none']);
 const VALID_FRESHNESS = new Set(['fresh', 'current', 'stale', 'expired', 'unknown']);
@@ -460,6 +462,7 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
   }
 
   const mandate = normalizeMandate(b.mandate, errors);
+  const proposedAction = parseProposedAction(b.proposed_action, errors);
 
   if (errors.length > 0) {
     return { valid: false, errors };
@@ -480,8 +483,28 @@ export function validateVerifyRequest(body: unknown): { valid: true; data: Senti
       key_manifest: keyManifest,
       ...(required_conditions !== undefined ? { required_conditions } : {}),
       ...(normalizedActionHash !== undefined ? { action_hash: normalizedActionHash } : {}),
+      ...(proposedAction !== undefined ? { proposed_action: proposedAction } : {}),
     },
   };
+}
+
+/**
+ * Keep the action-binding preimage exactly. Do not trim strings and do not
+ * drop nested fields — both would change the digest. Absent stays absent so
+ * requests that do not send the field keep the previous validated shape.
+ */
+function parseProposedAction(raw: unknown, errors: ValidationError[]): unknown {
+  if (raw === undefined) return undefined;
+  if (typeof raw === 'string' || Array.isArray(raw)) return raw;
+  if (raw !== null && typeof raw === 'object') {
+    const proto = Object.getPrototypeOf(raw);
+    if (proto === Object.prototype || proto === null) return raw;
+  }
+  errors.push({
+    field: 'proposed_action',
+    message: 'Must be a string, array, or plain object when provided',
+  });
+  return undefined;
 }
 
 function parseMandateKind(
