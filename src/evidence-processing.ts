@@ -254,6 +254,7 @@ function objectionLead(code: string): string {
     code.startsWith('action_binding_')
     || code === 'signed_claims_malformed'
     || code === 'duplicate_json_key'
+    || code === 'json_unexamined'
   ) {
     return 'Evidence verification failed';
   }

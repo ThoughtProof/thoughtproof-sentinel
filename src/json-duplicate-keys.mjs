@@ -7,9 +7,19 @@
  * and treats two keys as the same key after JSON string unescaping
  * (`a` and `\u0061`, including `__proto__`).
  *
+ * The scan is iterative. Nesting lives on a heap stack, not the JavaScript
+ * call stack, so a deep envelope cannot throw RangeError out of this module.
  * On success the returned value is `JSON.parse(text)`, so numbers, key order,
  * and an own `__proto__` key match the engine that already accepted unique
  * documents. The scanner does not build objects by assignment.
+ *
+ * If the scan or `JSON.parse` still throws, the result is `json_unexamined`.
+ * That is not "no approval". Callers fail the item with that code. Recognition
+ * treats the text as an approval when an outer approval claim is present, when
+ * a readable top-level `payload` value has an approval shape, or when the text
+ * was not examined far enough to rule an approval out. A scan that finishes
+ * and finds ordinary invalid JSON stays `json_invalid` and does not by itself
+ * mean an approval.
  *
  * `payloadValues` is every top-level value of the key `payload`, in order,
  * each parsed with `JSON.parse` on its own slice. Callers use that to see an
@@ -22,6 +32,7 @@
  */
 
 export const DUPLICATE_JSON_KEY = 'duplicate_json_key';
+export const JSON_UNEXAMINED = 'json_unexamined';
 
 /**
  * @param {string} text
@@ -29,33 +40,50 @@ export const DUPLICATE_JSON_KEY = 'duplicate_json_key';
  *   | { ok: true, value: unknown, payloadValues: unknown[] }
  *   | { ok: false, code: 'duplicate_json_key', value: unknown, payloadValues: unknown[] }
  *   | { ok: false, code: 'json_invalid' }
+ *   | { ok: false, code: 'json_unexamined', payloadValues?: unknown[] }
  */
 export function parseJsonText(text) {
   if (typeof text !== 'string') return { ok: false, code: 'json_invalid' };
-  const scan = scanJson(text);
+
+  let scan;
+  try {
+    scan = scanJson(text);
+  } catch {
+    return { ok: false, code: JSON_UNEXAMINED };
+  }
   if (!scan.valid) return { ok: false, code: 'json_invalid' };
 
   let value;
   try {
     value = JSON.parse(text);
   } catch {
-    return { ok: false, code: 'json_invalid' };
+    return { ok: false, code: JSON_UNEXAMINED, payloadValues: readPayloadSlices(scan.payloadSlices) };
   }
 
-  /** @type {unknown[]} */
-  const payloadValues = [];
-  for (const slice of scan.payloadSlices) {
-    try {
-      payloadValues.push(JSON.parse(slice));
-    } catch {
-      return { ok: false, code: 'json_invalid' };
-    }
-  }
+  const payloadValues = readPayloadSlices(scan.payloadSlices);
+  if (payloadValues === null) return { ok: false, code: JSON_UNEXAMINED };
 
   if (scan.duplicate) {
     return { ok: false, code: DUPLICATE_JSON_KEY, value, payloadValues };
   }
   return { ok: true, value, payloadValues };
+}
+
+/**
+ * @param {string[]} slices
+ * @returns {unknown[] | null} null when a slice cannot be parsed
+ */
+function readPayloadSlices(slices) {
+  /** @type {unknown[]} */
+  const payloadValues = [];
+  for (const slice of slices) {
+    try {
+      payloadValues.push(JSON.parse(slice));
+    } catch {
+      return null;
+    }
+  }
+  return payloadValues;
 }
 
 /**
@@ -67,12 +95,108 @@ function scanJson(text) {
   let duplicate = false;
   /** @type {string[]} */
   const payloadSlices = [];
+  /** @type {Array<Record<string, unknown>>} */
+  const stack = [{ kind: 'top', phase: 'value' }];
 
-  const valid = parseRoot();
-  skipWs();
-  if (!valid || i !== text.length) {
-    return { valid: false, duplicate: false, payloadSlices: [] };
+  const invalid = () => ({ valid: false, duplicate: false, payloadSlices: [] });
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+
+    if (frame.kind === 'top') {
+      if (frame.phase === 'value') {
+        const started = beginValue(true);
+        if (started === 'bad') return invalid();
+        frame.phase = started === 'container' ? 'wait' : 'end';
+        continue;
+      }
+      if (frame.phase === 'wait') {
+        frame.phase = 'end';
+        continue;
+      }
+      skipWs();
+      if (i !== text.length) return invalid();
+      stack.pop();
+      continue;
+    }
+
+    if (frame.kind === 'object') {
+      if (frame.phase === 'key') {
+        skipWs();
+        if (text[i] !== '"') return invalid();
+        const key = readString();
+        if (key === null) return invalid();
+        const seen = /** @type {Set<string>} */ (frame.seen);
+        if (seen.has(key)) duplicate = true;
+        else seen.add(key);
+        frame.key = key;
+        frame.phase = 'colon';
+        continue;
+      }
+      if (frame.phase === 'colon') {
+        skipWs();
+        if (text[i] !== ':') return invalid();
+        i += 1;
+        frame.valueStart = i;
+        frame.phase = 'value';
+        continue;
+      }
+      if (frame.phase === 'value') {
+        const started = beginValue(false);
+        if (started === 'bad') return invalid();
+        if (started === 'container') {
+          frame.phase = 'wait';
+          continue;
+        }
+        closeObjectValue(frame);
+        continue;
+      }
+      if (frame.phase === 'wait') {
+        closeObjectValue(frame);
+        continue;
+      }
+      skipWs();
+      if (text[i] === ',') {
+        i += 1;
+        frame.phase = 'key';
+        continue;
+      }
+      if (text[i] === '}') {
+        i += 1;
+        stack.pop();
+        continue;
+      }
+      return invalid();
+    }
+
+    if (frame.phase === 'value') {
+      const started = beginValue(false);
+      if (started === 'bad') return invalid();
+      if (started === 'container') {
+        frame.phase = 'wait';
+        continue;
+      }
+      frame.phase = 'after';
+      continue;
+    }
+    if (frame.phase === 'wait') {
+      frame.phase = 'after';
+      continue;
+    }
+    skipWs();
+    if (text[i] === ',') {
+      i += 1;
+      frame.phase = 'value';
+      continue;
+    }
+    if (text[i] === ']') {
+      i += 1;
+      stack.pop();
+      continue;
+    }
+    return invalid();
   }
+
   return { valid: true, duplicate, payloadSlices };
 
   function skipWs() {
@@ -83,87 +207,56 @@ function scanJson(text) {
     }
   }
 
-  function parseRoot() {
+  /** @param {boolean} isRoot */
+  function beginValue(isRoot) {
     skipWs();
-    if (i >= text.length) return false;
-    if (text[i] === '{') return parseObject(true);
-    return parseValue();
-  }
-
-  function parseValue() {
-    skipWs();
-    if (i >= text.length) return false;
+    if (i >= text.length) return 'bad';
     const c = text[i];
-    if (c === '{') return parseObject(false);
-    if (c === '[') return parseArray();
-    if (c === '"') return parseString() !== null;
-    if (c === 't') return consume('true');
-    if (c === 'f') return consume('false');
-    if (c === 'n') return consume('null');
-    if (c === '-' || (c >= '0' && c <= '9')) return parseNumber();
-    return false;
-  }
-
-  function parseObject(isRoot) {
-    i += 1;
-    skipWs();
-    if (text[i] === '}') {
+    if (c === '{') {
       i += 1;
-      return true;
-    }
-    const seen = new Set();
-    while (i < text.length) {
       skipWs();
-      if (text[i] !== '"') return false;
-      const key = parseString();
-      if (key === null) return false;
-      if (seen.has(key)) duplicate = true;
-      else seen.add(key);
-      skipWs();
-      if (text[i] !== ':') return false;
-      i += 1;
-      const valueStart = i;
-      if (!parseValue()) return false;
-      if (isRoot && key === 'payload') payloadSlices.push(text.slice(valueStart, i));
-      skipWs();
-      if (text[i] === ',') {
-        i += 1;
-        continue;
-      }
       if (text[i] === '}') {
         i += 1;
-        return true;
+        return 'atom';
       }
-      return false;
+      stack.push({
+        kind: 'object',
+        isRoot,
+        phase: 'key',
+        seen: new Set(),
+        key: null,
+        valueStart: 0,
+      });
+      return 'container';
     }
-    return false;
-  }
-
-  function parseArray() {
-    i += 1;
-    skipWs();
-    if (text[i] === ']') {
+    if (c === '[') {
       i += 1;
-      return true;
-    }
-    while (i < text.length) {
-      if (!parseValue()) return false;
       skipWs();
-      if (text[i] === ',') {
-        i += 1;
-        continue;
-      }
       if (text[i] === ']') {
         i += 1;
-        return true;
+        return 'atom';
       }
-      return false;
+      stack.push({ kind: 'array', phase: 'value' });
+      return 'container';
     }
-    return false;
+    if (c === '"') return readString() === null ? 'bad' : 'atom';
+    if (c === 't') return consume('true') ? 'atom' : 'bad';
+    if (c === 'f') return consume('false') ? 'atom' : 'bad';
+    if (c === 'n') return consume('null') ? 'atom' : 'bad';
+    if (c === '-' || (c >= '0' && c <= '9')) return readNumber() ? 'atom' : 'bad';
+    return 'bad';
+  }
+
+  /** @param {Record<string, unknown>} frame */
+  function closeObjectValue(frame) {
+    if (frame.isRoot === true && frame.key === 'payload') {
+      payloadSlices.push(text.slice(/** @type {number} */ (frame.valueStart), i));
+    }
+    frame.phase = 'after';
   }
 
   /** @returns {string | null} */
-  function parseString() {
+  function readString() {
     if (text[i] !== '"') return null;
     i += 1;
     let out = '';
@@ -219,7 +312,7 @@ function scanJson(text) {
     return null;
   }
 
-  function parseNumber() {
+  function readNumber() {
     const start = i;
     if (text[i] === '-') i += 1;
     if (i >= text.length || text[i] < '0' || text[i] > '9') return false;

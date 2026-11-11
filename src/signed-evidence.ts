@@ -195,6 +195,10 @@ function verifySignedEvidenceItem(
       return fail(failure('block', 'duplicate_json_key',
         'Signed JSON contains a duplicate key'));
     }
+    if (!parsed.ok && parsed.code === 'json_unexamined') {
+      return fail(failure('block', 'json_unexamined',
+        'Signed JSON could not be examined'));
+    }
     if (!parsed.ok || parsed.value === null || typeof parsed.value !== 'object') {
       return fail(failure('block', 'evidence_malformed',
         'Invalid raw_event: not valid base64 JSON'));

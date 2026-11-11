@@ -127,6 +127,15 @@ export function isApprovalDigestClaim(payload, outerClaims) {
  * the unverified payload. A corrupt signature does not hide the shape.
  */
 export function rawEventClaimsApproval(rawEventBase64, outerClaims) {
+  try {
+    return recogniseApproval(rawEventBase64, outerClaims);
+  } catch {
+    // A throw means the bytes were not examined. Do not report "not an approval".
+    return true;
+  }
+}
+
+function recogniseApproval(rawEventBase64, outerClaims) {
   if (outerClaimsNameApproval(outerClaims)) return true;
   if (typeof rawEventBase64 !== 'string' || rawEventBase64.length === 0) return false;
   let text;
@@ -136,6 +145,14 @@ export function rawEventClaimsApproval(rawEventBase64, outerClaims) {
     return false;
   }
   const parsed = parseJsonText(text);
+  if (!parsed.ok && parsed.code === 'json_unexamined') {
+    const values = parsed.payloadValues;
+    if (!values) return true;
+    for (const payload of values) {
+      if (isApprovalDigestClaim(payload, undefined)) return true;
+    }
+    return false;
+  }
   if (!parsed.ok && parsed.code !== 'duplicate_json_key') return false;
   for (const payload of parsed.payloadValues) {
     if (isApprovalDigestClaim(payload, undefined)) return true;

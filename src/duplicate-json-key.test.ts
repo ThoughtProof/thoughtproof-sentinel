@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  createHash,
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
@@ -60,25 +61,33 @@ function requestFor(item: SignedEventEvidence): SentinelVerifyRequest {
 function itemFromRawJson(
   jsonText: string,
   verification: 'optional' | 'required' = 'optional',
+  claims: string[] = ['release_approval'],
 ): SignedEventEvidence {
   return {
     type: 'signed_event',
     raw_event: Buffer.from(jsonText, 'utf8').toString('base64'),
     signature_scheme: 'ed25519',
     signer_pubkey: key.pubkeyHex,
-    claims: ['release_approval'],
+    claims,
     verification,
   };
 }
 
 function signedUnique(payload: unknown, verification: 'optional' | 'required' = 'optional'): SignedEventEvidence {
+  return itemFromRawJson(signedEnvelope(payload), verification);
+}
+
+function signPayload(payload: unknown): string {
   const canonical = (canonicalize as unknown as (v: unknown) => string)(payload);
-  const signature = cryptoSign(
+  return cryptoSign(
     null,
     Buffer.from(canonical, 'utf8'),
     createPrivateKey(key.privateKeyPem),
   ).toString('hex');
-  return itemFromRawJson(JSON.stringify({ payload, signature }), verification);
+}
+
+function signedEnvelope(payload: unknown): string {
+  return JSON.stringify({ payload, signature: signPayload(payload) });
 }
 
 function settle(request: SentinelVerifyRequest) {
@@ -304,5 +313,105 @@ describe('duplicate JSON keys', () => {
     expect(portable.items[0].status).toBe('recomputed');
     expect(portable.items[0].code).toBeNull();
     expect(portable.items[0].binding.status).toBe('not_checked');
+  });
+
+  it('scans deep unique documents without throwing', () => {
+    let nested = '{"leaf":1}';
+    for (let depth = 0; depth < 8000; depth += 1) nested = `{"k":${nested}}`;
+    const arrays = `${'['.repeat(15000)}0${']'.repeat(15000)}`;
+    expect(() => parseJsonText(nested)).not.toThrow();
+    expect(() => parseJsonText(arrays)).not.toThrow();
+    const objects = parseJsonText(nested);
+    const padded = parseJsonText(arrays);
+    expect(objects.ok).toBe(true);
+    expect(padded.ok).toBe(true);
+    if (objects.ok) {
+      let node = objects.value as { k?: unknown; leaf?: number };
+      for (let depth = 0; depth < 8000; depth += 1) node = node.k as { k?: unknown; leaf?: number };
+      expect(node.leaf).toBe(1);
+    }
+    if (padded.ok) {
+      let node: unknown = padded.value;
+      let depth = 0;
+      while (Array.isArray(node)) {
+        depth += 1;
+        node = node[0];
+      }
+      expect(depth).toBe(15000);
+      expect(node).toBe(0);
+    }
+  });
+
+  it('rejects a duplicate key nested past the old call-stack limit', () => {
+    let nested = '{"a":1,"a":2}';
+    for (let depth = 0; depth < 8000; depth += 1) nested = `{"k":${nested}}`;
+    expect(() => parseJsonText(nested)).not.toThrow();
+    const parsed = parseJsonText(nested);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.code).toBe('duplicate_json_key');
+
+    const payload = { approves_release_sha256: 'aa' };
+    const signature = signPayload(payload);
+    const raw = `{"payload":${JSON.stringify(payload)},"signature":"${signature}","deep":${nested}}`;
+    const request = requestFor(itemFromRawJson(raw));
+    const server = settle(request);
+    const portable = runPortable(request, server.response);
+    expect(server.response.verdict).toBe('BLOCK');
+    expect(server.processed.evidenceVerification[0].code).toBe('duplicate_json_key');
+    expect(portable.status, trace(portable)).toBe(1);
+    expect(portable.items[0].code).toBe('duplicate_json_key');
+  });
+
+  it('keeps an outer approval marker blocking when the envelope is deeply nested', () => {
+    const payload = { note: 'not an approval shape' };
+    const signature = signPayload(payload);
+    const padding = `${'['.repeat(8000)}0${']'.repeat(8000)}`;
+    const raw = `{"payload":${JSON.stringify(payload)},"signature":"${signature}","padding":${padding}}`;
+    const request = requestFor(itemFromRawJson(raw, 'optional', ['approves_release_sha256']));
+    const server = settle(request);
+    const portable = runPortable(request, server.response);
+    expect(server.processed.shouldForceVerdict).toBe(true);
+    expect(server.response.verdict).toBe('BLOCK');
+    expect(server.processed.evidenceVerification[0].code).toBe('action_binding_digest_not_signed');
+    expect(portable.status, trace(portable)).toBe(1);
+    expect(portable.items[0].code).toBe('action_binding_digest_not_signed');
+  });
+
+  it('accepts a flat matching approval wrapped in 15000 nested padding arrays', () => {
+    const release =
+      '{"artifact":"buzz-agent","artifact_sha256":"3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b","step":"deploy","target":"production","version":"1.4.0","workflow":"WF-release"}';
+    const digest = createHash('sha256').update(release, 'utf8').digest('hex');
+    const payload = {
+      approves_release_sha256: digest,
+      decision: 'ich signiere',
+      step: 'deploy',
+      type: 'approval',
+      workflow: 'WF-release',
+    };
+    const signature = signPayload(payload);
+    const padding = `${'['.repeat(15000)}0${']'.repeat(15000)}`;
+    const raw = `{"payload":${JSON.stringify(payload)},"signature":"${signature}","padding":${padding}}`;
+    expect(raw.length).toBeGreaterThan(30000);
+    const request = accept({
+      claim: 'Deploy buzz-agent',
+      evidence: 'Deep padding around a flat signed approval. No engine was run.',
+      mode: 'action_authorization',
+      tier: 'standard',
+      proposed_action: release,
+      signed_evidence: [itemFromRawJson(raw)],
+      key_manifest: {
+        version: 'test',
+        keys: [{ pubkey: key.pubkeyHex, status: 'active', roles: ['release_approval'] }],
+      },
+    });
+    const server = settle(request);
+    const portable = runPortable(request, server.response);
+    const evidence = server.processed.evidenceVerification[0];
+    expect(server.response.verdict).toBe('ALLOW');
+    expect(evidence?.status).toBe('recomputed');
+    expect(evidence?.code ?? null).toBeNull();
+    expect(portable.status, trace(portable)).toBe(0);
+    expect(portable.items[0].status).toBe('recomputed');
+    expect(portable.items[0].code).toBe(evidence?.code ?? null);
   });
 });

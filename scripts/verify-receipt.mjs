@@ -57,7 +57,7 @@ import { createRequire } from 'module';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { checkActionBinding } from '../src/action-binding-core.mjs';
-import { DUPLICATE_JSON_KEY, parseJsonText } from '../src/json-duplicate-keys.mjs';
+import { DUPLICATE_JSON_KEY, JSON_UNEXAMINED, parseJsonText } from '../src/json-duplicate-keys.mjs';
 import { readSignedClaims } from '../src/signed-claims.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -385,6 +385,17 @@ function recomputeEvidenceItem(item, index, trustedById, barePubkeys, proposedAc
           status: 'failed',
           code: DUPLICATE_JSON_KEY,
           reason: 'Signed JSON contains a duplicate key',
+        },
+        unchecked,
+      );
+    }
+    if (!parsed.ok && parsed.code === JSON_UNEXAMINED) {
+      return withChecks(
+        {
+          ...base,
+          status: 'failed',
+          code: JSON_UNEXAMINED,
+          reason: 'Signed JSON could not be examined',
         },
         unchecked,
       );
