@@ -34,6 +34,7 @@ import {
   rawEventClaimsApproval,
   type ProposedActionSource,
 } from './action-binding.js';
+import { readSignedClaims } from './signed-claims.mjs';
 
 /**
  * Evidence item type for cryptographically signed events.
@@ -225,7 +226,7 @@ function verifySignedEvidenceItem(
 
   const signedClaims = readSignedClaims(rawEvent.payload);
   if (!signedClaims.ok) {
-    return fail(failure('block', 'signed_claims_malformed', signedClaims.reason));
+    return fail(failure('block', signedClaims.code, signedClaims.reason));
   }
 
   // Check signer authorization if manifest is provided
@@ -249,34 +250,6 @@ function verifySignedEvidenceItem(
     signer: item.signer_pubkey,
     claims_validated: signedClaims.claims,
   };
-}
-
-/**
- * Claims that may be reported as validated. Only an own `claims` array on
- * the signed payload counts. A missing array is "no signed claims", not
- * a copy of the outer item. A present but malformed array fails closed.
- */
-function readSignedClaims(
-  payload: unknown,
-): { ok: true; claims: string[] } | { ok: false; reason: string } {
-  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
-    return { ok: true, claims: [] };
-  }
-  if (!Object.prototype.hasOwnProperty.call(payload, 'claims')) {
-    return { ok: true, claims: [] };
-  }
-  const raw = (payload as { claims?: unknown }).claims;
-  if (!Array.isArray(raw)) {
-    return { ok: false, reason: 'Signed payload claims must be an array of strings' };
-  }
-  const claims: string[] = [];
-  for (const entry of raw) {
-    if (typeof entry !== 'string' || entry.length === 0) {
-      return { ok: false, reason: 'Signed payload claims must be non-empty strings' };
-    }
-    claims.push(entry);
-  }
-  return { ok: true, claims };
 }
 
 /**

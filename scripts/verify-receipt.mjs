@@ -22,6 +22,14 @@
  * fails signature, binding, or authority makes the process exit 1.
  * Evidence that is not an approval leaves binding `not_checked` and keeps
  * the previous exit code.
+ * After a signature and binding pass, signed payload `claims` are checked
+ * with src/signed-claims.mjs (the same function as the server). A bad shape
+ * is signed_claims_malformed and exits 1.
+ * `authority: passed` means the signer matched a CLI trust anchor. It does
+ * not mean the inline key manifest was checked. With no trusted key, the
+ * process still exits 1 and every item still prints PORTABLE_ITEM. Authority
+ * is failed when the signer can be read, and not_checked when the item fails
+ * before that stage.
  *
  * Usage:
  *   node scripts/verify-receipt.mjs <receipt.json> <original-request.json> \
@@ -47,6 +55,7 @@ import { createRequire } from 'module';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { checkActionBinding } from '../src/action-binding-core.mjs';
+import { readSignedClaims } from '../src/signed-claims.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -481,6 +490,24 @@ function recomputeEvidenceItem(item, index, trustedById, barePubkeys, proposedAc
     );
   }
 
+  const signedClaims = readSignedClaims(rawEvent.payload);
+  if (!signedClaims.ok) {
+    return withChecks(
+      {
+        ...base,
+        signer: signerHex,
+        status: 'failed',
+        code: signedClaims.code,
+        reason: signedClaims.reason,
+      },
+      {
+        signature: STAGE_PASSED,
+        binding: binding.checked ? STAGE_PASSED : STAGE_NOT_CHECKED,
+        authority,
+      },
+    );
+  }
+
   return withChecks(
     {
       ...base,
@@ -562,7 +589,7 @@ function verifyEvidenceOffline(request, trustedById, barePubkeys) {
   if (trustedById.size === 0 && barePubkeys.size === 0) {
     console.log('❌ signed_evidence present but no --trusted-pubkey / --trusted-key supplied');
     console.log('   Refusing to treat server status as proof.');
-    return { ok: false, results: [], hadEvidence: true, missingTrust: true };
+    console.log('   Each item still reports signature, binding, and authority below.');
   }
 
   const proposedAction = proposedActionSource(request);

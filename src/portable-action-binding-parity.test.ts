@@ -190,7 +190,9 @@ describe('portable verifier shares the server binding predicate', () => {
     expect(checkActionBinding).toBe(sharedCheckActionBinding);
     const source = readFileSync(join(process.cwd(), 'scripts', 'verify-receipt.mjs'), 'utf8');
     expect(source).toContain("from '../src/action-binding-core.mjs'");
+    expect(source).toContain("from '../src/signed-claims.mjs'");
     expect(source).not.toContain('function checkActionBinding');
+    expect(source).not.toContain('function readSignedClaims');
   });
 
   it.each([
@@ -264,6 +266,26 @@ describe('portable verifier shares the server binding predicate', () => {
       binding: 'not_checked',
       bindingCode: null,
     },
+    {
+      name: 'signed claims number',
+      proposed: RELEASE_140 as unknown,
+      item: () => evidenceItem({ ...buzzApproval(), claims: 123 }),
+      verdict: 'BLOCK' as const,
+      code: 'signed_claims_malformed',
+      signature: 'passed',
+      binding: 'passed',
+      bindingCode: null,
+    },
+    {
+      name: 'signed claims mixed array',
+      proposed: RELEASE_140 as unknown,
+      item: () => evidenceItem({ ...buzzApproval(), claims: ['release_approval', 1] }),
+      verdict: 'BLOCK' as const,
+      code: 'signed_claims_malformed',
+      signature: 'passed',
+      binding: 'passed',
+      bindingCode: null,
+    },
   ])('$name has the same outcome on the server and in the portable verifier', (spec) => {
     const request = requestFor(spec.proposed === ABSENT ? ABSENT : spec.proposed, spec.item());
     const server = settle(request);
@@ -296,6 +318,34 @@ describe('portable verifier shares the server binding predicate', () => {
     expect(portable.items[0].signature.status).toBe('failed');
     expect(portable.items[0].binding.status).toBe('not_checked');
     expect(portable.items[0].code).toBe('evidence_signature_invalid');
+  });
+
+  it('emits PORTABLE_ITEM for every item when no trusted key is supplied', () => {
+    const request = accept({
+      claim: 'Deploy buzz-agent',
+      evidence: 'Offline parity: no CLI trust anchor',
+      mode: 'action_authorization',
+      tier: 'standard',
+      proposed_action: RELEASE_140,
+      signed_evidence: [evidenceItem(buzzApproval()), evidenceItem({ note: 'second item' })],
+      key_manifest: {
+        version: 'test',
+        keys: [{ pubkey: key.pubkeyHex, status: 'active', roles: ['release_approval'] }],
+      },
+    });
+    const server = settle(request);
+    expect(server.response.verdict).toBe('ALLOW');
+    const portable = runPortable(request, server.response);
+    expect(portable.status, trace(portable)).toBe(1);
+    expect(portable.items).toHaveLength(2);
+    for (const item of portable.items) {
+      expect(item.status).toBe('failed');
+      expect(item.code).toBe('untrusted_signer');
+      expect(item.authority.status).toBe('failed');
+      expect(item.authority.code).toBe('untrusted_signer');
+      expect(item.signature.status).toBe('not_checked');
+      expect(item.binding.status).toBe('not_checked');
+    }
   });
 
   it('keeps exit 0 for a legacy request with no approval shape and no signed evidence', () => {

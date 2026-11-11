@@ -133,10 +133,19 @@ signature-verification part of that row is bounded separately in §2.6.
    `checkActionBinding` from `src/action-binding-core.mjs` — the same module
    the server uses. Each item reports `signature`, `binding`, and `authority`
    separately (`passed`, `failed`, or `not_checked` when that stage did not
-   run). Authority in this script is the caller-supplied trusted key. It is
-   not the inline key manifest. A recognised approval that fails any of the
-   three exits 1. Evidence that is not an approval leaves binding
-   `not_checked` and keeps the previous exit code.
+   run). Authority in this script is the caller-supplied trusted key.
+   `authority: passed` confirms that CLI trust anchor only. It is not the
+   inline key manifest. A recognised approval that fails any of the three
+   exits 1. Evidence that is not an approval leaves binding `not_checked`
+   and keeps the previous exit code. With no trusted key the process still
+   exits 1, and every item still prints a `PORTABLE_ITEM` line. Authority is
+   `failed` when the signer can be read, and `not_checked` when the item
+   fails before that stage.
+4. **Signed claims shape.** After the signature and the binding check pass,
+   the script calls `readSignedClaims` from `src/signed-claims.mjs`, the same
+   function as the server. A present `claims` value that is not an array of
+   non-empty strings is `signed_claims_malformed` and exits 1. A missing
+   `claims` field stays "no signed claims".
 
 **What it never does.** It does **not** treat
 `meta.evidence_verification[i].status` as proof. Server-emitted statuses are
@@ -163,11 +172,12 @@ script. That is intentional:
 |---|---|
 | Missing `original-request.json` | 2 |
 | Digest mismatch / missing / uncomputable | 1 |
-| `signed_evidence` present, no trusted keys supplied | 1 |
+| `signed_evidence` present, no trusted keys supplied (each item still prints `PORTABLE_ITEM`) | 1 |
 | `signer_pubkey` not in trusted set / key_id mismatch | 1 |
 | Missing/malformed `raw_event` | 1 |
 | Invalid ed25519 over JCS-canonical payload | 1 |
 | Recognised approval fails action-binding (mismatch, missing action, unknown profile, or any other `action_binding_*` code) | 1 |
+| Signed payload `claims` is present but not an array of non-empty strings | 1 |
 | All requested checks pass | 0 |
 
 **Dependency note.** Signature and digest recompute require the same
@@ -201,7 +211,7 @@ Signature verification shows that a key signed a payload. It does not show that 
 
 **Optional does not bypass an approval.** Recognition uses the same shape rule and does not require a valid signature: outer claims, or the parsed payload, or both. Once an item is an approval, every failure on that item forces **BLOCK** even when `verification` is `"optional"`. That includes an invalid signature, a malformed `raw_event`, a binding failure, a revoked / rotated / expired / not-yet-valid key, a role mismatch, a key missing from the manifest, and a `key_manifest_ref` with no manifest. A non-approval item keeps the previous split: `optional` does not force, and an unverifiable manifest on a required item stays UNCERTAIN. Missing approvals for an action kind are not inferred; only an item that presents an approval shape is covered.
 
-**`claims_validated`.** The array is the signed payload's own `claims` when that value is an array of non-empty strings. It is never copied from outer `signed_evidence[].claims`. The HTTP field is omitted when the signed array is missing or empty, so responses for evidence that does not carry signed claims stay the previous shape. A malformed signed `claims` field is `signed_claims_malformed` and is not reported as validated. Manifest role matching still intersects the key's roles with the outer claim strings. That match is not evidence that those strings were signed.
+**`claims_validated`.** The array is the signed payload's own `claims` when that value is an array of non-empty strings. It is never copied from outer `signed_evidence[].claims`. The HTTP field is omitted when the signed array is missing or empty, so responses for evidence that does not carry signed claims stay the previous shape. A malformed signed `claims` field is `signed_claims_malformed` and is not reported as validated. The portable verifier uses the same `readSignedClaims` function and the same code. Manifest role matching still intersects the key's roles with the outer claim strings. That match is not evidence that those strings were signed.
 
 **Limits.**
 
