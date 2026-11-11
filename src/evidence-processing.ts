@@ -4,8 +4,9 @@
  * 
  * Processes signed evidence and applies verdict effects based on verification results.
  * Integrates with the verify handler to force verdict changes when evidence verification
- * fails for required items. Action-binding failures force BLOCK even if the item
- * is optional; that override is applied here, after the engine returns.
+ * fails for required items. Any failure of an item recognised as an approval
+ * forces BLOCK even if the item is optional; that override is applied here,
+ * after the engine returns.
  */
 
 import { verifySignedEvidence } from './signed-evidence.js';
@@ -84,8 +85,9 @@ export function processSignedEvidence(request: SentinelVerifyRequest): EvidenceP
     const evidence = request.signed_evidence[i];
     const result = verificationResults[i];
 
-    // Action-binding failures force BLOCK even when the caller marked the
-    // item optional. A cascade ALLOW must not survive a failed binding check.
+    // Approval failures force BLOCK even when the caller marked the item
+    // optional. That covers signature, binding, and manifest authority.
+    // A cascade ALLOW must not survive any of those failures.
     const bindingForcesBlock = result.forcesBlock === true;
     if (evidence.verification === 'required' || bindingForcesBlock) {
       if (result.status === 'failed') {

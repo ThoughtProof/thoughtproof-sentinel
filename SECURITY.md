@@ -188,14 +188,16 @@ Signature verification shows that a key signed a payload. It does not show that 
    - plain object or array: UTF-8 JCS
 4. The recomputed hex must equal the signed digest (`action_binding_mismatch` otherwise). No `proposed_action` is `action_binding_missing_action`. A value that cannot be hashed is `action_binding_malformed`.
 
-`action_hash`, mandate prose, and outer claims are not inputs. Failures use severity `block` and force **BLOCK** even when the item is `verification: "optional"`.
+`action_hash`, mandate prose, and outer claims are not inputs to the digest comparison.
+
+**Optional does not bypass an approval.** Recognition uses the same shape rule and does not require a valid signature: outer claims, or the parsed payload, or both. Once an item is an approval, every failure on that item forces **BLOCK** even when `verification` is `"optional"`. That includes an invalid signature, a malformed `raw_event`, a binding failure, a revoked / rotated / expired / not-yet-valid key, a role mismatch, a key missing from the manifest, and a `key_manifest_ref` with no manifest. A non-approval item keeps the previous split: `optional` does not force, and an unverifiable manifest on a required item stays UNCERTAIN. Missing approvals for an action kind are not inferred; only an item that presents an approval shape is covered.
 
 **`claims_validated`.** The array is the signed payload's own `claims` when that value is an array of non-empty strings. It is never copied from outer `signed_evidence[].claims`. The HTTP field is omitted when the signed array is missing or empty, so responses for evidence that does not carry signed claims stay the previous shape. A malformed signed `claims` field is `signed_claims_malformed` and is not reported as validated. Manifest role matching still intersects the key's roles with the outer claim strings. That match is not evidence that those strings were signed.
 
 **Limits.**
 
 - No BIP-340/Nostr verification. Those items stay `unsupported_signature_scheme`. There is no Ed25519 re-signing bridge.
-- The preimage is the submitted `proposed_action`. Sentinel does not watch an executor. A component that runs the release has to hash the same bytes again. `package_digest` commits the validated request, including `proposed_action` when it is present. That hash is not the approval digest.
+- The preimage is the submitted `proposed_action`. Sentinel does not watch an executor. A component that runs the release has to hash the same bytes again. `package_digest` commits the validated request, including `proposed_action` when it is present. That hash is not the approval digest. Own JSON keys named `__proto__`, `constructor`, and `prototype` are kept. `src/package-digest.ts` and `scripts/verify-receipt.mjs` copy them onto a null-prototype object. A request without those keys keeps the previous digest.
 - Legacy mandate normalization still drops `action.target` and `action.revision`. Those fields are not the binding preimage.
 - The inline-manifest limit in §2.2 is unchanged. A matching digest shows that the signing key approved that digest, not that the caller-supplied manifest is an independent authority.
 - `scripts/verify-receipt.mjs` does not evaluate this predicate.
@@ -233,7 +235,7 @@ Design rationales:
   to the package — the action-bound property is gone, so the response must say
   so rather than present an unbound ALLOW.
 - **Downgrade-only.** No code path raises a verdict.
-- **Action-binding failure → BLOCK, not UNCERTAIN.** The check could read the signed digest and the proposed action. A mismatch is a failed claim. An internal error inside that check is also BLOCK (`action_binding_malformed`), so it cannot be left as an optional-item ALLOW. This is separate from `package_digest` failure, which stays UNCERTAIN.
+- **Approval failure → BLOCK, including when the item is optional.** Recognition does not need a valid signature. Signature, binding, and manifest failures on that item force BLOCK, so an optional flag cannot turn a broken or unauthorised approval into ALLOW. An internal error on a recognised approval is also BLOCK. The same codes on an item that is not an approval keep the previous required/optional split. `package_digest` failure stays UNCERTAIN.
 
 ---
 

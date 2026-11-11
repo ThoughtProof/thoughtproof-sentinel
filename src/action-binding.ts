@@ -90,6 +90,41 @@ function outerClaimsNameApproval(claims: readonly string[] | undefined): boolean
 }
 
 /**
+ * Same shape rule as the binding predicate. Does not verify a signature.
+ * A parsed payload counts even when its signature is invalid. Outer claims
+ * count even when the payload cannot be parsed.
+ */
+export function isApprovalDigestClaim(
+  payload: unknown,
+  outerClaims: readonly string[] | undefined,
+): boolean {
+  const payloadObject = isPlainObject(payload) ? payload : null;
+  const hasProfile = payloadObject !== null && hasOwn(payloadObject, 'binding_profile');
+  const hasSignedDigestField =
+    payloadObject !== null && SIGNED_DIGEST_FIELDS.some((key) => hasOwn(payloadObject, key));
+  return hasProfile || hasSignedDigestField || outerClaimsNameApproval(outerClaims);
+}
+
+/**
+ * Recognise an approval from outer claims and, when the bytes parse, from
+ * the unverified payload. A corrupt signature does not hide the shape.
+ */
+export function rawEventClaimsApproval(
+  rawEventBase64: unknown,
+  outerClaims: readonly string[] | undefined,
+): boolean {
+  if (outerClaimsNameApproval(outerClaims)) return true;
+  if (typeof rawEventBase64 !== 'string' || rawEventBase64.length === 0) return false;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(rawEventBase64, 'base64').toString('utf8'));
+    if (!isPlainObject(parsed)) return false;
+    return isApprovalDigestClaim(parsed.payload, undefined);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * sha256 of the proposed action, lowercase hex.
  * - string: exact UTF-8 bytes, not re-canonicalized and not trimmed
  * - plain object or array: UTF-8 JCS
@@ -142,17 +177,15 @@ export function checkActionBinding(
   outerClaims: readonly string[] | undefined,
   proposedAction: ProposedActionSource | undefined,
 ): ActionBindingResult {
+  if (!isApprovalDigestClaim(payload, outerClaims)) {
+    return { ok: true, checked: false };
+  }
+
   const payloadObject = isPlainObject(payload) ? payload : null;
   const hasProfile = payloadObject !== null && hasOwn(payloadObject, 'binding_profile');
   const signedFields = payloadObject
     ? SIGNED_DIGEST_FIELDS.map((key) => readDigestField(payloadObject, key))
     : [];
-  const hasSignedDigestField = signedFields.some((field) => field.present);
-  const outerClaim = outerClaimsNameApproval(outerClaims);
-
-  if (!hasProfile && !hasSignedDigestField && !outerClaim) {
-    return { ok: true, checked: false };
-  }
 
   // An approval-digest claim exists. Everything below fails closed.
   if (payloadObject === null) {

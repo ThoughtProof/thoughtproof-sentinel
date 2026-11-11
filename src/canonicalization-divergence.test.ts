@@ -14,11 +14,19 @@ function portableCanonicalizeLibrary(obj: any): any {
   }
   
   if (obj && typeof obj === 'object') {
-    const sorted: any = {};
+    // Null prototype + defineProperty so an own "__proto__" key is kept.
+    // A normal {} assignment drops that key. constructor and prototype too.
+    const sorted: any = Object.create(null);
     for (const key of Object.keys(obj).sort()) {
-      if (obj[key] !== undefined) {
-        sorted[key] = portableCanonicalizeLibrary(obj[key]);
-      }
+      const desc = Object.getOwnPropertyDescriptor(obj, key);
+      if (!desc || !Object.prototype.hasOwnProperty.call(desc, 'value')) continue;
+      if (desc.value === undefined) continue;
+      Object.defineProperty(sorted, key, {
+        value: portableCanonicalizeLibrary(desc.value),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return sorted;
   }

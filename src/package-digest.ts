@@ -38,29 +38,38 @@ export function computePackageDigest(request: SentinelVerifyRequest): string {
 }
 
 /**
- * Recursively remove undefined fields for deterministic serialization.
+ * Drop undefined fields without losing own JSON keys.
+ * A normal `{}` assignment of `__proto__` hits the prototype setter and the
+ * key never becomes enumerable, so two actions that differ only in that key
+ * hashed to the same package digest. Copy onto a null-prototype object with
+ * defineProperty. `constructor` and `prototype` are copied the same way.
+ * Must match `removeUndefinedFields` in scripts/verify-receipt.mjs.
  */
 function removeUndefinedFields(obj: unknown): unknown {
   if (obj === null || obj === undefined) {
     return obj;
   }
-  
+
   if (Array.isArray(obj)) {
     return obj.map(removeUndefinedFields);
   }
-  
+
   if (typeof obj === 'object') {
-    const cleaned: Record<string, unknown> = {};
-    
-    for (const [key, value] of Object.entries(obj)) {
-      if (value !== undefined) {
-        cleaned[key] = removeUndefinedFields(value);
-      }
+    const cleaned = Object.create(null) as Record<string, unknown>;
+    for (const key of Object.keys(obj)) {
+      const desc = Object.getOwnPropertyDescriptor(obj, key);
+      if (!desc || !Object.prototype.hasOwnProperty.call(desc, 'value')) continue;
+      if (desc.value === undefined) continue;
+      Object.defineProperty(cleaned, key, {
+        value: removeUndefinedFields(desc.value),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
-    
     return cleaned;
   }
-  
+
   return obj;
 }
 
@@ -73,8 +82,8 @@ const COMMITMENT_SALT_HEX = /^[0-9a-f]{64}$/;
 /**
  * sha256(salt || UTF-8(JCS(value))), as `sha256:` + lowercase hex.
  * Canonicalize the JSON value directly, matching the portable verifier.
- * canonicalize already omits undefined object fields; the legacy package-digest
- * cleanup assigns into {}, which would lose an own JSON key named __proto__.
+ * canonicalize already omits undefined object fields and keeps an own JSON
+ * key named __proto__. computePackageDigest uses the same own-key copy.
  * An unsalted hash of a mandate is dictionary-reversible (amount, recipient, kind).
  * The salt is not part of the hashed value and must stay off the public receipt.
  */
