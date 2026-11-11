@@ -250,7 +250,12 @@ export function applyEvidenceEffects(
 
 /** Existing block codes keep the previous sentence. Binding codes name the check. */
 function objectionLead(code: string): string {
-  if (code.startsWith('action_binding_') || code === 'signed_claims_malformed') {
+  if (
+    code.startsWith('action_binding_')
+    || code === 'signed_claims_malformed'
+    || code === 'duplicate_json_key'
+    || code === 'json_unexamined'
+  ) {
     return 'Evidence verification failed';
   }
   return 'Evidence signature verification failed';

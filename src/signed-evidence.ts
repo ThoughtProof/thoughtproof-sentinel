@@ -34,6 +34,7 @@ import {
   rawEventClaimsApproval,
   type ProposedActionSource,
 } from './action-binding.js';
+import { parseJsonText } from './json-duplicate-keys.mjs';
 import { readSignedClaims } from './signed-claims.mjs';
 
 /**
@@ -184,11 +185,25 @@ function verifySignedEvidenceItem(
       `Unsupported signature scheme: ${item.signature_scheme}`));
   }
 
-  // Parse the raw event
+  // Parse the raw event. Duplicate keys are rejected before the signature
+  // so two parsers cannot disagree about which value was signed.
   let rawEvent: RawSignedEvent;
   try {
     const eventBytes = Buffer.from(item.raw_event, 'base64');
-    rawEvent = JSON.parse(eventBytes.toString('utf8'));
+    const parsed = parseJsonText(eventBytes.toString('utf8'));
+    if (!parsed.ok && parsed.code === 'duplicate_json_key') {
+      return fail(failure('block', 'duplicate_json_key',
+        'Signed JSON contains a duplicate key'));
+    }
+    if (!parsed.ok && parsed.code === 'json_unexamined') {
+      return fail(failure('block', 'json_unexamined',
+        'Signed JSON could not be examined'));
+    }
+    if (!parsed.ok || parsed.value === null || typeof parsed.value !== 'object') {
+      return fail(failure('block', 'evidence_malformed',
+        'Invalid raw_event: not valid base64 JSON'));
+    }
+    rawEvent = parsed.value as RawSignedEvent;
   } catch (error) {
     return fail(failure('block', 'evidence_malformed',
       'Invalid raw_event: not valid base64 JSON'));

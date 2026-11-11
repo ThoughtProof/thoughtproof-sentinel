@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseJsonText } from './json-duplicate-keys.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -126,15 +127,38 @@ export function isApprovalDigestClaim(payload, outerClaims) {
  * the unverified payload. A corrupt signature does not hide the shape.
  */
 export function rawEventClaimsApproval(rawEventBase64, outerClaims) {
+  try {
+    return recogniseApproval(rawEventBase64, outerClaims);
+  } catch {
+    // A throw means the bytes were not examined. Do not report "not an approval".
+    return true;
+  }
+}
+
+function recogniseApproval(rawEventBase64, outerClaims) {
   if (outerClaimsNameApproval(outerClaims)) return true;
   if (typeof rawEventBase64 !== 'string' || rawEventBase64.length === 0) return false;
+  let text;
   try {
-    const parsed = JSON.parse(Buffer.from(rawEventBase64, 'base64').toString('utf8'));
-    if (!isPlainObject(parsed)) return false;
-    return isApprovalDigestClaim(parsed.payload, undefined);
+    text = Buffer.from(rawEventBase64, 'base64').toString('utf8');
   } catch {
     return false;
   }
+  const parsed = parseJsonText(text);
+  if (!parsed.ok && parsed.code === 'json_unexamined') {
+    const values = parsed.payloadValues;
+    if (!values) return true;
+    for (const payload of values) {
+      if (isApprovalDigestClaim(payload, undefined)) return true;
+    }
+    return false;
+  }
+  if (!parsed.ok && parsed.code !== 'duplicate_json_key') return false;
+  for (const payload of parsed.payloadValues) {
+    if (isApprovalDigestClaim(payload, undefined)) return true;
+  }
+  if (!isPlainObject(parsed.value)) return false;
+  return isApprovalDigestClaim(parsed.value.payload, undefined);
 }
 
 /**
