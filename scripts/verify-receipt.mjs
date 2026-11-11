@@ -142,13 +142,23 @@ function computePackageDigest(request) {
   return `sha256:${hash}`;
 }
 
+// Must match removeUndefinedFields in src/package-digest.ts.
+// Assigning onto {} drops an own "__proto__" key via the prototype setter.
 function removeUndefinedFields(obj) {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) return obj.map(removeUndefinedFields);
   if (typeof obj === 'object') {
-    const cleaned = {};
-    for (const [key, value] of Object.entries(obj)) {
-      if (value !== undefined) cleaned[key] = removeUndefinedFields(value);
+    const cleaned = Object.create(null);
+    for (const key of Object.keys(obj)) {
+      const desc = Object.getOwnPropertyDescriptor(obj, key);
+      if (!desc || !Object.prototype.hasOwnProperty.call(desc, 'value')) continue;
+      if (desc.value === undefined) continue;
+      Object.defineProperty(cleaned, key, {
+        value: removeUndefinedFields(desc.value),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return cleaned;
   }

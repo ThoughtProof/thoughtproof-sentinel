@@ -244,6 +244,44 @@ describe('validateVerifyRequest', () => {
     expect(result.valid).toBe(false);
   });
 
+  describe('proposed_action preimage', () => {
+    it('omits the field when the caller does not send it', () => {
+      const result = validateVerifyRequest(validBody);
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect('proposed_action' in result.data).toBe(false);
+      }
+    });
+
+    it('preserves a string exactly, including surrounding spaces', () => {
+      const proposed_action = '  not-trimmed  ';
+      const result = validateVerifyRequest({ ...validBody, proposed_action });
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.data.proposed_action).toBe(proposed_action);
+      }
+    });
+
+    it('preserves a plain object without dropping nested fields', () => {
+      const proposed_action = { version: '1.4.0', extra: 'kept' };
+      const result = validateVerifyRequest({ ...validBody, proposed_action });
+      expect(result.valid).toBe(true);
+      if (result.valid) {
+        expect(result.data.proposed_action).toEqual(proposed_action);
+      }
+    });
+
+    it('rejects values that cannot be hashed', () => {
+      for (const proposed_action of [1, null, true]) {
+        const result = validateVerifyRequest({ ...validBody, proposed_action });
+        expect(result.valid).toBe(false);
+        if (!result.valid) {
+          expect(result.errors.some((e) => e.field === 'proposed_action')).toBe(true);
+        }
+      }
+    });
+  });
+
   // ------------------------------------------------------------
   // F3: strict-mode whitelists (unknown fields rejected)
   // ------------------------------------------------------------

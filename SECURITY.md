@@ -2,7 +2,7 @@
 
 **Scope:** `sentinel.thoughtproof.ai` verification API, including F1 action-bound
 evidence verification (`signed_event`, `package_digest`, `proof_strength`).
-**Last updated:** 2026-08-02 (post-F1, PR #19)
+**Last updated:** 2026-11-11 (action-binding predicate)
 
 This document is the searchable home of the trust and threat model. It exists so
 integrators, auditors, and reviewers do not have to extract security posture from
@@ -34,10 +34,11 @@ presented claims ("evidence-verifying, not evidence-consuming").
 
 | Statement | Guaranteed by |
 |---|---|
-| The evidence bytes carry a valid ed25519 signature over the JCS-canonical payload | Signature recomputation at verify time, **server-side only** (§2.6) |
+| The evidence bytes carry a valid ed25519 signature over the JCS-canonical payload | Signature recomputation in `src/signed-evidence.ts`, and again in `scripts/verify-receipt.mjs` when the caller passes trusted keys (§2.6). BIP-340/Nostr is not verified |
 | The verdict is bound to the exact request package (not a paraphrase, not "current room state") | `package_digest` = sha256 over JCS-canonical request, emitted in `meta` |
-| A declared signer key is listed as `active` in the *supplied* manifest, within time bounds, with matching roles | Manifest consistency check |
-| A third party can recompute the `package_digest` offline from the accepted request | `scripts/verify-receipt.mjs` (zero-dependency); requests with unknown fields are rejected at ingest (§2.5). **The portable script does not currently re-verify ed25519 signatures offline — see §2.6.** |
+| When a signed payload claims an approval digest, that digest equals sha256 of this request's `proposed_action` | Action-binding predicate (§2.7). Outer claims are not the digest |
+| A declared signer key is listed as `active` in the *supplied* manifest, within time bounds, with matching roles | Manifest consistency check. Role names are still the outer `claims` strings (§2.7) |
+| A third party can recompute the `package_digest` and the ed25519 signature offline from the accepted request | `scripts/verify-receipt.mjs` recomputes the digest and, with trusted keys, ed25519 over each JCS payload (§2.6). It does not trust `meta.evidence_verification[].status`. It does not run the action-binding check (§2.7) |
 
 ### 2.2 What F1 does **not** prove (v0)
 
@@ -74,7 +75,7 @@ manifests are insufficient. You need one of the production paths below.
 
 | Value | Meaning |
 |---|---|
-| `recomputed` | Every required `signed_event` was independently signature-verified (and manifest-consistent, where a manifest was supplied) |
+| `recomputed` | Every required `signed_event` passed signature verification (and manifest checks, where a manifest was supplied). An item that claims an approval digest also matched `proposed_action` (§2.7) |
 | `unverified` | At least one required item could not be fully recomputed, or no signed evidence was supplied at all |
 
 `proof_strength` is emitted **only** when the request contains `signed_evidence`.
@@ -170,6 +171,37 @@ JCS that could silently diverge.
 - Signed server responses (server signs its own output envelope).
 - Registry-backed key rotation / ERC-8004 authority.
 - Authoritative revocation freshness (transparency log / on-chain).
+- The action-binding predicate (§2.7). Exit 0 means the digest and ed25519 checks that were requested passed. It does not mean a release was approved.
+
+### 2.7 Action-binding predicate
+
+Signature verification shows that a key signed a payload. It does not show that the payload approves the action in this request. The predicate closes that gap for one explicit shape. It runs inside `verifySignedEvidence`, which `processSignedEvidence` calls. `applyEvidenceEffects` runs after the engine, so a cascade ALLOW or UNCERTAIN does not survive a failed check. The financial authorization gate is not this check and does not read release digests.
+
+**When it runs.** A signed evidence item is an approval-digest claim only when the signed payload object has an own property `binding_profile`, `approves_release_sha256`, or `approves_sha256`, or when an outer claim is exactly `approves_release_sha256`, `approves_sha256`, or `approves_action_sha256`, or one of those names plus a `:` suffix. Anything else skips the predicate. Existing requests that do not carry such a claim keep signature-only verification.
+
+**What it compares.** The digest is read only from the signed payload. Outer claim text can force the check and can never satisfy it. If the claim is only outside the signature, the result is `action_binding_digest_not_signed`.
+
+1. `binding_profile`, if present, must be exactly `thoughtproof.sentinel.action_binding.v1`. Any other value is `action_binding_unsupported_profile`.
+2. Profile v1 requires `approves_sha256`. A payload with no profile uses `approves_release_sha256` and/or `approves_sha256` (`approves_release_sha256` is the Buzz approval-content field). Each present field must be 64 lowercase hex characters and no prefix (`0x`, `sha256:`). A bad encoding or two fields that disagree is `action_binding_malformed`. A missing required field is `action_binding_missing_digest`.
+3. Sentinel recomputes sha256 of `proposed_action`:
+   - string: exact UTF-8 bytes, not trimmed and not re-canonicalized
+   - plain object or array: UTF-8 JCS
+4. The recomputed hex must equal the signed digest (`action_binding_mismatch` otherwise). No `proposed_action` is `action_binding_missing_action`. A value that cannot be hashed is `action_binding_malformed`.
+
+`action_hash`, mandate prose, and outer claims are not inputs to the digest comparison.
+
+**Optional does not bypass an approval.** Recognition uses the same shape rule and does not require a valid signature: outer claims, or the parsed payload, or both. Once an item is an approval, every failure on that item forces **BLOCK** even when `verification` is `"optional"`. That includes an invalid signature, a malformed `raw_event`, a binding failure, a revoked / rotated / expired / not-yet-valid key, a role mismatch, a key missing from the manifest, and a `key_manifest_ref` with no manifest. A non-approval item keeps the previous split: `optional` does not force, and an unverifiable manifest on a required item stays UNCERTAIN. Missing approvals for an action kind are not inferred; only an item that presents an approval shape is covered.
+
+**`claims_validated`.** The array is the signed payload's own `claims` when that value is an array of non-empty strings. It is never copied from outer `signed_evidence[].claims`. The HTTP field is omitted when the signed array is missing or empty, so responses for evidence that does not carry signed claims stay the previous shape. A malformed signed `claims` field is `signed_claims_malformed` and is not reported as validated. Manifest role matching still intersects the key's roles with the outer claim strings. That match is not evidence that those strings were signed.
+
+**Limits.**
+
+- No BIP-340/Nostr verification. Those items stay `unsupported_signature_scheme`. There is no Ed25519 re-signing bridge.
+- The preimage is the submitted `proposed_action`. Sentinel does not watch an executor. A component that runs the release has to hash the same bytes again. `package_digest` commits the validated request, including `proposed_action` when it is present. That hash is not the approval digest. Own JSON keys named `__proto__`, `constructor`, and `prototype` are kept. `src/package-digest.ts` and `scripts/verify-receipt.mjs` copy them onto a null-prototype object. A request without those keys keeps the previous digest.
+- Legacy mandate normalization still drops `action.target` and `action.revision`. Those fields are not the binding preimage.
+- The inline-manifest limit in §2.2 is unchanged. A matching digest shows that the signing key approved that digest, not that the caller-supplied manifest is an independent authority.
+- `scripts/verify-receipt.mjs` does not evaluate this predicate.
+- Duplicate keys inside `raw_event` JSON are not rejected (`JSON.parse` keeps the last). String preimages are not Unicode-normalized.
 
 ---
 
@@ -183,6 +215,8 @@ matching on human-readable reasons.
 | Invalid signature over canonical payload | block | **BLOCK** | `evidence_signature_invalid` |
 | Malformed / tampered `raw_event` | block | **BLOCK** | `evidence_malformed` |
 | Unsupported signature scheme | block | **BLOCK** | `unsupported_signature_scheme` |
+| Approval digest mismatch, missing, not inside the signature, unknown profile, or malformed binding | block | **BLOCK**, including when the item is `optional` | `action_binding_mismatch`, `action_binding_missing_digest`, `action_binding_digest_not_signed`, `action_binding_unsupported_profile`, `action_binding_malformed`, `action_binding_missing_action` |
+| `claims` inside the signed payload is present but not an array of non-empty strings | block | **BLOCK** when the item is required | `signed_claims_malformed` |
 | Signer key revoked / rotated / expired / not-yet-valid / role mismatch | block | **BLOCK** | `signer_not_authorized` |
 | Signer key not present in manifest | uncertain | **UNCERTAIN** | `key_manifest_unverifiable` |
 | Manifest referenced but not supplied | uncertain | **UNCERTAIN** | `key_manifest_unverifiable` |
@@ -201,6 +235,7 @@ Design rationales:
   to the package — the action-bound property is gone, so the response must say
   so rather than present an unbound ALLOW.
 - **Downgrade-only.** No code path raises a verdict.
+- **Approval failure → BLOCK, including when the item is optional.** Recognition does not need a valid signature. Signature, binding, and manifest failures on that item force BLOCK, so an optional flag cannot turn a broken or unauthorised approval into ALLOW. An internal error on a recognised approval is also BLOCK. The same codes on an item that is not an approval keep the previous required/optional split. `package_digest` failure stays UNCERTAIN.
 
 ---
 
@@ -225,6 +260,7 @@ Design rationales:
 4. **No rate-of-evidence abstractions** — evidence counts are bounded (≤50
    items), request body ≤ 1 MB.
 5. **A verdict is not enforcement** — see §1.
+6. **Action binding is shape-triggered** — see §2.7. It does not cover BIP-340, executor bytes outside `proposed_action`, or outer manifest role strings.
 
 ---
 

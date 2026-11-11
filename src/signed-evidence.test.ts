@@ -71,7 +71,60 @@ describe('signed-evidence', () => {
       expect(results).toHaveLength(1);
       expect(results[0].status).toBe('recomputed');
       expect(results[0].signer).toBe(pubkeyHex);
+      // Outer claims are not validated. This payload has no signed claims array.
+      expect(results[0].claims_validated).toEqual([]);
+    });
+
+    it('reports claims from the signed payload, not the outer claims array', () => {
+      const { publicKey, privateKey } = generateTestKeyPair();
+      const pubkeyHex = extractEd25519PublicKey(publicKey);
+
+      const payload = {
+        action: 'transfer',
+        amount: 100,
+        to: 'alice',
+        claims: ['owner_signoff'],
+      };
+      const signature = signPayload(payload, privateKey);
+      const rawEventBase64 = Buffer.from(
+        JSON.stringify({ payload, signature }),
+        'utf8',
+      ).toString('base64');
+
+      const evidence: SignedEventEvidence = {
+        type: 'signed_event',
+        raw_event: rawEventBase64,
+        signature_scheme: 'ed25519',
+        signer_pubkey: pubkeyHex,
+        claims: ['different_unsigned_claim'],
+        verification: 'required',
+      };
+
+      const results = verifySignedEvidence([evidence]);
+      expect(results[0].status).toBe('recomputed');
       expect(results[0].claims_validated).toEqual(['owner_signoff']);
+    });
+
+    it('fails closed when the signed payload claims field is malformed', () => {
+      const { publicKey, privateKey } = generateTestKeyPair();
+      const pubkeyHex = extractEd25519PublicKey(publicKey);
+
+      const payload = { action: 'transfer', claims: 'owner_signoff' };
+      const signature = signPayload(payload, privateKey);
+      const evidence: SignedEventEvidence = {
+        type: 'signed_event',
+        raw_event: Buffer.from(JSON.stringify({ payload, signature }), 'utf8').toString('base64'),
+        signature_scheme: 'ed25519',
+        signer_pubkey: pubkeyHex,
+        claims: ['owner_signoff'],
+        verification: 'required',
+      };
+
+      const results = verifySignedEvidence([evidence]);
+      expect(results[0].status).toBe('failed');
+      expect(results[0].severity).toBe('block');
+      expect(results[0].code).toBe('signed_claims_malformed');
+      expect(results[0].claims_validated).toBeUndefined();
     });
 
     it('should fail on tampered payload', () => {

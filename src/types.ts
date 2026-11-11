@@ -162,8 +162,20 @@ export interface SentinelVerifyRequest {
   /**
    * Optional action/payload hash for shadow event correlation. If omitted,
    * shadow uses meta.package_digest when available.
+   * Not an input to the action-binding predicate. That predicate hashes
+   * `proposed_action` itself.
    */
   action_hash?: string;
+  /**
+   * Preimage for the action-binding predicate. Omitted when the caller does
+   * not send it. Present values are committed to `package_digest`.
+   *
+   * - string: sha256 of the exact UTF-8 bytes (not trimmed, not re-canonicalized)
+   * - plain object or array: sha256 of the UTF-8 JCS encoding
+   *
+   * Ignored unless a signed evidence item makes an approval-digest claim.
+   */
+  proposed_action?: unknown;
 }
 
 /** ADR-0020 structured condition (measurement / shadow input). */
@@ -256,6 +268,12 @@ export interface EvidenceVerificationResult {
   reason?: string;
   /** Verified signer public key when successful */
   signer?: string;
+  /**
+   * Claims taken from the signed payload's `claims` array.
+   * Omitted when that array is missing or empty. Never copied from the
+   * outer `signed_evidence[].claims` field.
+   */
+  claims_validated?: string[];
 }
 
 export type SentinelVerdict = 'ALLOW' | 'BLOCK' | 'UNCERTAIN';
