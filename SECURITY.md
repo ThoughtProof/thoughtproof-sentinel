@@ -38,7 +38,7 @@ presented claims ("evidence-verifying, not evidence-consuming").
 | The verdict is bound to the exact request package (not a paraphrase, not "current room state") | `package_digest` = sha256 over JCS-canonical request, emitted in `meta` |
 | When a signed payload claims an approval digest, that digest equals sha256 of this request's `proposed_action` | Action-binding predicate (§2.7). Outer claims are not the digest |
 | A declared signer key is listed as `active` in the *supplied* manifest, within time bounds, with matching roles | Manifest consistency check. Role names are still the outer `claims` strings (§2.7) |
-| A third party can recompute the `package_digest` and the ed25519 signature offline from the accepted request | `scripts/verify-receipt.mjs` recomputes the digest and, with trusted keys, ed25519 over each JCS payload (§2.6). It does not trust `meta.evidence_verification[].status`. It does not run the action-binding check (§2.7) |
+| A third party can recompute the `package_digest`, the ed25519 signature, and the action-binding predicate offline from the accepted request | `scripts/verify-receipt.mjs` recomputes the digest and, with trusted keys, ed25519 over each JCS payload, then runs the same action-binding predicate as the server (§2.6, §2.7). It does not trust `meta.evidence_verification[].status` |
 
 ### 2.2 What F1 does **not** prove (v0)
 
@@ -129,6 +129,23 @@ signature-verification part of that row is bounded separately in §2.6.
    (`--trusted-pubkey <hex>` and/or `--trusted-key <id>=<hex>`), recomputes
    ed25519 over the JCS-canonical payload inside each `raw_event` using the
    same algorithm as `src/signed-evidence.ts`. Exit non-zero on any failure.
+3. **Action-binding.** After a signature verifies, the script calls
+   `checkActionBinding` from `src/action-binding-core.mjs` — the same module
+   the server uses. Each item reports `signature`, `binding`, and `authority`
+   separately (`passed`, `failed`, or `not_checked` when that stage did not
+   run). Authority in this script is the caller-supplied trusted key.
+   `authority: passed` confirms that CLI trust anchor only. It is not the
+   inline key manifest. A recognised approval that fails any of the three
+   exits 1. Evidence that is not an approval leaves binding `not_checked`
+   and keeps the previous exit code. With no trusted key the process still
+   exits 1, and every item still prints a `PORTABLE_ITEM` line. Authority is
+   `failed` when the signer can be read, and `not_checked` when the item
+   fails before that stage.
+4. **Signed claims shape.** After the signature and the binding check pass,
+   the script calls `readSignedClaims` from `src/signed-claims.mjs`, the same
+   function as the server. A present `claims` value that is not an array of
+   non-empty strings is `signed_claims_malformed` and exits 1. A missing
+   `claims` field stays "no signed claims".
 
 **What it never does.** It does **not** treat
 `meta.evidence_verification[i].status` as proof. Server-emitted statuses are
@@ -155,10 +172,12 @@ script. That is intentional:
 |---|---|
 | Missing `original-request.json` | 2 |
 | Digest mismatch / missing / uncomputable | 1 |
-| `signed_evidence` present, no trusted keys supplied | 1 |
+| `signed_evidence` present, no trusted keys supplied (each item still prints `PORTABLE_ITEM`) | 1 |
 | `signer_pubkey` not in trusted set / key_id mismatch | 1 |
 | Missing/malformed `raw_event` | 1 |
 | Invalid ed25519 over JCS-canonical payload | 1 |
+| Recognised approval fails action-binding (mismatch, missing action, unknown profile, or any other `action_binding_*` code) | 1 |
+| Signed payload `claims` is present but not an array of non-empty strings | 1 |
 | All requested checks pass | 0 |
 
 **Dependency note.** Signature and digest recompute require the same
@@ -171,7 +190,7 @@ JCS that could silently diverge.
 - Signed server responses (server signs its own output envelope).
 - Registry-backed key rotation / ERC-8004 authority.
 - Authoritative revocation freshness (transparency log / on-chain).
-- The action-binding predicate (§2.7). Exit 0 means the digest and ed25519 checks that were requested passed. It does not mean a release was approved.
+- Inline key-manifest policy (revocation, roles, validity window). The portable authority stage is only the caller-supplied trusted key. Exit 0 means the digest, ed25519, and — when the payload is an approval — action-binding checks passed. It does not mean a release was executed.
 
 ### 2.7 Action-binding predicate
 
@@ -192,7 +211,7 @@ Signature verification shows that a key signed a payload. It does not show that 
 
 **Optional does not bypass an approval.** Recognition uses the same shape rule and does not require a valid signature: outer claims, or the parsed payload, or both. Once an item is an approval, every failure on that item forces **BLOCK** even when `verification` is `"optional"`. That includes an invalid signature, a malformed `raw_event`, a binding failure, a revoked / rotated / expired / not-yet-valid key, a role mismatch, a key missing from the manifest, and a `key_manifest_ref` with no manifest. A non-approval item keeps the previous split: `optional` does not force, and an unverifiable manifest on a required item stays UNCERTAIN. Missing approvals for an action kind are not inferred; only an item that presents an approval shape is covered.
 
-**`claims_validated`.** The array is the signed payload's own `claims` when that value is an array of non-empty strings. It is never copied from outer `signed_evidence[].claims`. The HTTP field is omitted when the signed array is missing or empty, so responses for evidence that does not carry signed claims stay the previous shape. A malformed signed `claims` field is `signed_claims_malformed` and is not reported as validated. Manifest role matching still intersects the key's roles with the outer claim strings. That match is not evidence that those strings were signed.
+**`claims_validated`.** The array is the signed payload's own `claims` when that value is an array of non-empty strings. It is never copied from outer `signed_evidence[].claims`. The HTTP field is omitted when the signed array is missing or empty, so responses for evidence that does not carry signed claims stay the previous shape. A malformed signed `claims` field is `signed_claims_malformed` and is not reported as validated. The portable verifier uses the same `readSignedClaims` function and the same code. Manifest role matching still intersects the key's roles with the outer claim strings. That match is not evidence that those strings were signed.
 
 **Limits.**
 
@@ -200,7 +219,7 @@ Signature verification shows that a key signed a payload. It does not show that 
 - The preimage is the submitted `proposed_action`. Sentinel does not watch an executor. A component that runs the release has to hash the same bytes again. `package_digest` commits the validated request, including `proposed_action` when it is present. That hash is not the approval digest. Own JSON keys named `__proto__`, `constructor`, and `prototype` are kept. `src/package-digest.ts` and `scripts/verify-receipt.mjs` copy them onto a null-prototype object. A request without those keys keeps the previous digest.
 - Legacy mandate normalization still drops `action.target` and `action.revision`. Those fields are not the binding preimage.
 - The inline-manifest limit in §2.2 is unchanged. A matching digest shows that the signing key approved that digest, not that the caller-supplied manifest is an independent authority.
-- `scripts/verify-receipt.mjs` does not evaluate this predicate.
+- `scripts/verify-receipt.mjs` evaluates this same predicate. It does not apply the inline key-manifest policy, and it does not require an approval when the evidence never presents an approval shape.
 - Duplicate keys inside `raw_event` JSON are not rejected (`JSON.parse` keeps the last). String preimages are not Unicode-normalized.
 
 ---
