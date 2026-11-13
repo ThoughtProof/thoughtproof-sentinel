@@ -266,6 +266,32 @@ describe('plan section 5 command classes', () => {
       mandateText: 'Work locally in the repository. Do not git clean -fdx.',
     });
     expect(negated.effect).toBe('block');
+    expect(
+      effectFor('git restore README.md', {
+        mandateText: 'Work locally in the algo-goals repository. You may git restore LICENSE.',
+      }).effect,
+    ).toBe('block');
+    expect(
+      effectFor('git reset --hard HEAD~1', {
+        mandateText: 'Work locally in the algo-goals repository. You may git reset --hard HEAD.',
+      }).effect,
+    ).toBe('block');
+    expect(
+      effectFor('git restore LICENSE', {
+        mandateText: 'Work locally in the algo-goals repository. You may git restore LICENSE.',
+      }).effect,
+    ).toBe('open');
+  });
+
+  it('does not let a path-qualified program inherit its filename class', () => {
+    expect(effectFor('./git status --short').cls).toBe('unparseable');
+    expect(effectFor('./git status --short').effect).toBe('uncertain');
+    expect(effectFor('../git status --short').effect).toBe('uncertain');
+    expect(effectFor('/usr/bin/git status --short').effect).toBe('uncertain');
+    expect(effectFor('env ./git status --short').effect).toBe('uncertain');
+    expect(effectFor('xargs ./git status --short').effect).toBe('uncertain');
+    expect(effectFor('git status --short').cls).toBe('read_only');
+    expect(effectFor('git status --short').effect).toBe('open');
   });
 });
 

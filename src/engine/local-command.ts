@@ -1,9 +1,13 @@
 /**
  * Deterministic local-command classifier for `action_authorization`.
  *
- * No network and no filesystem. A text parser cannot see aliases, shell
- * functions, or the body of a script (`./run.sh`, a Makefile target,
- * `npm test` via package.json). `read_only` means "no direct write was
+ * No network and no filesystem. A bare name is whatever the host PATH
+ * resolves. Aliases, shell functions, PATH entries, and symlinks are not
+ * visible here; they need a host contract. An explicit program path
+ * (`./x`, `../x`, `/path/x`, `~/x`, or the same after `env` / `xargs` /
+ * another wrapper) does not inherit a class from its filename. The body
+ * of a script (`./run.sh`, a Makefile target, `npm test` via package.json)
+ * is not visible either. `read_only` means "no direct write was
  * classified". It does not mean the command is safe.
  *
  * Chains, pipes, substitutions, and redirects are split. The reported
@@ -169,6 +173,7 @@ const KNOWN_COMMANDS = new Set([
   'nice',
   'time',
   'exec',
+  'xargs',
   'true',
   'false',
   'which',
@@ -280,6 +285,21 @@ export interface LocalCommandEffectInput {
 function basenameCommand(token: string): string {
   const slash = Math.max(token.lastIndexOf('/'), token.lastIndexOf('\\'));
   return slash >= 0 ? token.slice(slash + 1) : token;
+}
+
+/**
+ * A path is a specific file, not a PATH lookup. `./git` is not `git`.
+ * Bare names stay on the host PATH contract documented at the top of this file.
+ */
+function isUnverifiedProgramPath(token: string): boolean {
+  return (
+    token.startsWith('./') ||
+    token.startsWith('../') ||
+    token.startsWith('/') ||
+    token.startsWith('~') ||
+    token.includes('/') ||
+    token.includes('\\')
+  );
 }
 
 function firstCommandToken(line: string): string {
@@ -1196,7 +1216,8 @@ function classifyFind(argv: string[]): ArgClass {
 function classifyArgv(argv: string[], words: Word[]): ArgClass {
   let i = 0;
   while (i < argv.length && isEnvAssign(argv[i] ?? '') && !words[i]?.tainted) i += 1;
-  while (i < argv.length && WRAPPERS.has(basenameCommand(argv[i] ?? ''))) i += 1;
+  // Only a bare wrapper name is skipped. `/usr/bin/time` is an unverified path.
+  while (i < argv.length && WRAPPERS.has(argv[i] ?? '')) i += 1;
   if (i >= argv.length) return argResult('unparseable');
   const slicedArgv = argv.slice(i);
   const slicedWords = words.slice(i);
@@ -1211,6 +1232,9 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   if (/^\$/.test(raw0) || (word0?.tainted && raw0.startsWith('$'))) {
     return argResult('unparseable');
   }
+  // `./git`, `../git`, `/usr/bin/git` do not inherit git's class. The same
+  // check applies to the program `env` or another wrapper actually runs.
+  if (isUnverifiedProgramPath(raw0)) return argResult('unparseable');
   const cmd = basenameCommand(raw0);
   if (!cmd || raw0.includes('*')) return argResult('unparseable');
 
@@ -1310,9 +1334,8 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
     result = argResult('privilege');
   } else if (READ_BINARIES.has(cmd)) {
     result = classifyReadBinary(cmd, slicedArgv);
-  } else if (cmd === 'make') {
-    result = argResult('unparseable');
-  } else if (raw0.startsWith('./') || raw0.startsWith('../') || raw0.includes('/')) {
+  } else if (cmd === 'xargs' || cmd === 'make') {
+    // xargs runs another program. That program is not classified by name.
     result = argResult('unparseable');
   } else {
     result = argResult('unparseable');
@@ -1562,22 +1585,20 @@ function mentionIsAuthorized(mandateText: string, marker: string): boolean {
   return false;
 }
 
-function isPathToken(token: string): boolean {
-  return (
-    token.startsWith('/') ||
-    token.startsWith('./') ||
-    token.startsWith('../') ||
-    token.startsWith('~') ||
-    (token.includes('/') && !token.startsWith('-'))
-  );
+interface BoundDestructive {
+  /** Command and flags. Targets are not included. `rm` flags are lowercased. */
+  head: string;
+  /** Positional arguments as the shell tokenizer saw them. Case preserved, in order. */
+  targets: string[];
+  /**
+   * Full bound argv, case-sensitive, in order. A git grant matches only
+   * when this vector is identical. Nothing meaningful is dropped from it.
+   */
+  argv: string[];
 }
 
-interface BoundDestructive {
-  /** Command and flags, lowercased. Targets are not included. */
-  head: string;
-  /** Positional targets as the shell tokenizer saw them. Case preserved. */
-  targets: string[];
-}
+/** Determiners that introduce trailing clause prose ("the worktree"). Not filenames. */
+const TRAILING_PROSE = new Set(['the', 'a', 'an', 'this', 'that', 'these', 'those']);
 
 const CLAUSE_NEGATION_RE =
   /\b(?:do\s+not|don't|never|forbidden|verboten|nicht|niemals|cannot|can't|without|kein(?:e|en|em|er)?)\b|\bnot\b/i;
@@ -1634,7 +1655,7 @@ function shellWords(text: string): string[] | null {
   return words;
 }
 
-function boundFromWords(words: string[]): BoundDestructive | null {
+function boundFromWords(words: string[], allowTrailingProse: boolean): BoundDestructive | null {
   const found: BoundDestructive[] = [];
   for (let i = 0; i < words.length; i += 1) {
     const word = words[i] ?? '';
@@ -1647,30 +1668,32 @@ function boundFromWords(words: string[]): BoundDestructive | null {
         else targets.push(token);
       }
       const recursive = word === 'rmdir' || flags.some((flag) => /r/.test(flag) || flag === '--recursive');
-      if (recursive) found.push({ head: [word, ...flags].join(' ').toLowerCase(), targets });
+      if (recursive) {
+        const head = [word, ...flags].join(' ').toLowerCase();
+        found.push({ head, targets, argv: [word, ...flags, ...targets] });
+      }
       break;
     }
     if (word === 'git' && (words[i + 1] === 'clean' || words[i + 1] === 'reset' || words[i + 1] === 'checkout' || words[i + 1] === 'restore')) {
       const sub = words[i + 1] ?? '';
       const flags: string[] = [];
       const targets: string[] = [];
+      const argv: string[] = ['git', sub];
       for (let j = i + 2; j < words.length; j += 1) {
         const token = words[j] ?? '';
-        if (token.startsWith('-')) {
-          flags.push(token);
-          continue;
-        }
-        if (isPathToken(token) || token === '.' || token === '..') {
-          targets.push(token);
-          continue;
-        }
-        break;
+        // "the worktree" is clause prose. Every other token is an argument:
+        // a filename, a revision, an option value, or `--`. Dropping one
+        // would let a different command match, so it never does.
+        if (allowTrailingProse && TRAILING_PROSE.has(token.toLowerCase())) break;
+        argv.push(token);
+        if (token.startsWith('-')) flags.push(token);
+        else targets.push(token);
       }
       const destructive = sub === 'clean'
         || (sub === 'reset' && flags.includes('--hard'))
         || (sub === 'checkout' && (flags.includes('--') || targets.length > 0))
         || sub === 'restore';
-      if (destructive) found.push({ head: ['git', sub, ...flags].join(' ').toLowerCase(), targets });
+      if (destructive) found.push({ head: ['git', sub, ...flags].join(' '), targets, argv });
       break;
     }
   }
@@ -1678,15 +1701,15 @@ function boundFromWords(words: string[]): BoundDestructive | null {
   return found[0] ?? null;
 }
 
-function parseBoundDestructive(text: string): BoundDestructive | null {
+function parseBoundDestructive(text: string, allowTrailingProse: boolean): BoundDestructive | null {
   const words = shellWords(text);
   if (!words) return null;
-  return boundFromWords(words);
+  return boundFromWords(words, allowTrailingProse);
 }
 
-function sameTargets(left: string[], right: string[]): boolean {
+function sameArgv(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
-  return left.every((target, index) => target === right[index]);
+  return left.every((token, index) => token === right[index]);
 }
 
 function clauseMentionsTarget(clause: string, target: string): boolean {
@@ -1702,20 +1725,22 @@ function clauseMentionsTarget(clause: string, target: string): boolean {
  * names the target wins. Anything ambiguous stays closed.
  */
 function mandateNamesDestructive(mandateText: string, commandText: string): boolean {
-  const action = parseBoundDestructive(commandText);
+  // The action is a command, so every token is an argument. A mandate clause
+  // may end in prose ("the worktree"); that prose is not part of the argv.
+  const action = parseBoundDestructive(commandText, false);
   if (!action) return false;
   const clauses = splitClauses(mandateText);
   for (const clause of clauses) {
     if (!CLAUSE_NEGATION_RE.test(clause)) continue;
-    const negated = parseBoundDestructive(clause);
+    const negated = parseBoundDestructive(clause, true);
     const namesCommand = negated?.head === action.head && (negated.targets.length === 0 || negated.targets.some((target) => action.targets.includes(target)));
     const namesTarget = action.targets.some((target) => clauseMentionsTarget(clause, target));
     if (namesCommand || namesTarget) return false;
   }
   const grants = clauses
     .filter((clause) => !CLAUSE_NEGATION_RE.test(clause))
-    .map((clause) => parseBoundDestructive(clause))
-    .filter((bound): bound is BoundDestructive => bound !== null && bound.head === action.head && sameTargets(bound.targets, action.targets));
+    .map((clause) => parseBoundDestructive(clause, true))
+    .filter((bound): bound is BoundDestructive => bound !== null && sameArgv(bound.argv, action.argv));
   return grants.length === 1;
 }
 
