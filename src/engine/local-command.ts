@@ -1562,26 +1562,6 @@ function mentionIsAuthorized(mandateText: string, marker: string): boolean {
   return false;
 }
 
-const DESTRUCTIVE_MARKERS = [
-  'git clean',
-  'git reset --hard',
-  'reset --hard',
-  'git checkout --',
-  'git restore',
-  'stash drop',
-  'stash clear',
-  'rm -rf',
-  'rm -fr',
-  'mkfs',
-];
-
-function commandTokens(commandText: string): string[] {
-  return commandText
-    .replace(/['"]/g, ' ')
-    .split(/\s+/)
-    .filter((token) => token.length > 0 && token !== '&&' && token !== '||' && token !== ';' && token !== '|');
-}
-
 function isPathToken(token: string): boolean {
   return (
     token.startsWith('/') ||
@@ -1592,50 +1572,151 @@ function isPathToken(token: string): boolean {
   );
 }
 
-/** Complete path, case preserved. A prefix of another path is a different path. */
-function normalizeCompletePath(token: string): string | null {
-  const trimmed = token.replace(/[.,;:]+$/g, '');
-  if (!isPathToken(trimmed)) return null;
-  return lexicalPath(trimmed);
+interface BoundDestructive {
+  /** Command and flags, lowercased. Targets are not included. */
+  head: string;
+  /** Positional targets as the shell tokenizer saw them. Case preserved. */
+  targets: string[];
 }
 
-function tokensBind(commandToken: string, mandateToken: string): boolean {
-  if (isPathToken(commandToken) || isPathToken(mandateToken)) {
-    const left = normalizeCompletePath(commandToken);
-    const right = normalizeCompletePath(mandateToken);
-    return left !== null && right !== null && left === right;
+const CLAUSE_NEGATION_RE =
+  /\b(?:do\s+not|don't|never|forbidden|verboten|nicht|niemals|cannot|can't|without|kein(?:e|en|em|er)?)\b|\bnot\b/i;
+
+/**
+ * Sentences outside quotes. A dot inside `./build` or `"/srv/data."` is not a boundary.
+ */
+function splitClauses(text: string): string[] {
+  const clauses: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i] ?? '';
+    if (quote) {
+      current += c;
+      if (c === quote && text[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      current += c;
+      continue;
+    }
+    if (c === '.' || c === '!' || c === '?') {
+      const prev = text[i - 1] ?? '';
+      const next = text[i + 1];
+      const pathDot = c === '.' && (prev === '/' || prev === '.' || next === '/' || next === '.');
+      const boundary = next === undefined || /\s/.test(next);
+      if (boundary && !pathDot) {
+        const clause = current.trim();
+        if (clause) clauses.push(clause);
+        current = '';
+        continue;
+      }
+    }
+    current += c;
   }
-  return commandToken.toLowerCase() === mandateToken.toLowerCase();
+  const tail = current.trim();
+  if (tail) clauses.push(tail);
+  return clauses;
+}
+
+function shellWords(text: string): string[] | null {
+  const scanned = scanShell(text);
+  if (!scanned.ok) return null;
+  const words: string[] = [];
+  for (const statement of scanned.statements) {
+    for (const stage of statement.stages) {
+      for (const word of stage.words) {
+        if (word.text) words.push(word.text);
+      }
+    }
+  }
+  return words;
+}
+
+function boundFromWords(words: string[]): BoundDestructive | null {
+  const found: BoundDestructive[] = [];
+  for (let i = 0; i < words.length; i += 1) {
+    const word = words[i] ?? '';
+    if (word === 'rm' || word === 'rmdir') {
+      const flags: string[] = [];
+      const targets: string[] = [];
+      for (let j = i + 1; j < words.length; j += 1) {
+        const token = words[j] ?? '';
+        if (token.startsWith('-')) flags.push(token);
+        else targets.push(token);
+      }
+      const recursive = word === 'rmdir' || flags.some((flag) => /r/.test(flag) || flag === '--recursive');
+      if (recursive) found.push({ head: [word, ...flags].join(' ').toLowerCase(), targets });
+      break;
+    }
+    if (word === 'git' && (words[i + 1] === 'clean' || words[i + 1] === 'reset' || words[i + 1] === 'checkout' || words[i + 1] === 'restore')) {
+      const sub = words[i + 1] ?? '';
+      const flags: string[] = [];
+      const targets: string[] = [];
+      for (let j = i + 2; j < words.length; j += 1) {
+        const token = words[j] ?? '';
+        if (token.startsWith('-')) {
+          flags.push(token);
+          continue;
+        }
+        if (isPathToken(token) || token === '.' || token === '..') {
+          targets.push(token);
+          continue;
+        }
+        break;
+      }
+      const destructive = sub === 'clean'
+        || (sub === 'reset' && flags.includes('--hard'))
+        || (sub === 'checkout' && (flags.includes('--') || targets.length > 0))
+        || sub === 'restore';
+      if (destructive) found.push({ head: ['git', sub, ...flags].join(' ').toLowerCase(), targets });
+      break;
+    }
+  }
+  if (found.length !== 1) return null;
+  return found[0] ?? null;
+}
+
+function parseBoundDestructive(text: string): BoundDestructive | null {
+  const words = shellWords(text);
+  if (!words) return null;
+  return boundFromWords(words);
+}
+
+function sameTargets(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((target, index) => target === right[index]);
+}
+
+function clauseMentionsTarget(clause: string, target: string): boolean {
+  const words = shellWords(clause);
+  return words?.some((word) => word === target) === true;
 }
 
 /**
- * An explicit destructive grant must name this part, including its targets.
- * Paths are complete and case-sensitive: `/srv/data` is not `/srv/database-backup`.
+ * A destructive exception opens only for one unambiguous authorizing clause.
+ * The clause is parsed with the shell tokenizer, so quotes keep argument
+ * boundaries and punctuation inside a quoted path. Every action target must
+ * equal a target of that clause, in order, case-sensitive. A negation that
+ * names the target wins. Anything ambiguous stays closed.
  */
 function mandateNamesDestructive(mandateText: string, commandText: string): boolean {
-  const command = commandText.toLowerCase();
-  const marker = DESTRUCTIVE_MARKERS.find(
-    (candidate) => command.includes(candidate) && mentionIsAuthorized(mandateText, candidate),
-  );
-  if (!marker) return false;
-  const hay = mandateText
-    .replace(/['"]/g, ' ')
-    .split(/\s+/)
-    .map((token) => token.replace(/[.,;:]+$/g, ''))
-    .filter((token) => token.length > 0);
-  let from = 0;
-  for (const token of commandTokens(commandText)) {
-    let found = -1;
-    for (let i = from; i < hay.length; i += 1) {
-      if (tokensBind(token, hay[i] ?? '')) {
-        found = i;
-        break;
-      }
-    }
-    if (found < 0) return false;
-    from = found + 1;
+  const action = parseBoundDestructive(commandText);
+  if (!action) return false;
+  const clauses = splitClauses(mandateText);
+  for (const clause of clauses) {
+    if (!CLAUSE_NEGATION_RE.test(clause)) continue;
+    const negated = parseBoundDestructive(clause);
+    const namesCommand = negated?.head === action.head && (negated.targets.length === 0 || negated.targets.some((target) => action.targets.includes(target)));
+    const namesTarget = action.targets.some((target) => clauseMentionsTarget(clause, target));
+    if (namesCommand || namesTarget) return false;
   }
-  return true;
+  const grants = clauses
+    .filter((clause) => !CLAUSE_NEGATION_RE.test(clause))
+    .map((clause) => parseBoundDestructive(clause))
+    .filter((bound): bound is BoundDestructive => bound !== null && bound.head === action.head && sameTargets(bound.targets, action.targets));
+  return grants.length === 1;
 }
 
 function mandateNamesForce(mandateText: string): boolean {

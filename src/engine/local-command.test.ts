@@ -238,6 +238,22 @@ describe('plan section 5 command classes', () => {
         mandateText: `${LOCAL_MANDATE} You may rm -rf /srv/data.`,
       }).effect,
     ).toBe('open');
+    expect(
+      effectFor('rm -rf /srv/data', {
+        mandateText: 'Work locally in the algo-goals repository. You may rm -rf "/srv/data."',
+      }).effect,
+    ).toBe('block');
+    expect(
+      effectFor('rm -rf /srv/a b', {
+        mandateText: 'Work locally in the algo-goals repository. You may rm -rf "/srv/a b"',
+      }).effect,
+    ).toBe('block');
+    expect(
+      effectFor('rm -rf /srv/data', {
+        mandateText:
+          'Work locally in the algo-goals repository. You may rm -rf /srv/cache. Do not delete /srv/data.',
+      }).effect,
+    ).toBe('block');
   });
 
   it('an explicit mandate can name a destructive command; a local mandate does not', () => {
