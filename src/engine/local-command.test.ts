@@ -224,6 +224,20 @@ describe('plan section 5 command classes', () => {
     expect(mirror.effect).toBe('block');
     const relocated = effectFor('git -C /srv/unrelated commit -am test');
     expect(relocated.effect).not.toBe('open');
+    expect(effectFor('cat .en[v]').effect).toBe('uncertain');
+    expect(effectFor("cat '.en[v]'").effect).toBe('open');
+    expect(effectFor('rg --pre rm needle ./victim.txt').effect).toBe('uncertain');
+    expect(effectFor('git clean -fdx | git push origin main', { allowRemoteWrite: true }).effect).toBe('block');
+    expect(
+      effectFor('rm -rf /srv/data', {
+        mandateText: `${LOCAL_MANDATE} You may rm -rf /srv/database-backup.`,
+      }).effect,
+    ).toBe('block');
+    expect(
+      effectFor('rm -rf /srv/data', {
+        mandateText: `${LOCAL_MANDATE} You may rm -rf /srv/data.`,
+      }).effect,
+    ).toBe('open');
   });
 
   it('an explicit mandate can name a destructive command; a local mandate does not', () => {

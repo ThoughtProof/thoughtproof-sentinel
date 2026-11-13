@@ -174,6 +174,9 @@ const KNOWN_COMMANDS = new Set([
   'which',
   'file',
   'stat',
+  'sort',
+  'less',
+  'more',
 ]);
 
 const WRAPPERS = new Set(['command', 'nohup', 'nice', 'time', 'exec']);
@@ -196,6 +199,9 @@ const READ_BINARIES = new Set([
   'stat',
   'true',
   'false',
+  'sort',
+  'less',
+  'more',
 ]);
 
 export interface LocalCommandPart {
@@ -239,6 +245,8 @@ interface Word {
   text: string;
   substitutions: string[];
   tainted: boolean;
+  /** Unquoted glob, `~`, or other shell expansion. A quoted literal is not expandable. */
+  expandable: boolean;
 }
 
 interface Redirect {
@@ -553,6 +561,7 @@ function readWord(
   let text = '';
   const substitutions: string[] = [];
   let tainted = false;
+  let expandable = false;
   let quote: "'" | '"' | null = null;
 
   const stop = (idx: number): boolean => {
@@ -565,7 +574,7 @@ function readWord(
   };
 
   if (start >= n || stop(start)) {
-    return { ok: true, word: { text: '', substitutions, tainted }, end: start };
+    return { ok: true, word: { text: '', substitutions, tainted, expandable }, end: start };
   }
 
   while (i < n) {
@@ -624,6 +633,8 @@ function readWord(
       continue;
     }
     if (stop(i)) break;
+    // Globs expand unquoted. `~` expands only at the start of a word (`HEAD~3` does not).
+    if (/[*?[\]{}]/.test(c) || (c === '~' && text.length === 0)) expandable = true;
     if (c === "'") {
       quote = "'";
       i += 1;
@@ -655,7 +666,7 @@ function readWord(
     i += 1;
   }
   if (quote) return { ok: false };
-  return { ok: true, word: { text, substitutions, tainted }, end: i };
+  return { ok: true, word: { text, substitutions, tainted, expandable }, end: i };
 }
 
 function readBacktick(
@@ -1095,6 +1106,93 @@ function nestedCommand(script: string): ArgClass {
   });
 }
 
+/** Options that run another program. Unknown options are never read_only. */
+const READ_EXEC_OPTIONS: Record<string, Set<string>> = {
+  rg: new Set(['--pre', '--pre-glob', '--hostname-bin']),
+  grep: new Set([]),
+  egrep: new Set([]),
+  fgrep: new Set([]),
+  sort: new Set(['-o', '--output', '--compress-program', '--compress-prog']),
+  less: new Set([]),
+  more: new Set([]),
+};
+
+const READ_SAFE_OPTIONS: Record<string, Set<string>> = {
+  cat: new Set(['-n', '-A', '-b', '-s', '-T', '-v', '-e', '-E']),
+  head: new Set(['-n', '-c', '-q', '-v']),
+  tail: new Set(['-n', '-c', '-q', '-v']),
+  wc: new Set(['-l', '-w', '-c', '-m', '-L']),
+  ls: new Set(['-l', '-a', '-A', '-h', '-1', '-t', '-S', '-r', '-R', '--color']),
+  pwd: new Set(['-L', '-P']),
+  echo: new Set(['-n', '-e', '-E']),
+  printf: new Set([]),
+  which: new Set(['-a']),
+  file: new Set(['-b', '-i', '-L', '-z']),
+  stat: new Set(['-c', '-t', '-L']),
+  true: new Set([]),
+  false: new Set([]),
+  rg: new Set([
+    '-n', '-i', '-w', '-l', '-c', '-o', '-F', '-U', '-u', '-S', '-H',
+    '--line-number', '--ignore-case', '--word-regexp', '--files-with-matches',
+    '--count', '--only-matching', '--fixed-strings', '--multiline', '--heading',
+    '--no-heading', '--color', '--no-color', '--hidden', '--glob', '--iglob',
+    '--type', '-t', '-T', '-g', '-m', '--max-count', '-A', '-B', '-C',
+    '--context', '--column', '--vimgrep', '--json', '--case-sensitive', '--smart-case',
+  ]),
+  grep: new Set([
+    '-n', '-i', '-w', '-l', '-c', '-o', '-F', '-E', '-G', '-P', '-r', '-R',
+    '-H', '-h', '-a', '-I', '-v', '-x', '-m', '-A', '-B', '-C', '--',
+  ]),
+  egrep: new Set(['-n', '-i', '-w', '-l', '-c', '-o', '-r', '-R', '-H', '-h', '-v', '-m', '-A', '-B', '-C']),
+  fgrep: new Set(['-n', '-i', '-w', '-l', '-c', '-o', '-r', '-R', '-H', '-h', '-v', '-m', '-A', '-B', '-C']),
+  sort: new Set([
+    '-n', '-r', '-u', '-k', '-t', '-s', '-b', '-f', '-z', '-h', '-V',
+    '--numeric-sort', '--reverse', '--unique', '--stable', '--version-sort', '--key',
+  ]),
+  less: new Set(['-N', '-n', '-F', '-X', '-R', '-S', '-M', '-E']),
+  more: new Set(['-d', '-l', '-f', '-p', '-c', '-s', '-n']),
+};
+
+const FIND_DESTRUCTIVE = new Set(['-delete', '-exec', '-execdir', '-ok', '-okdir']);
+const FIND_SAFE = new Set([
+  '-name', '-iname', '-type', '-path', '-wholename', '-print', '-print0', '-ls',
+  '-maxdepth', '-mindepth', '-size', '-empty', '-mtime', '-newer', '-not', '-and',
+  '-or', '-a', '-o', '-true', '-false', '-regex', '-iregex', '-prune', '-depth',
+  '-mount', '-xdev', '-L', '-H', '-P', '-noleaf', '-group', '-user', '-perm',
+  '-readable', '-writable', '-executable',
+]);
+
+function shortFlagsAreSafe(arg: string, safe: Set<string>): boolean {
+  if (!/^-[^-].+/.test(arg)) return false;
+  return [...arg.slice(1)].every((ch) => safe.has(`-${ch}`));
+}
+
+function classifyReadBinary(cmd: string, argv: string[]): ArgClass {
+  const safe = READ_SAFE_OPTIONS[cmd] ?? new Set<string>();
+  const exec = READ_EXEC_OPTIONS[cmd] ?? new Set<string>();
+  for (let i = 1; i < argv.length; i += 1) {
+    const arg = argv[i] ?? '';
+    if (arg === '--') break;
+    if (arg.startsWith('+')) return argResult('unparseable');
+    if (!arg.startsWith('-')) continue;
+    const name = optionName(arg);
+    if (exec.has(name)) return argResult('unparseable');
+    if (safe.has(name) || safe.has(arg) || shortFlagsAreSafe(arg, safe)) continue;
+    return argResult('unparseable');
+  }
+  return argResult('read_only');
+}
+
+function classifyFind(argv: string[]): ArgClass {
+  if (argv.some((arg) => FIND_DESTRUCTIVE.has(arg))) return argResult('destructive_local');
+  for (const arg of argv.slice(1)) {
+    if (!arg.startsWith('-')) continue;
+    if (FIND_SAFE.has(optionName(arg)) || FIND_SAFE.has(arg)) continue;
+    return argResult('unparseable');
+  }
+  return argResult('read_only');
+}
+
 function classifyArgv(argv: string[], words: Word[]): ArgClass {
   let i = 0;
   while (i < argv.length && isEnvAssign(argv[i] ?? '') && !words[i]?.tainted) i += 1;
@@ -1154,11 +1252,7 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   } else if (cmd === 'dd' || cmd === 'mkfs' || cmd.startsWith('mkfs.') || cmd === 'truncate' || cmd === 'shred') {
     result = argResult('destructive_local');
   } else if (cmd === 'find') {
-    if (slicedArgv.some((a) => a === '-delete' || a === '-exec' || a === '-execdir' || a === '-ok')) {
-      result = argResult('destructive_local');
-    } else {
-      result = argResult('read_only');
-    }
+    result = classifyFind(slicedArgv);
   } else if (
     cmd === 'npm' ||
     cmd === 'pnpm' ||
@@ -1189,8 +1283,8 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
       const scriptWords: Word[] =
         cmd === 'eval'
           ? [
-              { text: 'sh', substitutions: [], tainted: false },
-              { text: '-c', substitutions: [], tainted: false },
+              { text: 'sh', substitutions: [], tainted: false, expandable: false },
+              { text: '-c', substitutions: [], tainted: false, expandable: false },
               ...slicedWords.slice(1),
             ]
           : slicedWords;
@@ -1215,7 +1309,7 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   } else if (['apt', 'apt-get', 'yum', 'dnf', 'pacman', 'apk'].includes(cmd)) {
     result = argResult('privilege');
   } else if (READ_BINARIES.has(cmd)) {
-    result = argResult('read_only');
+    result = classifyReadBinary(cmd, slicedArgv);
   } else if (cmd === 'make') {
     result = argResult('unparseable');
   } else if (raw0.startsWith('./') || raw0.startsWith('../') || raw0.includes('/')) {
@@ -1226,6 +1320,11 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
 
   if (slicedArgv.some((a) => isSecretPath(a)) && CLASS_RANK[result.commandClass] < CLASS_RANK.privilege) {
     result = { ...result, commandClass: 'privilege' };
+  }
+  // Unquoted globs and `~` are not expanded here. A quoted literal is not expandable.
+  // An unresolved expansion is never read_only. A known secret path is already privilege.
+  if (slicedWords.some((w) => w.expandable) && result.commandClass === 'read_only') {
+    result = { ...result, commandClass: 'unparseable' };
   }
   // A parameter in an argument is an unknown path. Never treat that as read_only
   // or as a scoped write. Command substitutions are classified on their own.
@@ -1271,7 +1370,9 @@ function applyRedirects(result: ArgClass, redirects: Redirect[]): ArgClass {
       if (!target) continue;
       const kind = pathKind(target);
       if (kind === 'secret') next = mergeArg(next, argResult('privilege', { paths: [target] }));
-      else if (kind === 'escape') next = mergeArg(next, argResult('unparseable', { paths: [target] }));
+      else if (kind === 'escape' || targetWord?.expandable) {
+        next = mergeArg(next, argResult('unparseable', { paths: [target] }));
+      }
       continue;
     }
     if (!target || isFdDup(redir.op, target) || target === '-' || target === '&1' || target === '&2') {
@@ -1306,6 +1407,17 @@ function classifyStage(stage: Stage): ArgClass {
   return result;
 }
 
+function partFromArg(result: ArgClass, text: string): LocalCommandPart {
+  return {
+    commandClass: result.commandClass,
+    text,
+    filesystemWrite: result.filesystemWrite,
+    forceRemote: result.forceRemote,
+    paths: result.paths,
+    scopeRoots: result.scopeRoots,
+  };
+}
+
 function classifyStatement(statement: Statement): ArgClass {
   const stages = statement.stages.map(classifyStage);
   if (stages.length === 0) return argResult('unparseable');
@@ -1313,12 +1425,23 @@ function classifyStatement(statement: Statement): ArgClass {
   const fetcher = stages.some((s) => s.fetcher);
   const decode = stages.some((s) => s.base64Decode);
   const sink = stages.some((s, idx) => idx > 0 && s.interpreterSink);
+  // Fetch-and-execute may only add a tighter class. It must not replace
+  // the per-stage decisions below.
   if ((fetcher || decode) && sink) {
     merged = {
       ...merged,
       commandClass: 'network_exec',
       obfuscated: merged.obfuscated || decode,
     };
+  }
+  if (stages.length > 1) {
+    const perStage = stages.flatMap((stage, index) => {
+      const text = statement.stages[index]?.raw ?? '';
+      const pieces = stage.segments.length > 0 ? [...stage.segments] : [];
+      pieces.push(partFromArg(stage, text));
+      return pieces;
+    });
+    merged = { ...merged, segments: perStage };
   }
   return merged;
 }
@@ -1454,15 +1577,40 @@ const DESTRUCTIVE_MARKERS = [
 
 function commandTokens(commandText: string): string[] {
   return commandText
-    .toLowerCase()
     .replace(/['"]/g, ' ')
     .split(/\s+/)
     .filter((token) => token.length > 0 && token !== '&&' && token !== '||' && token !== ';' && token !== '|');
 }
 
+function isPathToken(token: string): boolean {
+  return (
+    token.startsWith('/') ||
+    token.startsWith('./') ||
+    token.startsWith('../') ||
+    token.startsWith('~') ||
+    (token.includes('/') && !token.startsWith('-'))
+  );
+}
+
+/** Complete path, case preserved. A prefix of another path is a different path. */
+function normalizeCompletePath(token: string): string | null {
+  const trimmed = token.replace(/[.,;:]+$/g, '');
+  if (!isPathToken(trimmed)) return null;
+  return lexicalPath(trimmed);
+}
+
+function tokensBind(commandToken: string, mandateToken: string): boolean {
+  if (isPathToken(commandToken) || isPathToken(mandateToken)) {
+    const left = normalizeCompletePath(commandToken);
+    const right = normalizeCompletePath(mandateToken);
+    return left !== null && right !== null && left === right;
+  }
+  return commandToken.toLowerCase() === mandateToken.toLowerCase();
+}
+
 /**
  * An explicit destructive grant must name this part, including its targets.
- * `rm -rf ./build` does not authorize `rm -rf /srv/unrelated`.
+ * Paths are complete and case-sensitive: `/srv/data` is not `/srv/database-backup`.
  */
 function mandateNamesDestructive(mandateText: string, commandText: string): boolean {
   const command = commandText.toLowerCase();
@@ -1470,12 +1618,22 @@ function mandateNamesDestructive(mandateText: string, commandText: string): bool
     (candidate) => command.includes(candidate) && mentionIsAuthorized(mandateText, candidate),
   );
   if (!marker) return false;
-  const hay = mandateText.toLowerCase();
+  const hay = mandateText
+    .replace(/['"]/g, ' ')
+    .split(/\s+/)
+    .map((token) => token.replace(/[.,;:]+$/g, ''))
+    .filter((token) => token.length > 0);
   let from = 0;
   for (const token of commandTokens(commandText)) {
-    const at = hay.indexOf(token, from);
-    if (at < 0) return false;
-    from = at + token.length;
+    let found = -1;
+    for (let i = from; i < hay.length; i += 1) {
+      if (tokensBind(token, hay[i] ?? '')) {
+        found = i;
+        break;
+      }
+    }
+    if (found < 0) return false;
+    from = found + 1;
   }
   return true;
 }
