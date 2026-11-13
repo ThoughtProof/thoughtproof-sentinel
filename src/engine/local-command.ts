@@ -6,9 +6,13 @@
  * `npm test` via package.json). `read_only` means "no direct write was
  * classified". It does not mean the command is safe.
  *
- * Chains, pipes, substitutions, and redirects are split. The strictest
- * class wins. Hard classes are decided here so the model cascade cannot
- * ALLOW them.
+ * Chains, pipes, substitutions, and redirects are split. The reported
+ * class is the strictest one. Authorization is per sub-command: a grant
+ * for one part never opens a stricter part of the same chain. BLOCK wins
+ * over UNCERTAIN, and UNCERTAIN wins over open. Anything the parser cannot
+ * fully account for (a comment boundary it is unsure of, an unknown
+ * option, a substitution, an unbound path) is UNCERTAIN or BLOCK, never
+ * a read that the panel may ALLOW.
  */
 
 export const COMMAND_CLASSES = [
@@ -197,6 +201,12 @@ const READ_BINARIES = new Set([
 export interface LocalCommandPart {
   commandClass: CommandClass;
   text: string;
+  filesystemWrite: boolean;
+  forceRemote: boolean;
+  /** Paths this part reads or writes. Empty when the part has no path operand. */
+  paths: string[];
+  /** `git -C`, `--git-dir`, and `--work-tree` values. */
+  scopeRoots: string[];
 }
 
 export interface LocalCommandAnalysis {
@@ -550,7 +560,7 @@ function readWord(
     const c = input[idx] ?? '';
     if (c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === ';' || c === '|' || c === '&') return true;
     if (c === '>' || c === '<') return true;
-    if (c === '#') return true;
+    // `#` starts a comment only as its own word. `x#y` is one argument.
     return false;
   };
 
@@ -735,6 +745,13 @@ interface ArgClass {
   fetcher: boolean;
   base64Decode: boolean;
   interpreterSink: boolean;
+  paths: string[];
+  scopeRoots: string[];
+  /**
+   * Inner commands (eval, command substitution) that must be authorized
+   * on their own. Class-rank collapse must not drop them.
+   */
+  segments: LocalCommandPart[];
 }
 
 function argResult(
@@ -749,6 +766,9 @@ function argResult(
     fetcher: false,
     base64Decode: false,
     interpreterSink: false,
+    paths: [],
+    scopeRoots: [],
+    segments: [],
     ...extra,
   };
 }
@@ -762,6 +782,9 @@ function mergeArg(a: ArgClass, b: ArgClass): ArgClass {
     fetcher: a.fetcher || b.fetcher,
     base64Decode: a.base64Decode || b.base64Decode,
     interpreterSink: a.interpreterSink || b.interpreterSink,
+    paths: [...a.paths, ...b.paths],
+    scopeRoots: [...a.scopeRoots, ...b.scopeRoots],
+    segments: [...a.segments, ...b.segments],
   };
 }
 
@@ -773,7 +796,10 @@ function flagSet(argv: string[]): Set<string> {
   const out = new Set<string>();
   for (const a of argv) {
     if (a === '--') break;
-    if (a.startsWith('--')) out.add(a);
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      out.add(eq === -1 ? a : a.slice(0, eq));
+    }
     else if (/^-[^-]/.test(a)) {
       out.add(a);
       for (const ch of a.slice(1)) out.add(`-${ch}`);
@@ -807,10 +833,64 @@ function classifyRm(argv: string[]): ArgClass {
     if (kind === 'secret') cls = strictestCommandClass([cls, 'privilege']);
     else if (kind === 'escape') cls = strictestCommandClass([cls, 'destructive_local']);
   }
-  return argResult(cls, { filesystemWrite: cls === 'local_write_scoped' });
+  return argResult(cls, { filesystemWrite: cls === 'local_write_scoped', paths });
+}
+
+function optionName(arg: string): string {
+  if (!arg.startsWith('--')) return arg;
+  const eq = arg.indexOf('=');
+  return eq === -1 ? arg : arg.slice(0, eq);
+}
+
+function optionValue(arg: string): string | null {
+  const eq = arg.indexOf('=');
+  return eq === -1 ? null : arg.slice(eq + 1);
+}
+
+/** Read-only git options. Anything else on a read subcommand is not read_only. */
+const GIT_READ_OPTIONS: Record<string, Set<string>> = {
+  status: new Set([
+    '-s', '--short', '-b', '--branch', '--porcelain', '-u', '--untracked-files',
+    '--ignored', '-z', '--column', '-v', '--verbose', '--ahead-behind', '--no-ahead-behind',
+  ]),
+  diff: new Set([
+    '--stat', '--name-only', '--name-status', '--numstat', '--shortstat', '--cached', '--staged',
+    '--exit-code', '--color', '--no-color', '--raw', '--summary', '--check', '-p', '--patch',
+    '-U', '--unified', '-w', '--ignore-all-space', '-b', '--ignore-space-change', '-M', '-C',
+    '--find-copies', '--find-renames',
+  ]),
+  log: new Set([
+    '--oneline', '--graph', '--decorate', '--all', '--stat', '-p', '--patch', '-n', '--max-count',
+    '--abbrev-commit', '--pretty', '--format', '--author', '--since', '--until', '--follow',
+    '--name-only', '--name-status',
+  ]),
+  show: new Set([
+    '--stat', '--oneline', '--format', '--pretty', '--name-only', '--name-status', '-p', '--patch',
+    '--no-patch', '-s', '--quiet',
+  ]),
+  branch: new Set(['-v', '-vv', '-a', '--all', '-r', '--remotes', '--list', '--show-current']),
+  blame: new Set(['-L', '-e', '-w', '-p']),
+  'rev-parse': new Set(['--short', '--abbrev-ref', '--verify', '--quiet', 'HEAD']),
+  describe: new Set(['--tags', '--always', '--dirty', '--abbrev']),
+  shortlog: new Set(['-s', '-n', '-e', '--summary']),
+  'ls-files': new Set(['-s', '-m', '-o', '-c', '-d', '-u', '-z', '--stage', '--cached']),
+};
+
+function isForcePushArg(arg: string): boolean {
+  const name = optionName(arg);
+  return (
+    name === '-f' ||
+    name === '--force' ||
+    name === '--force-with-lease' ||
+    name === '--delete' ||
+    name === '--mirror' ||
+    arg.startsWith('+') ||
+    /^-[^-]*f/.test(arg)
+  );
 }
 
 function classifyGit(argv: string[]): ArgClass {
+  const scopeRoots: string[] = [];
   let i = 1;
   while (i < argv.length) {
     const a = argv[i] ?? '';
@@ -818,7 +898,18 @@ function classifyGit(argv: string[]): ArgClass {
       i += 1;
       break;
     }
-    if (a === '-C' || a === '-c' || a === '--git-dir' || a === '--work-tree') {
+    if (a === '-C' || a === '--git-dir' || a === '--work-tree') {
+      const value = argv[i + 1];
+      if (value) scopeRoots.push(value);
+      i += 2;
+      continue;
+    }
+    if (a.startsWith('--git-dir=') || a.startsWith('--work-tree=')) {
+      scopeRoots.push(a.slice(a.indexOf('=') + 1));
+      i += 1;
+      continue;
+    }
+    if (a === '-c') {
       i += 2;
       continue;
     }
@@ -829,42 +920,42 @@ function classifyGit(argv: string[]): ArgClass {
     break;
   }
   const sub = argv[i];
-  if (!sub) return argResult('unparseable');
+  if (!sub) return argResult('unparseable', { scopeRoots });
   const rest = argv.slice(i + 1);
   const flags = flagSet(rest);
   const has = (...names: string[]) => names.some((n) => flags.has(n));
+  const scoped = (result: ArgClass): ArgClass =>
+    scopeRoots.length === 0 ? result : { ...result, scopeRoots: [...result.scopeRoots, ...scopeRoots] };
 
   if (sub === 'push') {
-    const force =
-      has('-f', '--force', '--force-with-lease', '--delete') ||
-      rest.some((a) => a.startsWith('+') || /^-[^-]*f/.test(a));
-    return argResult('remote_write', { forceRemote: force });
+    const force = rest.some((a) => isForcePushArg(a));
+    return scoped(argResult('remote_write', { forceRemote: force }));
   }
   if (sub === 'clean') {
-    if (has('-n', '--dry-run') && !has('-f', '-d', '-x', '--force')) return argResult('read_only');
-    return argResult('destructive_local');
+    if (has('-n', '--dry-run') && !has('-f', '-d', '-x', '--force')) return scoped(argResult('read_only'));
+    return scoped(argResult('destructive_local'));
   }
   if (sub === 'reset') {
-    if (has('--hard')) return argResult('destructive_local');
-    return argResult('local_write_scoped');
+    if (has('--hard')) return scoped(argResult('destructive_local'));
+    return scoped(argResult('local_write_scoped'));
   }
   if (sub === 'checkout' || sub === 'switch' || sub === 'restore') {
     if (sub === 'restore') {
-      if (has('--staged') && !rest.some((a) => !a.startsWith('-'))) return argResult('local_write_scoped');
-      return argResult('destructive_local');
+      if (has('--staged') && !rest.some((a) => !a.startsWith('-'))) return scoped(argResult('local_write_scoped'));
+      return scoped(argResult('destructive_local'));
     }
-    if (rest.includes('--') || has('--force') || has('-f')) return argResult('destructive_local');
-    return argResult('local_write_scoped');
+    if (rest.includes('--') || has('--force') || has('-f')) return scoped(argResult('destructive_local'));
+    return scoped(argResult('local_write_scoped'));
   }
   if (sub === 'stash') {
     const op = rest.find((a) => !a.startsWith('-'));
-    if (op === 'drop' || op === 'clear') return argResult('destructive_local');
-    if (op === 'list' || op === 'show' || op === undefined) return argResult(op ? 'read_only' : 'local_write_scoped');
-    return argResult('local_write_scoped');
+    if (op === 'drop' || op === 'clear') return scoped(argResult('destructive_local'));
+    if (op === 'list' || op === 'show' || op === undefined) return scoped(argResult(op ? 'read_only' : 'local_write_scoped'));
+    return scoped(argResult('local_write_scoped'));
   }
   if (sub === 'branch') {
-    if (has('-d', '-D', '--delete')) return argResult('local_write_scoped');
-    return argResult('read_only');
+    if (has('-d', '-D', '--delete')) return scoped(argResult('local_write_scoped'));
+    return scoped(classifyGitRead('branch', rest));
   }
   if (
     sub === 'status' ||
@@ -879,7 +970,7 @@ function classifyGit(argv: string[]): ArgClass {
     sub === 'version' ||
     sub === 'help'
   ) {
-    return argResult('read_only');
+    return scoped(classifyGitRead(sub, rest));
   }
   if (
     sub === 'commit' ||
@@ -893,12 +984,42 @@ function classifyGit(argv: string[]): ArgClass {
     sub === 'revert' ||
     sub === 'init'
   ) {
-    return argResult('local_write_scoped');
+    return scoped(argResult('local_write_scoped'));
   }
   if (sub === 'remote' || sub === 'fetch' || sub === 'pull' || sub === 'clone') {
-    return argResult('network_fetch');
+    return scoped(argResult('network_fetch'));
   }
-  return argResult('unparseable');
+  return scoped(argResult('unparseable'));
+}
+
+/**
+ * A read subcommand stays read_only only for options that do not write.
+ * `--output` writes a file. Any other unknown option is unparseable.
+ */
+function classifyGitRead(sub: string, rest: string[]): ArgClass {
+  const safe = GIT_READ_OPTIONS[sub];
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i] ?? '';
+    if (arg === '--') break;
+    if (!arg.startsWith('-')) continue;
+    const name = optionName(arg);
+    if (name === '--output') {
+      const value = optionValue(arg) ?? rest[i + 1] ?? '';
+      if (!optionValue(arg)) i += 1;
+      const kind = value ? pathKind(value) : 'escape';
+      if (kind === 'secret') return argResult('privilege', { paths: value ? [value] : [] });
+      if (kind === 'build') {
+        return argResult('local_write_scoped', { filesystemWrite: true, paths: value ? [value] : [] });
+      }
+      return argResult('destructive_local', { paths: value ? [value] : [] });
+    }
+    if (sub === 'diff' && /^-U\d+$/.test(arg)) continue;
+    if ((sub === 'log' || sub === 'show') && /^-\d+$/.test(arg)) continue;
+    if (safe?.has(name) || safe?.has(arg)) continue;
+    if (sub === 'version' || sub === 'help') continue;
+    return argResult('unparseable');
+  }
+  return argResult('read_only');
 }
 
 function hasUrl(argv: string[]): boolean {
@@ -950,18 +1071,28 @@ function classifyPython(argv: string[], words: Word[]): ArgClass {
 function classifyShellC(argv: string[], words: Word[]): ArgClass {
   const idx = argv.indexOf('-c');
   if (idx < 0) return argResult('unparseable', { interpreterSink: true });
-  const scriptWord = words[idx + 1];
-  const script = argv[idx + 1] ?? '';
-  const subs = scriptWord?.substitutions ?? [];
-  const subClasses = subs.map((s) => classifyCommandText(s));
-  if (subs.length > 0) {
-    const fetched = subClasses.some(
-      (c) => c.commandClass === 'network_fetch' || c.commandClass === 'network_exec' || c.fetcher,
-    );
-    if (fetched) return argResult('network_exec', { obfuscated: true });
+  // eval joins every argument into one script. sh -c uses the first as the
+  // script; extra words are still classified so nothing after -c is ignored.
+  const script = argv.slice(idx + 1).join(' ');
+  const scriptWords = words.slice(idx + 1);
+  const subs = scriptWords.flatMap((word) => word.substitutions);
+  if (subs.some((sub) => /\b(?:curl|wget)\b/.test(sub))) {
+    return argResult('network_exec', { obfuscated: true });
   }
-  const inner = script.trim() ? classifyCommandText(script) : argResult('unparseable');
-  return subClasses.reduce(mergeArg, inner);
+  let result = script.trim() ? nestedCommand(script) : argResult('unparseable');
+  for (const sub of subs) result = mergeArg(result, nestedCommand(sub));
+  return result;
+}
+
+/** Classify a nested script and keep every statement as its own segment. */
+function nestedCommand(script: string): ArgClass {
+  const inner = analysisFrom(script, true);
+  return argResult(inner.commandClass ?? 'unparseable', {
+    filesystemWrite: inner.filesystemWrite,
+    forceRemote: inner.forceRemote,
+    obfuscated: inner.obfuscated,
+    segments: inner.parts,
+  });
 }
 
 function classifyArgv(argv: string[], words: Word[]): ArgClass {
@@ -1000,7 +1131,7 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
       if (kind === 'secret') cls = strictestCommandClass([cls, 'privilege']);
       else if (kind === 'escape') cls = strictestCommandClass([cls, 'destructive_local']);
     }
-    result = argResult(cls, { filesystemWrite: cls === 'local_write_scoped' });
+    result = argResult(cls, { filesystemWrite: cls === 'local_write_scoped', paths });
   } else if (cmd === 'chmod') {
     const mode = slicedArgv.find((a) => /^[0-7]{3,4}$/.test(a) || a.includes('777') || a === 'a+rwx');
     const recursive = flagSet(slicedArgv).has('-R');
@@ -1106,10 +1237,15 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   }
   for (const w of slicedWords) {
     for (const sub of w.substitutions) {
-      result = mergeArg(result, classifyCommandText(sub));
+      result = mergeArg(result, nestedCommand(sub));
     }
   }
   return result;
+}
+
+function isFdDup(op: string, target: string): boolean {
+  // `>&1` and `2>&1` duplicate a descriptor. `> 123` writes a file named 123.
+  return op.includes('&') && /^&?\d+$/.test(target);
 }
 
 function applyRedirects(result: ArgClass, redirects: Redirect[]): ArgClass {
@@ -1119,15 +1255,38 @@ function applyRedirects(result: ArgClass, redirects: Redirect[]): ArgClass {
       next = mergeArg(next, argResult('unparseable'));
       continue;
     }
-    if (!redir.op.includes('>')) continue;
-    const target = redir.target?.text ?? '';
-    if (!target || /^[0-9]+$/.test(target) || target === '-' || target === '&1' || target === '&2') continue;
+    const targetWord = redir.target;
+    if (targetWord) {
+      for (const sub of targetWord.substitutions) {
+        next = mergeArg(next, nestedCommand(sub));
+      }
+    }
+    const target = targetWord?.text ?? '';
+    const input = !redir.op.includes('>');
+    if (input) {
+      if (!target && !(targetWord && targetWord.substitutions.length > 0)) {
+        next = mergeArg(next, argResult('unparseable'));
+        continue;
+      }
+      if (!target) continue;
+      const kind = pathKind(target);
+      if (kind === 'secret') next = mergeArg(next, argResult('privilege', { paths: [target] }));
+      else if (kind === 'escape') next = mergeArg(next, argResult('unparseable', { paths: [target] }));
+      continue;
+    }
+    if (!target || isFdDup(redir.op, target) || target === '-' || target === '&1' || target === '&2') {
+      if (!target && !(targetWord && targetWord.substitutions.length > 0)) {
+        next = mergeArg(next, argResult('unparseable'));
+      }
+      continue;
+    }
     const kind = pathKind(target);
     if (kind === 'null') continue;
-    if (kind === 'secret') next = mergeArg(next, argResult('privilege'));
-    else if (kind === 'escape') next = mergeArg(next, argResult('destructive_local'));
-    else if (kind === 'build') next = mergeArg(next, argResult('local_write_scoped', { filesystemWrite: true }));
-    else next = mergeArg(next, argResult('destructive_local'));
+    if (kind === 'secret') next = mergeArg(next, argResult('privilege', { paths: [target] }));
+    else if (kind === 'escape') next = mergeArg(next, argResult('destructive_local', { paths: [target] }));
+    else if (kind === 'build') {
+      next = mergeArg(next, argResult('local_write_scoped', { filesystemWrite: true, paths: [target] }));
+    } else next = mergeArg(next, argResult('destructive_local', { paths: [target] }));
   }
   return next;
 }
@@ -1172,6 +1331,21 @@ function classifyCommandText(command: string): ArgClass {
   return parts.reduce(mergeArg, argResult('read_only'));
 }
 
+function statementParts(result: ArgClass, text: string): LocalCommandPart[] {
+  const own: LocalCommandPart = {
+    commandClass: result.commandClass,
+    text,
+    filesystemWrite: result.filesystemWrite,
+    forceRemote: result.forceRemote,
+    paths: result.paths,
+    scopeRoots: result.scopeRoots,
+  };
+  if (result.segments.length === 0) return [own];
+  // Inner segments stay separate. The collapsed class is kept as well so a
+  // redirect or pipeline upgrade is not dropped when segments exist.
+  return [...result.segments, own];
+}
+
 function analysisFrom(command: string, recognized: boolean): LocalCommandAnalysis {
   const scanned = scanShell(command);
   if (!scanned.ok) {
@@ -1182,7 +1356,14 @@ function analysisFrom(command: string, recognized: boolean): LocalCommandAnalysi
       filesystemWrite: false,
       forceRemote: false,
       obfuscated: false,
-      parts: [{ commandClass: 'unparseable', text: command }],
+      parts: [{
+        commandClass: 'unparseable',
+        text: command,
+        filesystemWrite: false,
+        forceRemote: false,
+        paths: [],
+        scopeRoots: [],
+      }],
     };
   }
   if (scanned.statements.length === 0) {
@@ -1208,7 +1389,7 @@ function analysisFrom(command: string, recognized: boolean): LocalCommandAnalysi
     filesystemWrite: merged.filesystemWrite,
     forceRemote: merged.forceRemote,
     obfuscated: merged.obfuscated,
-    parts: partResults.map((p) => ({ commandClass: p.result.commandClass, text: p.text })),
+    parts: partResults.flatMap((p) => statementParts(p.result, p.text)),
   };
 }
 
@@ -1271,11 +1452,32 @@ const DESTRUCTIVE_MARKERS = [
   'mkfs',
 ];
 
+function commandTokens(commandText: string): string[] {
+  return commandText
+    .toLowerCase()
+    .replace(/['"]/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length > 0 && token !== '&&' && token !== '||' && token !== ';' && token !== '|');
+}
+
+/**
+ * An explicit destructive grant must name this part, including its targets.
+ * `rm -rf ./build` does not authorize `rm -rf /srv/unrelated`.
+ */
 function mandateNamesDestructive(mandateText: string, commandText: string): boolean {
   const command = commandText.toLowerCase();
-  return DESTRUCTIVE_MARKERS.some(
-    (marker) => command.includes(marker) && mentionIsAuthorized(mandateText, marker),
+  const marker = DESTRUCTIVE_MARKERS.find(
+    (candidate) => command.includes(candidate) && mentionIsAuthorized(mandateText, candidate),
   );
+  if (!marker) return false;
+  const hay = mandateText.toLowerCase();
+  let from = 0;
+  for (const token of commandTokens(commandText)) {
+    const at = hay.indexOf(token, from);
+    if (at < 0) return false;
+    from = at + token.length;
+  }
+  return true;
 }
 
 function mandateNamesForce(mandateText: string): boolean {
@@ -1288,30 +1490,93 @@ function mandateNamesForce(mandateText: string): boolean {
   );
 }
 
-/**
- * Class gate only. Kind fit (mandate_kind === local_command, no caller
- * widen) is a separate check. `null` when the text is not a command.
- *
- * Filesystem writes (`rm -fr ./build`) open only with granted.workspace.
- * Git-local writes (`git commit`) also open on an explicit local-repo mandate.
- */
-export function localCommandEffect(input: LocalCommandEffectInput): LocalCommandEffect | null {
-  if (!input.analysis.recognized || !input.analysis.commandClass) return null;
-  let cls = input.analysis.commandClass;
-  if (cwdEscapes(input.cwd)) {
-    if (cls === 'read_only') cls = 'unparseable';
-    else if (cls === 'local_write_scoped') cls = 'destructive_local';
+function lexicalPath(path: string): string | null {
+  if (path.includes('$') || path.includes('`') || path.startsWith('~')) return null;
+  const absolute = path.startsWith('/');
+  const segs: string[] = [];
+  for (const seg of path.split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') {
+      if (segs.length === 0 || segs[segs.length - 1] === '..') {
+        if (absolute) return null;
+        segs.push('..');
+      } else {
+        segs.pop();
+      }
+      continue;
+    }
+    segs.push(seg);
   }
+  if (segs.includes('..')) return null;
+  return (absolute ? '/' : '') + segs.join('/');
+}
+
+function resolveAgainst(base: string, rel: string): string | null {
+  if (rel.startsWith('~') || rel.includes('$') || rel.includes('`')) return null;
+  if (rel.startsWith('/')) return lexicalPath(rel);
+  const root = base.endsWith('/') ? base.slice(0, -1) : base;
+  return lexicalPath(`${root}/${rel}`);
+}
+
+function pathInside(path: string, workspace: string): boolean {
+  const resolved = lexicalPath(path);
+  const root = lexicalPath(workspace);
+  if (!resolved || !root) return false;
+  return resolved === root || resolved.startsWith(`${root}/`);
+}
+
+type ScopeFit = 'ok' | 'outside' | 'unknown';
+
+function scopeFit(part: LocalCommandPart, input: LocalCommandEffectInput): ScopeFit {
+  const workspace = input.workspace?.trim() ?? '';
+  const cwd = input.cwd?.trim() ?? '';
+  const anchors = part.scopeRoots;
+  if (!workspace) {
+    if (part.filesystemWrite) return 'unknown';
+    if (cwd.startsWith('/') || cwd.startsWith('~') || cwd.includes('..')) return 'unknown';
+    if (anchors.some((anchor) => anchor.startsWith('/') || anchor.startsWith('~') || anchor.includes('..'))) {
+      return 'unknown';
+    }
+    return 'ok';
+  }
+  const base = cwd ? resolveAgainst(workspace, cwd) : lexicalPath(workspace);
+  if (!base || !pathInside(base, workspace)) return cwd ? 'outside' : 'unknown';
+  for (const anchor of anchors) {
+    const resolved = resolveAgainst(base, anchor);
+    if (!resolved || !pathInside(resolved, workspace)) {
+      return anchor.startsWith('/') || anchor.startsWith('~') ? 'outside' : 'unknown';
+    }
+  }
+  if (part.filesystemWrite) {
+    for (const target of part.paths) {
+      const resolved = resolveAgainst(base, target);
+      if (!resolved || !pathInside(resolved, workspace)) return 'outside';
+    }
+  }
+  return 'ok';
+}
+
+function stricterEffect(a: LocalCommandEffect, b: LocalCommandEffect): LocalCommandEffect {
+  const rank = (effect: LocalCommandEffect): number =>
+    effect === 'block' ? 2 : effect === 'uncertain' ? 1 : 0;
+  return rank(a) >= rank(b) ? a : b;
+}
+
+function effectForPart(part: LocalCommandPart, input: LocalCommandEffectInput): LocalCommandEffect {
   const mandateText = input.mandateText ?? '';
-  switch (cls) {
+  if (cwdEscapes(input.cwd)) {
+    if (part.commandClass === 'read_only') return 'uncertain';
+    if (part.commandClass === 'local_write_scoped') return 'block';
+  }
+  const scope = scopeFit(part, input);
+  switch (part.commandClass) {
     case 'privilege':
       return 'block';
     case 'destructive_local':
-      return mandateNamesDestructive(mandateText, input.analysis.commandText ?? '') ? 'open' : 'block';
+      if (scope === 'outside') return 'block';
+      return mandateNamesDestructive(mandateText, part.text) ? 'open' : 'block';
     case 'remote_write':
-      if (input.analysis.forceRemote) {
-        return mandateNamesForce(mandateText) ? 'open' : 'block';
-      }
+      if (part.forceRemote) return mandateNamesForce(mandateText) ? 'open' : 'block';
       if (input.allowRemoteWrite === true || input.mandateKind === 'deploy_ship') return 'open';
       return 'block';
     case 'network_exec':
@@ -1320,13 +1585,69 @@ export function localCommandEffect(input: LocalCommandEffectInput): LocalCommand
     case 'unparseable':
       return 'uncertain';
     case 'local_write_scoped':
-      if (input.analysis.filesystemWrite) {
-        return hasWorkspace(input.workspace) ? 'open' : 'uncertain';
+      if (scope === 'outside') return 'block';
+      if (part.filesystemWrite) {
+        if (!hasWorkspace(input.workspace)) return 'uncertain';
+        return scope === 'ok' ? 'open' : 'uncertain';
       }
+      if (scope === 'unknown') return 'uncertain';
       return hasWorkspace(input.workspace) || mandateAuthorizesLocalRepo(mandateText) ? 'open' : 'uncertain';
     case 'read_only':
+      if (part.scopeRoots.length > 0 && scope !== 'ok') return 'uncertain';
       return 'open';
     default:
       return 'uncertain';
   }
+}
+
+/**
+ * Class gate only. Kind fit (mandate_kind === local_command, no caller
+ * widen) is a separate check. `null` when the text is not a command.
+ *
+ * Every sub-command is authorized on its own. BLOCK wins over UNCERTAIN,
+ * and UNCERTAIN wins over open. A remote-write grant does not open a
+ * destructive sibling. Filesystem writes need granted.workspace and a
+ * cwd/target inside that workspace. Git-local writes also open on an
+ * explicit local-repo mandate when no path escapes that scope.
+ */
+export function localCommandEffect(input: LocalCommandEffectInput): LocalCommandEffect | null {
+  if (!input.analysis.recognized || !input.analysis.commandClass) return null;
+  const parts = input.analysis.parts.length > 0
+    ? input.analysis.parts
+    : [{
+        commandClass: input.analysis.commandClass,
+        text: input.analysis.commandText ?? '',
+        filesystemWrite: input.analysis.filesystemWrite,
+        forceRemote: input.analysis.forceRemote,
+        paths: [],
+        scopeRoots: [],
+      }];
+  let effect: LocalCommandEffect = 'open';
+  for (const part of parts) effect = stricterEffect(effect, effectForPart(part, input));
+  return effect;
+}
+
+/**
+ * An explicit `action.command` is always a payload. Text the parser does
+ * not recognize is unparseable, not absent.
+ */
+export function classifyCommandPayload(command: string): LocalCommandAnalysis {
+  const parsed = classifyLocalCommand(command);
+  if (parsed.recognized) return parsed;
+  return {
+    recognized: true,
+    commandClass: 'unparseable',
+    commandText: command,
+    filesystemWrite: false,
+    forceRemote: false,
+    obfuscated: false,
+    parts: [{
+      commandClass: 'unparseable',
+      text: command,
+      filesystemWrite: false,
+      forceRemote: false,
+      paths: [],
+      scopeRoots: [],
+    }],
+  };
 }

@@ -177,6 +177,55 @@ describe('plan section 5 command classes', () => {
     expect(effectFor('git push --force origin main', { allowRemoteWrite: true }).effect).toBe('block');
   });
 
+  it('authorizes each sub-command, and does not treat # inside a word as a comment', () => {
+    const hash = effectFor('echo x#y; git clean -fdx');
+    expect(hash.cls).toBe('destructive_local');
+    expect(hash.effect).toBe('block');
+    const secret = effectFor('cat < .env');
+    expect(secret.cls).toBe('privilege');
+    expect(secret.effect).toBe('block');
+    const subst = effectFor('cat < "$(git clean -fdx)out.txt"');
+    expect(subst.effect).toBe('block');
+    const numeric = effectFor('echo x > 123');
+    expect(numeric.effect).toBe('block');
+    const evalTail = effectFor("eval 'git status;' 'git clean -fdx'");
+    expect(evalTail.effect).toBe('block');
+    const chain = effectFor('git clean -fdx && git push origin main', { allowRemoteWrite: true });
+    expect(chain.effect).toBe('block');
+    const unknown = effectFor('run_command: $CMD; git push origin main', { allowRemoteWrite: true });
+    expect(unknown.effect).toBe('uncertain');
+    const outside = effectFor('rm -fr ./build', {
+      workspace: '/repo/algo-goals',
+      mandateText: LOCAL_MANDATE,
+    });
+    expect(outside.effect).toBe('open');
+    const wrongCwd = classifyLocalCommand('rm -fr ./build');
+    expect(localCommandEffect({
+      analysis: wrongCwd,
+      mandateText: LOCAL_MANDATE,
+      mandateKind: 'local_command',
+      workspace: '/repo/algo-goals',
+      cwd: '/srv/unrelated',
+    })).toBe('block');
+    const lease = effectFor(
+      'git push --force-with-lease=refs/heads/main:55dc2eb836d027227318e17600f836110ce0a00f origin main',
+      { allowRemoteWrite: true },
+    );
+    expect(lease.force).toBe(true);
+    expect(lease.effect).toBe('block');
+    const output = effectFor('git diff --output=src/app.ts');
+    expect(output.effect).toBe('block');
+    const scoped = effectFor('rm -rf /srv/unrelated', {
+      mandateText: `${LOCAL_MANDATE} You may rm -rf ./build.`,
+    });
+    expect(scoped.effect).toBe('block');
+    const mirror = effectFor('git push --mirror origin', { allowRemoteWrite: true });
+    expect(mirror.force).toBe(true);
+    expect(mirror.effect).toBe('block');
+    const relocated = effectFor('git -C /srv/unrelated commit -am test');
+    expect(relocated.effect).not.toBe('open');
+  });
+
   it('an explicit mandate can name a destructive command; a local mandate does not', () => {
     expect(effectFor('git clean -fdx').effect).toBe('block');
     const named = effectFor('git clean -fdx', {

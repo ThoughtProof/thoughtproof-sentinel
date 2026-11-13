@@ -138,9 +138,9 @@
 import type { AuthorizationMandate } from './authorization-gate.js';
 import { allowanceLooksUnlimited } from './authorization-gate.js';
 import {
+  classifyCommandPayload,
   classifyLocalCommand,
   combineLocalCommandAnalysis,
-  isHardCommandClass,
   localCommandEffect,
   mandateAuthorizesLocalRepo,
   type CommandClass,
@@ -2102,8 +2102,10 @@ export function classifyActionAuthKind(
   const textCommand = classifyLocalCommand(actionText);
   const structuredCommand =
     typeof mandate?.action?.command === 'string' ? mandate.action.command.trim() : '';
+  // An explicit command field is always part of the payload. Unrecognized
+  // text is unparseable; it must not disappear behind a benign prose command.
   const structuredCommandAnalysis = structuredCommand
-    ? classifyLocalCommand(structuredCommand)
+    ? classifyCommandPayload(structuredCommand)
     : null;
 
   const mixedTransfer =
@@ -2210,12 +2212,10 @@ export function classifyActionAuthKind(
   }
 
   const commandAnalysis = textCommand.recognized
-    ? structuredCommandAnalysis?.recognized
+    ? structuredCommandAnalysis
       ? combineLocalCommandAnalysis(textCommand, structuredCommandAnalysis)
       : textCommand
-    : structuredCommandAnalysis?.recognized && isHardCommandClass(structuredCommandAnalysis.commandClass)
-      ? structuredCommandAnalysis
-      : null;
+    : structuredCommandAnalysis;
   const command_class = commandAnalysis?.commandClass ?? null;
   const command_force_remote = commandAnalysis?.forceRemote === true;
   const local_command_effect = commandAnalysis
