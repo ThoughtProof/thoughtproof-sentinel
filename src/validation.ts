@@ -545,6 +545,24 @@ function normalizeMandate(
 
   const kind = parseMandateKind(m.kind, 'mandate.kind', errors);
   const actionKind = parseMandateKind(actionIn?.kind, 'mandate.action.kind', errors);
+  if (grantedIn?.workspace !== undefined && typeof grantedIn.workspace !== 'string') {
+    errors.push({ field: 'mandate.granted.workspace', message: 'Must be a string' });
+  }
+  if (
+    grantedIn?.allowRemoteWrite !== undefined &&
+    typeof grantedIn.allowRemoteWrite !== 'boolean'
+  ) {
+    errors.push({ field: 'mandate.granted.allowRemoteWrite', message: 'Must be a boolean' });
+  }
+  if (grantedIn?.allowNetwork !== undefined && typeof grantedIn.allowNetwork !== 'boolean') {
+    errors.push({ field: 'mandate.granted.allowNetwork', message: 'Must be a boolean' });
+  }
+  if (actionIn?.command !== undefined && typeof actionIn.command !== 'string') {
+    errors.push({ field: 'mandate.action.command', message: 'Must be a string' });
+  }
+  if (actionIn?.cwd !== undefined && typeof actionIn.cwd !== 'string') {
+    errors.push({ field: 'mandate.action.cwd', message: 'Must be a string' });
+  }
 
   const num = (v: unknown): number | undefined =>
     typeof v === 'number' && Number.isFinite(v) ? v : undefined;
@@ -560,6 +578,11 @@ function normalizeMandate(
         recipient: typeof grantedIn.recipient === 'string' ? grantedIn.recipient : undefined,
         allowUnlimited:
           typeof grantedIn.allowUnlimited === 'boolean' ? grantedIn.allowUnlimited : undefined,
+        workspace: typeof grantedIn.workspace === 'string' ? grantedIn.workspace : undefined,
+        allowRemoteWrite:
+          typeof grantedIn.allowRemoteWrite === 'boolean' ? grantedIn.allowRemoteWrite : undefined,
+        allowNetwork:
+          typeof grantedIn.allowNetwork === 'boolean' ? grantedIn.allowNetwork : undefined,
       }
     : undefined;
 
@@ -571,6 +594,8 @@ function normalizeMandate(
         asset: typeof actionIn.asset === 'string' ? actionIn.asset : undefined,
         recipient: typeof actionIn.recipient === 'string' ? actionIn.recipient : undefined,
         allowance: actionIn.allowance as string | number | undefined,
+        command: typeof actionIn.command === 'string' ? actionIn.command : undefined,
+        cwd: typeof actionIn.cwd === 'string' ? actionIn.cwd : undefined,
       }
     : undefined;
 
@@ -580,7 +605,10 @@ function normalizeMandate(
     (granted.maxAmount !== undefined ||
       granted.asset !== undefined ||
       granted.recipient !== undefined ||
-      granted.allowUnlimited !== undefined)
+      granted.allowUnlimited !== undefined ||
+      granted.workspace !== undefined ||
+      granted.allowRemoteWrite !== undefined ||
+      granted.allowNetwork !== undefined)
       ? {
           ...(granted.maxAmount !== undefined ? { maxAmount: granted.maxAmount } : {}),
           ...(granted.asset !== undefined ? { asset: granted.asset } : {}),
@@ -588,6 +616,11 @@ function normalizeMandate(
           ...(granted.allowUnlimited !== undefined
             ? { allowUnlimited: granted.allowUnlimited }
             : {}),
+          ...(granted.workspace !== undefined ? { workspace: granted.workspace } : {}),
+          ...(granted.allowRemoteWrite !== undefined
+            ? { allowRemoteWrite: granted.allowRemoteWrite }
+            : {}),
+          ...(granted.allowNetwork !== undefined ? { allowNetwork: granted.allowNetwork } : {}),
         }
       : undefined;
   const a =
@@ -596,6 +629,8 @@ function normalizeMandate(
       action.asset !== undefined ||
       action.recipient !== undefined ||
       action.allowance !== undefined ||
+      action.command !== undefined ||
+      action.cwd !== undefined ||
       actionKind !== undefined)
       ? {
           ...(actionKind !== undefined ? { kind: actionKind } : {}),
@@ -603,6 +638,8 @@ function normalizeMandate(
           ...(action.asset !== undefined ? { asset: action.asset } : {}),
           ...(action.recipient !== undefined ? { recipient: action.recipient } : {}),
           ...(action.allowance !== undefined ? { allowance: action.allowance } : {}),
+          ...(action.command !== undefined ? { command: action.command } : {}),
+          ...(action.cwd !== undefined ? { cwd: action.cwd } : {}),
         }
       : undefined;
 

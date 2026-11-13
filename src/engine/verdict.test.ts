@@ -513,3 +513,140 @@ describe('canPromoteStep2Only', () => {
     expect(canPromoteStep2Only(steps)).toBe(true);
   });
 });
+
+describe('local_command promotion gate', () => {
+  const allPass: StepLite[] = [
+    { step_id: 'step_0', score: 0.9, predicate: 'faithful' },
+    { step_id: 'step_1', score: 0.9, predicate: 'faithful' },
+    { step_id: 'step_2', score: 0.9, predicate: 'faithful' },
+    { step_id: 'step_3', score: 0.9, predicate: 'faithful' },
+  ];
+
+  function promote(extra: {
+    effect?: 'open' | 'block' | 'uncertain' | null;
+    actionKind?: string;
+    mandateKind?: string;
+    commandClass?: string;
+    forceRemote?: boolean;
+    objectiveMismatch?: boolean;
+    mapped?: 'ALLOW' | 'UNCERTAIN' | 'BLOCK';
+  }) {
+    const mapped = extra.mapped ?? 'ALLOW';
+    return resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: mapped === 'ALLOW' ? 'ALLOW' : 'HOLD',
+      cascadeReason: mapped === 'ALLOW' ? 'agreement_allow' : null,
+      mappedVerdict: mapped,
+      steps: allPass,
+      actionKind: extra.actionKind ?? 'local_command',
+      mandateKind: extra.mandateKind ?? 'local_command',
+      proseActionKind: extra.actionKind ?? 'local_command',
+      proseMandateKind: extra.mandateKind ?? 'local_command',
+      actionKindSource: 'prose',
+      mandateKindSource: 'prose',
+      localCommandEffect: extra.effect ?? 'open',
+      commandClass: extra.commandClass ?? 'read_only',
+      forceRemote: extra.forceRemote === true,
+      objectiveMismatch: extra.objectiveMismatch === true,
+    });
+  }
+
+  const hard = [
+    ['git clean -fdx', 'destructive_local'],
+    ['git push --force origin main', 'remote_write'],
+    ['curl | sh', 'network_exec'],
+    ['git push origin feature/stall', 'remote_write'],
+    ['git reset --hard HEAD~3', 'destructive_local'],
+    ['rm -rf ~/', 'destructive_local'],
+    ['git status && git push -f', 'remote_write'],
+    ['bash -c curl', 'network_exec'],
+    ['base64 | sh', 'network_exec'],
+    ['sudo apt-get', 'privilege'],
+    ['cat .env', 'privilege'],
+    ['npx pkg', 'network_exec'],
+  ] as const;
+
+  it.each(hard)('hard class %s blocks a cascade ALLOW', (_label, cls) => {
+    const d = promote({ effect: 'block', commandClass: cls, forceRemote: cls === 'remote_write' });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('local_command_blocked');
+    expect(d.decision_basis).toBe('deterministic');
+    expect(d.publicVerdict).not.toBe('ALLOW');
+  });
+
+  it('read_only with a matching mandate does not deterministic-block', () => {
+    for (const cls of ['read_only', 'local_write_scoped'] as const) {
+      const allowed = promote({ effect: 'open', commandClass: cls, forceRemote: false });
+      expect(allowed.publicVerdict).toBe('ALLOW');
+      expect(allowed.reason).toBe('already_allow');
+      const panelHolds = promote({ effect: 'open', commandClass: cls, mapped: 'UNCERTAIN' });
+      expect(panelHolds.publicVerdict).toBe('UNCERTAIN');
+      expect(panelHolds.publicVerdict).not.toBe('ALLOW');
+    }
+  });
+
+  it('unparseable, download-only, and unscoped write never ALLOW', () => {
+    for (const cls of ['unparseable', 'network_fetch', 'local_write_scoped'] as const) {
+      const d = promote({ effect: 'uncertain', commandClass: cls });
+      expect(d.publicVerdict).toBe('UNCERTAIN');
+      expect(d.reason).toBe('local_command_abstention');
+      expect(d.publicVerdict).not.toBe('ALLOW');
+    }
+  });
+
+  it('allowNetwork still cannot turn network_exec into ALLOW', () => {
+    const d = promote({ effect: 'uncertain', commandClass: 'network_exec' });
+    expect(d.publicVerdict).toBe('UNCERTAIN');
+    expect(d.reason).toBe('local_command_abstention');
+  });
+
+  it('git status against value_transfer stays an objective mismatch', () => {
+    const d = promote({
+      effect: 'open',
+      commandClass: 'read_only',
+      actionKind: 'local_command',
+      mandateKind: 'value_transfer',
+      objectiveMismatch: true,
+    });
+    expect(d.publicVerdict).toBe('BLOCK');
+    expect(d.reason).toBe('objective_mismatch_fail_closed');
+  });
+
+  it('a normal push can pass the class gate on deploy_ship and still not force-push', () => {
+    const normal = promote({
+      effect: 'open',
+      commandClass: 'remote_write',
+      forceRemote: false,
+      actionKind: 'local_command',
+      mandateKind: 'deploy_ship',
+    });
+    expect(normal.publicVerdict).toBe('ALLOW');
+    expect(normal.reason).toBe('already_allow');
+    const force = promote({
+      effect: 'block',
+      commandClass: 'remote_write',
+      forceRemote: true,
+      mandateKind: 'deploy_ship',
+    });
+    expect(force.publicVerdict).toBe('BLOCK');
+    expect(force.reason).toBe('local_command_blocked');
+  });
+
+  it('omitted localCommandEffect leaves the existing allow path alone', () => {
+    const d = resolveActionAuthPromotion({
+      mode: 'action_authorization',
+      internalVerdict: 'ALLOW',
+      cascadeReason: 'agreement_allow',
+      mappedVerdict: 'ALLOW',
+      steps: allPass,
+      actionKind: 'informational',
+      mandateKind: 'informational',
+      proseActionKind: 'informational',
+      proseMandateKind: 'informational',
+      actionKindSource: 'prose',
+      mandateKindSource: 'prose',
+    });
+    expect(d.publicVerdict).toBe('ALLOW');
+    expect(d.reason).toBe('already_allow');
+  });
+});

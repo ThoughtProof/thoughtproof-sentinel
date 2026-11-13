@@ -15,6 +15,7 @@ import {
   type ActionKind,
   type ActionKindSource,
 } from './action-auth-kind.js';
+import type { CommandClass } from './local-command.js';
 import type { AuthorizationMandate } from './authorization-gate.js';
 
 /**
@@ -113,7 +114,9 @@ export type ActionAuthPromotionReason =
   | 'promoted_all_steps_pass'
   | 'no_promote_path'
   | 'objective_mismatch_fail_closed'
-  | 'unclassified_abstention_fail_closed';
+  | 'unclassified_abstention_fail_closed'
+  | 'local_command_blocked'
+  | 'local_command_abstention';
 
 /** Receipt-level origin of the public verdict (issue #43). */
 export type ActionAuthDecisionBasis = 'deterministic' | 'cascade';
@@ -121,6 +124,8 @@ export type ActionAuthDecisionBasis = 'deterministic' | 'cascade';
 const DETERMINISTIC_PROMOTION_REASONS = new Set<string>([
   'objective_mismatch_fail_closed',
   'unclassified_abstention_fail_closed',
+  'local_command_blocked',
+  'local_command_abstention',
 ]);
 
 export function decisionBasisForPromotionReason(
@@ -190,6 +195,15 @@ export interface ActionAuthPromotionInput {
    * explicitly requested. Omitted stays fail-closed.
    */
   requestedFyiCompatible?: boolean | null;
+  /**
+   * Deterministic shell-class gate. `block` / `uncertain` are decided
+   * before cascade ALLOW can stand. `open` and omitted leave the
+   * existing kind allowlist in charge. Never promotes to ALLOW.
+   */
+  localCommandEffect?: 'open' | 'block' | 'uncertain' | null;
+  /** Present when the action payload was parsed as a command. */
+  commandClass?: string | null;
+  forceRemote?: boolean | null;
 }
 
 /**
@@ -293,6 +307,12 @@ export function resolveActionAuthPromotion(
     return finish(input.mappedVerdict, false, 'not_action_authorization');
   }
 
+  // Hard shell classes are code, not the model. A cascade ALLOW cannot
+  // override destruction, force-push, fetch-and-execute, or privilege.
+  if (input.localCommandEffect === 'block') {
+    return finish('BLOCK', false, 'local_command_blocked');
+  }
+
   // P0 2026-09-10 / #38 + #47 + #49 + #53: informational action may
   // public-ALLOW only when the mandate is positively informational.
   // Unknown action vs a named non-informational mandate
@@ -327,10 +347,18 @@ export function resolveActionAuthPromotion(
         mandateKindSource: (input.mandateKindSource as ActionKindSource | null) ?? null,
         mandate: input.mandate,
         requestedFyiCompatible: input.requestedFyiCompatible === true,
+        commandClass: (input.commandClass as CommandClass | null) ?? null,
+        forceRemote: input.forceRemote === true,
       },
     );
   if (input.objectiveMismatch === true || informationalAllowlistBlocked) {
     return finish('BLOCK', false, 'objective_mismatch_fail_closed');
+  }
+
+  // Unparseable, download-without-exec, or an unscoped local write.
+  // Kind fit may be open; public ALLOW is still forbidden.
+  if (input.localCommandEffect === 'uncertain') {
+    return finish('UNCERTAIN', false, 'local_command_abstention');
   }
 
   // Hard stop: primary BLOCK disagreement must never promote to ALLOW.

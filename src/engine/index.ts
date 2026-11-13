@@ -33,6 +33,10 @@ import {
   UNCLASSIFIED_ABSTENTION_REASON,
   recordActionAuthUnknownKinds,
 } from './action-auth-kind.js';
+import {
+  LOCAL_COMMAND_BLOCK_REASON,
+  LOCAL_COMMAND_UNCERTAIN_REASON,
+} from './local-command.js';
 import { bindStepObjections } from '../objection-evidence-bind.js';
 import {
   normalizeCascadeSteps,
@@ -136,6 +140,104 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     };
   }
 
+  // 0c. Hard local-command classes, and command forms that must not ALLOW
+  //     (unparseable, download-only, unscoped filesystem write), are decided
+  //     before the model cascade. `open` still runs the panel. UNCERTAIN and
+  //     BLOCK from this gate never become ALLOW.
+  if (
+    req.mode === 'action_authorization' &&
+    actionAuthKind &&
+    (actionAuthKind.local_command_effect === 'block' ||
+      actionAuthKind.local_command_effect === 'uncertain')
+  ) {
+    const decision = resolveActionAuthPromotion({
+      mode: req.mode,
+      internalVerdict: 'ALLOW',
+      cascadeReason: null,
+      mappedVerdict: 'ALLOW',
+      steps: [],
+      objectiveMismatch,
+      actionKind: actionAuthKind.action_kind,
+      mandateKind: actionAuthKind.mandate_kind,
+      boundedPermissionCompatible: actionAuthKind.bounded_permission_compatible === true,
+      proseActionKind: actionAuthKind.prose_action_kind,
+      proseMandateKind: actionAuthKind.prose_mandate_kind,
+      actionKindSource: actionAuthKind.action_kind_source,
+      mandateKindSource: actionAuthKind.mandate_kind_source,
+      mandate: req.mandate,
+      requestedFyiCompatible: actionAuthKind.requested_fyi_compatible === true,
+      localCommandEffect: actionAuthKind.local_command_effect,
+      commandClass: actionAuthKind.command_class,
+      forceRemote: actionAuthKind.command_force_remote,
+    });
+    const reasoning =
+      decision.reason === 'local_command_blocked'
+        ? LOCAL_COMMAND_BLOCK_REASON
+        : decision.reason === 'local_command_abstention'
+          ? LOCAL_COMMAND_UNCERTAIN_REASON
+          : decision.reason === 'unclassified_abstention_fail_closed'
+            ? UNCLASSIFIED_ABSTENTION_REASON
+            : OBJECTIVE_MISMATCH_BLOCK_REASON;
+    return {
+      id,
+      verdict: decision.publicVerdict,
+      confidence: receiptConfidence(decision.publicVerdict === 'BLOCK' ? 1 : 0),
+      reasoning,
+      objections: [
+        {
+          step_id: 'local_command',
+          criterion: 'Deterministic local-command class gate',
+          score: 0,
+          predicate: decision.publicVerdict === 'BLOCK' ? 'unauthorized' : 'unverified',
+          quote: null,
+          quote_source: null,
+          reasoning,
+          objection_source: 'deterministic_gate',
+        },
+      ],
+      mode: req.mode,
+      tier,
+      gate: gateField,
+      meta: {
+        duration_ms: Date.now() - startMs,
+        models_used: [],
+        verified_at: new Date().toISOString(),
+        promotion: {
+          cascade_reason: null,
+          internal_verdict: 'cascade_not_run',
+          mapped_verdict: decision.publicVerdict,
+          public_verdict: decision.publicVerdict,
+          promoted: false,
+          reason: decision.reason,
+          decision_basis: decision.decision_basis,
+          steps_all_pass: false,
+          machine_condition_proof_present: false,
+          machine_condition_proof_accepted: false,
+          action_kind: actionAuthKind.action_kind,
+          mandate_kind: actionAuthKind.mandate_kind,
+          action_kind_source: actionAuthKind.action_kind_source,
+          mandate_kind_source: actionAuthKind.mandate_kind_source,
+          ...(unknownKinds ?? {}),
+          unclassified_abstention: unclassifiedAbstention,
+          ...(actionAuthKind.command_class
+            ? {
+                command_class: actionAuthKind.command_class,
+                local_command_effect: actionAuthKind.local_command_effect ?? undefined,
+              }
+            : {}),
+          release_id:
+            process.env.VERCEL_GIT_COMMIT_SHA ||
+            process.env.GIT_COMMIT ||
+            process.env.RELEASE_ID ||
+            undefined,
+          policy:
+            'adr-0019-cascade-promotion-2026-08-08+p0-primary-error-fail-closed+p0-objective-mismatch-fail-closed+p0-informational-allowlist+p0-unknown-action-fail-closed+p0-unclassified-abstention-uncertain+p0-caller-declared-kinds',
+        },
+        ...(req.agent_context ? { agent_context: req.agent_context } : {}),
+      },
+    };
+  }
+
   // 1. Get mode handler and shape claim/evidence into EvalInput
   const modeHandler = getModeHandler(req.mode);
   const modeOutput = modeHandler({
@@ -164,8 +266,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   } catch (err) {
     budget.clear();
     if (isEngineBudgetExhaustedError(err)) {
+      const localCommandBlock = actionAuthKind?.local_command_effect === 'block';
       const publicVerdict =
-        err.knownInternalVerdict === 'BLOCK' || objectiveMismatch
+        err.knownInternalVerdict === 'BLOCK' || objectiveMismatch || localCommandBlock
           ? 'BLOCK'
           : 'UNCERTAIN';
       const trace = buildBudgetTrace({
@@ -207,13 +310,17 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
                   mapped_verdict: publicVerdict,
                   public_verdict: publicVerdict,
                   promoted: false,
-                  reason: objectiveMismatch
-                    ? 'objective_mismatch_fail_closed'
-                    : ENGINE_BUDGET_REASON,
-                  decision_basis: decisionBasisForPromotionReason(
-                    objectiveMismatch
+                  reason: localCommandBlock
+                    ? 'local_command_blocked'
+                    : objectiveMismatch
                       ? 'objective_mismatch_fail_closed'
                       : ENGINE_BUDGET_REASON,
+                  decision_basis: decisionBasisForPromotionReason(
+                    localCommandBlock
+                      ? 'local_command_blocked'
+                      : objectiveMismatch
+                        ? 'objective_mismatch_fail_closed'
+                        : ENGINE_BUDGET_REASON,
                   ),
                   steps_all_pass: false,
                   machine_condition_proof_present: false,
@@ -319,6 +426,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       mandateKindSource: actionAuthKind?.mandate_kind_source ?? null,
       mandate: req.mandate,
       requestedFyiCompatible: actionAuthKind?.requested_fyi_compatible === true,
+      localCommandEffect: actionAuthKind?.local_command_effect ?? null,
+      commandClass: actionAuthKind?.command_class ?? null,
+      forceRemote: actionAuthKind?.command_force_remote === true,
     });
     verdict = decision.publicVerdict;
     promotionMeta = {
@@ -340,6 +450,12 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
             mandate_kind_source: actionAuthKind.mandate_kind_source,
             ...(unknownKinds ?? {}),
             unclassified_abstention: unclassifiedAbstention,
+            ...(actionAuthKind.command_class
+              ? {
+                  command_class: actionAuthKind.command_class,
+                  local_command_effect: actionAuthKind.local_command_effect ?? undefined,
+                }
+              : {}),
           }
         : {}),
       // Deploy provenance: Vercel sets VERCEL_GIT_COMMIT_SHA; local/dev may set

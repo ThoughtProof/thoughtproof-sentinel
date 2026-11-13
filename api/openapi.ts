@@ -148,15 +148,16 @@ const spec = {
                           'value_transfer',
                           'permission',
                           'deploy_ship',
+                          'local_command',
                           'unknown',
                         ],
                         description:
-                          'Caller-declared mandate kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict.',
+                          'Caller-declared mandate kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict. local_command is a shell/coding-agent command; the parser must agree, and hard command classes still block.',
                       },
                       granted: {
                         type: 'object',
                         description:
-                          'Authorized parameters (maxAmount, asset, recipient, allowUnlimited). Preferred for the financial gate when present — amounts and addresses as data.',
+                          'Authorized parameters (maxAmount, asset, recipient, allowUnlimited). Preferred for the financial gate when present — amounts and addresses as data. Optional local_command scope: workspace (path), allowRemoteWrite (default false; normal push only, not force-push), allowNetwork (default false; downgrades fetch-and-execute from BLOCK to UNCERTAIN, never ALLOW).',
                       },
                       action: {
                         type: 'object',
@@ -170,15 +171,26 @@ const spec = {
                               'value_transfer',
                               'permission',
                               'deploy_ship',
+                              'local_command',
                               'unknown',
                             ],
                             description:
-                              'Caller-declared action kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict.',
+                              'Caller-declared action kind (issue #51). BLOCK always applies; ALLOW requires prose not to contradict. Declared local_command counts only when the command parser agrees.',
                           },
                           amount: { type: 'number' },
                           asset: { type: 'string' },
                           recipient: { type: 'string' },
                           allowance: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+                          command: {
+                            type: 'string',
+                            description:
+                              'Optional shell text. Classified with the action prose; the strictest class wins. A benign command here does not relabel a payment.',
+                          },
+                          cwd: {
+                            type: 'string',
+                            description:
+                              'Optional working directory. `..`, `~`, and `$` escape the local scope.',
+                          },
                         },
                       },
                     },
