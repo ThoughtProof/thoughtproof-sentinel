@@ -123,6 +123,12 @@ export interface IssueExportOptions {
   privateKey: KeyObject | string;
   /** When set, write validUntil = signedAt + ttlSeconds. */
   ttlSeconds?: number;
+  /**
+   * Server-computed request binding. Applied only when `source` is a
+   * response (v1 projection). A prebuilt canonical body already carries
+   * the field. Invalid values throw so the caller does not sign them.
+   */
+  requestHash?: string;
 }
 
 export type ExportVerifyFailureCode =
@@ -577,7 +583,9 @@ export function issueSignedCanonicalExport(
 
   const body: CanonicalSentinelVerdictArtifact = isCanonicalSentinelVerdictBody(source)
     ? source
-    : buildCanonicalSentinelVerdict(source as SentinelVerifyResponse);
+    : buildCanonicalSentinelVerdict(source as SentinelVerifyResponse, {
+        requestHash: options.requestHash,
+      });
 
   const canonical = serializeCanonicalSentinelVerdict(body);
   const digest = hashCanonicalSentinelVerdict(body);
@@ -838,6 +846,7 @@ export function maybeIssueSignedExport(
   env: NodeJS.ProcessEnv = process.env,
   nowSeconds?: number,
   load: LoadExportSignerOptions = {},
+  extras: { requestHash?: string } = {},
 ): SignedCanonicalExport | null {
   const signer = loadExportSignerFromEnv(env, { ...load, nowSeconds });
   if (!signer) return null;
@@ -847,6 +856,7 @@ export function maybeIssueSignedExport(
       keyId: signer.keyId,
       ttlSeconds: signer.ttlSeconds,
       nowSeconds,
+      requestHash: extras.requestHash,
     });
   } catch (err) {
     console.error(
@@ -872,6 +882,7 @@ export function maybeIssueSignedExportV2(
     mandateDigest?: string;
     actionDigest?: string;
     mandateSource?: string;
+    requestHash?: string;
   } = {},
 ): SignedCanonicalExport | null {
   try {
@@ -882,6 +893,7 @@ export function maybeIssueSignedExportV2(
         mandateDigest: supplements.mandateDigest,
         actionDigest: supplements.actionDigest,
         mandateSource: supplements.mandateSource,
+        requestHash: supplements.requestHash,
       }),
       {
         privateKey: signer.privateKey,
