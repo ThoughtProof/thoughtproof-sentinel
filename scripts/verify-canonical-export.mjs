@@ -50,6 +50,13 @@
  *   fail closed (gate_report_invalid). v1 is not inspected. Values are
  *   not echoed.
  *
+ * requestHash (ADR-0024) is an optional string inside the transported
+ * canonical (v1 and v2), not a separate envelope field. The signature and
+ * the canonical digest already cover it. This script does not recompute it:
+ * historical exports may omit it, and new verify exports include the
+ * server-computed `sha256:` hash. A caller that wants the binding check
+ * compares that field to the hash of the body it sent.
+ *
  * Optional salted-commitment recompute (ADR-0022 addendum), v2 only:
  *   --mandate <json>  --action <json>  --digest-salt <64 hex chars>
  * When any of those flags is set the check is mandatory and fails closed.

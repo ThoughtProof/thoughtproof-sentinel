@@ -36,7 +36,7 @@ const spec = {
         operationId: 'sentinelVerify',
         summary: 'Verify agent reasoning before execution',
         description:
-          'Multi-model cascade verification. A fast nano model screens first; if escalation is needed, a stronger second model re-evaluates. Returns one of three verdicts — ALLOW, BLOCK, or UNCERTAIN — with structured per-step objections agents can use to re-plan. Supports x402 micropayment on Base (USDC).',
+          'Multi-model cascade verification. A fast nano model screens first; if escalation is needed, a stronger second model re-evaluates. Returns one of three verdicts — ALLOW, BLOCK, or UNCERTAIN — with structured per-step objections agents can use to re-plan. Supports x402 micropayment on Base (USDC). When the export signer is configured, both signed canonicals include requestHash (profile thoughtproof.mcp.request_binding.v2): SHA-256 of the RFC 8785 JCS of the parsed body, computed by the server. A client-supplied hash is not copied. A body that is not well-formed Unicode is rejected and is not an ALLOW. Headers and credentials are not part of the hash.',
         // Structured x-payment-info (AgentCash non-legacy). Live 402 challenges
         // still dual-advertise network base + eip155:8453 for facilitators.
         'x-payment-info': {

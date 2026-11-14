@@ -2,6 +2,7 @@
 
 | Doc | Topic |
 |---|---|
+| [ADR-0024-request-binding.md](./ADR-0024-request-binding.md) | Server-computed `requestHash` on signed canonical v1 and v2 |
 | [ADR-FRESHNESS-VS-VERIFIER-LATENCY-2026-07-30.md](./ADR-FRESHNESS-VS-VERIFIER-LATENCY-2026-07-30.md) | Quote freshness ≠ verifier latency; settlement TTL; taxonomy codes |
 | [ADR-SETTLEMENT-FRESHNESS-AT-EXECUTION-EDGE-2026-07-30.md](./ADR-SETTLEMENT-FRESHNESS-AT-EXECUTION-EDGE-2026-07-30.md) | Last TTL/action-hash check at wallet/authz edge; `execution_conditions` on ALLOW |
 | [FAILURE-TAXONOMY-v0-2026-07-30.md](./FAILURE-TAXONOMY-v0-2026-07-30.md) | Reporting-only failure codes + windowed rates |

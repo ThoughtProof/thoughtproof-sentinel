@@ -1,6 +1,20 @@
 ## Unreleased
 
 ### Added
+- Server-computed `requestHash` on both signed canonicals (ADR-0024,
+  profile `thoughtproof.mcp.request_binding.v2`). The verify handler
+  hashes the parsed JSON body with the MCP JCS encoder (RFC 8785,
+  UTF-8, SHA-256, `sha256:` + lowercase hex) and writes that field into
+  `sentinel.verdict.canonical.v1` and `sentinel.verdict.canonical.v2`
+  before signing. Artifact schema ids, the export envelope domain, and
+  `apiVersion` are unchanged. Historical exports that omit the field
+  still verify. New verify issuances include it, so their v1 digest
+  differs from the same verdict without the field. The M1 fixture files
+  are not regenerated. A lone UTF-16 surrogate is rejected before the
+  engine (HTTP 400, no signed export, no ALLOW). A client-supplied hash
+  is body content only. `mandateDigest`, `actionDigest`, and
+  `packageDigest` are unchanged. Top-level unknown fields stay a 400
+  under the existing F3 whitelist.
 - `gate.checked` and `gate.skipped` on canonical verdict v2 only (ADR-0022
   P3 addendum). `runAuthorizationGate` reports which of the three checks
   ran and which were skipped because an input was missing or unparseable.

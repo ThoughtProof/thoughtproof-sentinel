@@ -11,14 +11,17 @@
  *  - Optional fields (gate, secondary model, v2 provenance) are OMITTED when
  *    not present, never null — JCS treats absent vs null distinctly.
  *  - Canonical serialization via JCS (RFC 8785) so body bytes are stable.
- *  - v1 is a strict projection of SentinelVerifyResponse — nothing added,
- *    nothing re-expressed.  "ThoughtProof said X" stays intact.
+ *  - v1 is a strict projection of SentinelVerifyResponse — nothing added
+ *    from the response, nothing re-expressed.  "ThoughtProof said X" stays
+ *    intact. Optional requestHash (ADR-0024) is the server-computed binding
+ *    of the parsed verify body. It is not read from the response. Callers
+ *    that omit it keep the historical v1 bytes, including the M1 fixtures.
  *  - v2 (ADR-0022) is that projection plus optional releaseId, policy, and
- *    potCli, optional salted mandateDigest / actionDigest, and optional
- *    gate.checked / gate.skipped. It does not change the verdict. Callers
- *    that cannot build v2 omit signed_export_v2. The commitment salt is
- *    not a v2 field. gate.checked and gate.skipped are report-only and are
- *    omitted from v1.
+ *    potCli, optional salted mandateDigest / actionDigest, optional
+ *    gate.checked / gate.skipped, and the same optional requestHash.
+ *    It does not change the verdict. Callers that cannot build v2 omit
+ *    signed_export_v2. The commitment salt is not a v2 field. gate.checked
+ *    and gate.skipped are report-only and are omitted from v1.
  *
  * v1 is pure computation. v2 may read the installed pot-cli version; a throw
  * from that read propagates so the export issuer can omit signed_export_v2.
@@ -32,6 +35,7 @@ import { createHash } from 'crypto';
 // @ts-ignore - canonicalize types are loose; runtime export is the function
 import canonicalize from 'canonicalize';
 import type { SentinelVerifyResponse } from './types.js';
+import { REQUEST_HASH_RE } from './request-binding.js';
 import { confidenceToPercent } from './confidence.js';
 import { getPotCliVersion, publishablePotCliVersion } from './runtime-versions.js';
 import {
@@ -95,6 +99,15 @@ export interface CanonicalSentinelVerdictBody {
   packageDigest?: string;
   /** Proof strength (F1, omitted when absent). */
   proofStrength?: string;
+  /**
+   * Server-computed request binding, profile
+   * `thoughtproof.mcp.request_binding.v2` (ADR-0024). `sha256:` + 64
+   * lowercase hex. Omitted when the caller does not supply one, so
+   * historical v1 bytes stay stable. Not copied from the request body.
+   * Not a verdict input. The canonical digest and the export signature
+   * cover it on both v1 and v2.
+   */
+  requestHash?: string;
   /** Deterministic-gate result (action_authorization only; omitted otherwise). */
   gate?: {
     mode: string;
@@ -190,15 +203,39 @@ export interface BuildCanonicalSentinelVerdictV2Options {
    * onto the v1 body.
    */
   mandateSource?: string;
+  /**
+   * Server-computed request binding. Same string on v1 and v2.
+   * A value that is not `sha256:` + 64 lowercase hex throws so the
+   * export issuer omits the export instead of signing a bad field.
+   */
+  requestHash?: string;
+}
+
+/**
+ * Copy a server-computed request hash onto a canonical body.
+ * Undefined leaves the field absent (historical bytes). Any other value
+ * that is not `sha256:` + 64 lowercase hex throws. Never reads the response.
+ */
+function assignRequestHash(
+  body: { requestHash?: string },
+  requestHash: string | undefined,
+): void {
+  if (requestHash === undefined) return;
+  if (!REQUEST_HASH_RE.test(requestHash)) {
+    throw new Error('requestHash must be sha256: plus 64 lowercase hex');
+  }
+  body.requestHash = requestHash;
 }
 
 /**
  * Build the canonical (pre-serialization) v1 body from a SentinelVerifyResponse.
  * Pure function — no I/O, no side effects. Does not read promotion provenance
- * or pot-cli; those belong to v2 only, so existing v1 bytes stay stable.
+ * or pot-cli; those belong to v2 only. requestHash is optional and is not
+ * read from the response, so existing v1 bytes stay stable when it is omitted.
  */
 export function buildCanonicalSentinelVerdict(
   response: SentinelVerifyResponse,
+  options: { requestHash?: string } = {},
 ): CanonicalSentinelVerdictBody {
   const evaluatedAt = Math.floor(
     new Date(response.meta.verified_at).getTime() / 1000,
@@ -249,6 +286,7 @@ export function buildCanonicalSentinelVerdict(
     };
   }
 
+  assignRequestHash(body, options.requestHash);
   return body;
 }
 
@@ -266,7 +304,7 @@ export function buildCanonicalSentinelVerdictV2(
   response: SentinelVerifyResponse,
   options: BuildCanonicalSentinelVerdictV2Options = {},
 ): CanonicalSentinelVerdictBodyV2 {
-  const v1 = buildCanonicalSentinelVerdict(response);
+  const v1 = buildCanonicalSentinelVerdict(response, { requestHash: options.requestHash });
   const body: CanonicalSentinelVerdictBodyV2 = {
     ...v1,
     artifactSchema: CANONICAL_VERDICT_SCHEMA_V2,

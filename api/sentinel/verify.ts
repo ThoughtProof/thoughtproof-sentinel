@@ -21,6 +21,11 @@ import {
   modelConfigUnavailablePayload,
 } from '../../src/model-config.js';
 import { maybeIssueSignedExport, maybeIssueSignedExportV2 } from '../../src/canonical-export.js';
+import type { SignedCanonicalExport } from '../../src/canonical-export.js';
+import {
+  canonicalBindsRequest,
+  computeRequestHash,
+} from '../../src/request-binding.js';
 import {
   prepareV2CommitmentSupplements,
   responseDigestSalt,
@@ -38,6 +43,23 @@ import {
 const VERSION = '0.1.0';
 const VALID_PLATFORMS: PaymentPlatform[] = ['openserv', 'acp', 'direct'];
 const MAX_BODY_SIZE = 1_000_000; // 1MB
+
+/**
+ * Publish a signed export only when its canonical carries this server hash.
+ * A missing or different requestHash is not sent. Never throws.
+ */
+function publishBoundExport(
+  exp: SignedCanonicalExport | null,
+  requestHash: string,
+): SignedCanonicalExport | undefined {
+  if (!exp) return undefined;
+  try {
+    if (!canonicalBindsRequest(exp.canonical, requestHash)) return undefined;
+    return exp;
+  } catch {
+    return undefined;
+  }
+}
 
 /** Public semver for meta.pot_cli. Lookup failures omit the field and do not change the verdict. */
 function readPublishablePotCli(): string | undefined {
@@ -119,6 +141,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         code: 'RATE_LIMITED',
         remaining: 0,
         retry_after_ms: retryAfterMs,
+      });
+    }
+
+    // Request binding (ADR-0024). Hash the parsed body before payment,
+    // validation rewriting, or the engine. Lone surrogates and any other
+    // preimage failure are an error: no engine call, no signed export, no ALLOW.
+    // The hash is not read from a client field. Headers are not covered.
+    let requestHash: string;
+    try {
+      requestHash = computeRequestHash(req.body);
+    } catch {
+      console.error(`[sentinel/verify:${requestId}] request binding rejected`);
+      return res.status(400).json({
+        error: 'Validation failed',
+        code: 'INVALID_REQUEST',
+        details: [{ field: 'body', message: 'Request body is not well-formed Unicode' }],
       });
     }
 
@@ -245,24 +283,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     // --- M1 signed canonical export (only when SENTINEL_EXPORT_PRIVATE_KEY set) ---
-    // v1 envelope stays byte-compatible. v2 (ADR-0022) is additive provenance.
+    // Both canonicals carry the same server-computed requestHash (ADR-0024).
+    // An export that does not bind this request is omitted. Omitted when the
+    // signer is unset so the pre-M1 response shape stays compatible.
     // A v2 failure omits signed_export_v2 only — never the verdict or v1.
-    // Omitted when the signer is unset so the pre-M1 response shape stays compatible.
     const exportNowSeconds = Math.floor(Date.now() / 1000);
-    const signedExport = maybeIssueSignedExport(processedResponse, process.env, exportNowSeconds);
+    const signedExport = publishBoundExport(
+      maybeIssueSignedExport(processedResponse, process.env, exportNowSeconds, {}, { requestHash }),
+      requestHash,
+    );
     // Salted v2 commitments. A failure omits the digests and the salt.
     // It does not change the verdict, the promotion, or signed_export (v1).
     const commitment = prepareV2CommitmentSupplements(
       mandateVerified ? mandateVerified.normalizedMandate : result.data.mandate,
     );
-    const signedExportV2 = maybeIssueSignedExportV2(
-      processedResponse,
-      process.env,
-      exportNowSeconds,
-      {},
-      mandateVerified
-        ? { ...commitment, mandateSource: mandateVerified.mandateSource }
-        : commitment,
+    const signedExportV2 = publishBoundExport(
+      maybeIssueSignedExportV2(
+        processedResponse,
+        process.env,
+        exportNowSeconds,
+        {},
+        mandateVerified
+          ? { ...commitment, mandateSource: mandateVerified.mandateSource, requestHash }
+          : { ...commitment, requestHash },
+      ),
+      requestHash,
     );
     const potCli = readPublishablePotCli();
     const digestSalt = responseDigestSalt(signedExportV2, commitment.digestSaltCandidate);
