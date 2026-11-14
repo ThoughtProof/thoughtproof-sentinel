@@ -5,7 +5,12 @@
  * resolves. Aliases, shell functions, PATH entries, and symlinks are not
  * visible here; they need a host contract. An explicit program path
  * (`./x`, `../x`, `/path/x`, `~/x`, or the same after `env` / `xargs` /
- * another wrapper) does not inherit a class from its filename. The body
+ * another wrapper) does not inherit a class from its filename. A leading
+ * `NAME=value`, `env` with an option or assignment, `sh -c` / `bash -c`
+ * (including `-lc`, `-ec`, and `--norc -c`), and a wrapper (`command`,
+ * `builtin`, `exec`, `nohup`, `nice`, `time`, `timeout`, `stdbuf`,
+ * `ionice`) are closed in v1: UNCERTAIN, not the inner command. A hard
+ * BLOCK on any stage still wins. The body
  * of a script (`./run.sh`, a Makefile target, `npm test` via package.json)
  * is not visible either. `read_only` means "no direct write was
  * classified". It does not mean the command is safe.
@@ -173,6 +178,10 @@ const KNOWN_COMMANDS = new Set([
   'nice',
   'time',
   'exec',
+  'builtin',
+  'timeout',
+  'stdbuf',
+  'ionice',
   'xargs',
   'true',
   'false',
@@ -184,7 +193,22 @@ const KNOWN_COMMANDS = new Set([
   'more',
 ]);
 
-const WRAPPERS = new Set(['command', 'nohup', 'nice', 'time', 'exec']);
+/**
+ * Not stripped and not implemented in v1. The inner command is still
+ * inspected so a hard BLOCK is not lost; the form itself cannot open.
+ */
+const CLOSED_WRAPPERS = new Set([
+  'command',
+  'builtin',
+  'exec',
+  'nohup',
+  'nice',
+  'time',
+  'timeout',
+  'stdbuf',
+  'ionice',
+]);
+const SHELLS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh', 'fish']);
 const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'ksh', 'python', 'python3', 'perl', 'ruby', 'node', 'php']);
 const READ_BINARIES = new Set([
   'ls',
@@ -218,6 +242,11 @@ export interface LocalCommandPart {
   paths: string[];
   /** `git -C`, `--git-dir`, and `--work-tree` values. */
   scopeRoots: string[];
+  /**
+   * Leading assignment, `env` option/assignment, shell `-c`, or wrapper.
+   * Cannot open. A BLOCK from the class still wins.
+   */
+  closedForm?: boolean;
 }
 
 export interface LocalCommandAnalysis {
@@ -783,6 +812,8 @@ interface ArgClass {
    * on their own. Class-rank collapse must not drop them.
    */
   segments: LocalCommandPart[];
+  /** Assignment, env option, shell `-c`, or wrapper. See `LocalCommandPart`. */
+  closedForm: boolean;
 }
 
 function argResult(
@@ -800,6 +831,7 @@ function argResult(
     paths: [],
     scopeRoots: [],
     segments: [],
+    closedForm: false,
     ...extra,
   };
 }
@@ -816,6 +848,7 @@ function mergeArg(a: ArgClass, b: ArgClass): ArgClass {
     paths: [...a.paths, ...b.paths],
     scopeRoots: [...a.scopeRoots, ...b.scopeRoots],
     segments: [...a.segments, ...b.segments],
+    closedForm: a.closedForm || b.closedForm,
   };
 }
 
@@ -1099,13 +1132,25 @@ function classifyPython(argv: string[], words: Word[]): ArgClass {
   return argResult('unparseable', { interpreterSink: true });
 }
 
+function shellCIndex(argv: string[]): number {
+  for (let i = 1; i < argv.length; i += 1) {
+    const arg = argv[i] ?? '';
+    if (arg === '--') break;
+    if (arg === '-c' || arg === '--command') return i;
+    if (/^-[^-]*c/.test(arg)) return i;
+  }
+  return -1;
+}
+
 function classifyShellC(argv: string[], words: Word[]): ArgClass {
-  const idx = argv.indexOf('-c');
+  const idx = shellCIndex(argv);
   if (idx < 0) return argResult('unparseable', { interpreterSink: true });
-  // eval joins every argument into one script. sh -c uses the first as the
-  // script; extra words are still classified so nothing after -c is ignored.
-  const script = argv.slice(idx + 1).join(' ');
-  const scriptWords = words.slice(idx + 1);
+  const flag = argv[idx] ?? '';
+  const combined = flag !== '-c' && flag !== '--command';
+  // eval and `sh -c` join every argument into one script so nothing after
+  // -c is ignored. A combined flag (`-lc`, `-ec`) takes the next word.
+  const script = combined ? (argv[idx + 1] ?? '') : argv.slice(idx + 1).join(' ');
+  const scriptWords = combined ? words.slice(idx + 1, idx + 2) : words.slice(idx + 1);
   const subs = scriptWords.flatMap((word) => word.substitutions);
   if (subs.some((sub) => /\b(?:curl|wget)\b/.test(sub))) {
     return argResult('network_exec', { obfuscated: true });
@@ -1113,6 +1158,50 @@ function classifyShellC(argv: string[], words: Word[]): ArgClass {
   let result = script.trim() ? nestedCommand(script) : argResult('unparseable');
   for (const sub of subs) result = mergeArg(result, nestedCommand(sub));
   return result;
+}
+
+/**
+ * First real program after a wrapper. Flags, assignments, and numeric
+ * operands (nice/timeout) are not the program. The caller marks the result
+ * closed so the wrapper cannot open a gate.
+ */
+function classifyWrapperInner(argv: string[], words: Word[]): ArgClass {
+  for (let i = 1; i < argv.length; i += 1) {
+    const token = argv[i] ?? '';
+    if (!token || token.startsWith('-') || isEnvAssign(token)) continue;
+    if (/^\d+(?:\.\d+)?$/.test(token)) continue;
+    const base = basenameCommand(token);
+    if (CLOSED_WRAPPERS.has(base) || KNOWN_COMMANDS.has(base) || isUnverifiedProgramPath(token)) {
+      return classifyArgv(argv.slice(i), words.slice(i));
+    }
+  }
+  return argResult('unparseable');
+}
+
+/** `env` options and NAME=value. `--` ends the prefix. A value-taking flag consumes the next word. */
+function envPrefix(argv: string[]): { end: number; closed: boolean } {
+  let j = 1;
+  let closed = false;
+  while (j < argv.length) {
+    const arg = argv[j] ?? '';
+    if (arg === '--') return { end: j + 1, closed: true };
+    if (arg.startsWith('-') && arg !== '-') {
+      closed = true;
+      if ((arg === '-u' || arg === '-C' || arg === '-S') && j + 1 < argv.length) {
+        j += 2;
+        continue;
+      }
+      j += 1;
+      continue;
+    }
+    if (isEnvAssign(arg)) {
+      closed = true;
+      j += 1;
+      continue;
+    }
+    break;
+  }
+  return { end: j, closed };
 }
 
 /** Classify a nested script and keep every statement as its own segment. */
@@ -1215,10 +1304,13 @@ function classifyFind(argv: string[]): ArgClass {
 
 function classifyArgv(argv: string[], words: Word[]): ArgClass {
   let i = 0;
-  while (i < argv.length && isEnvAssign(argv[i] ?? '') && !words[i]?.tainted) i += 1;
-  // Only a bare wrapper name is skipped. `/usr/bin/time` is an unverified path.
-  while (i < argv.length && WRAPPERS.has(argv[i] ?? '')) i += 1;
-  if (i >= argv.length) return argResult('unparseable');
+  let assigned = false;
+  while (i < argv.length && isEnvAssign(argv[i] ?? '') && !words[i]?.tainted) {
+    assigned = true;
+    i += 1;
+  }
+  const close = (result: ArgClass): ArgClass => (assigned ? { ...result, closedForm: true } : result);
+  if (i >= argv.length) return close(argResult('unparseable'));
   const slicedArgv = argv.slice(i);
   const slicedWords = words.slice(i);
   const raw0 = slicedArgv[0] ?? '';
@@ -1226,20 +1318,22 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   if (!raw0 && word0 && word0.substitutions.length > 0) {
     const subs = word0.substitutions.map((s) => classifyCommandText(s));
     const fetched = subs.some((c) => c.fetcher || c.commandClass === 'network_fetch' || c.commandClass === 'network_exec');
-    if (fetched) return argResult('network_exec', { obfuscated: true });
-    return subs.reduce(mergeArg, argResult('unparseable'));
+    if (fetched) return close(argResult('network_exec', { obfuscated: true }));
+    return close(subs.reduce(mergeArg, argResult('unparseable')));
   }
   if (/^\$/.test(raw0) || (word0?.tainted && raw0.startsWith('$'))) {
-    return argResult('unparseable');
+    return close(argResult('unparseable'));
   }
   // `./git`, `../git`, `/usr/bin/git` do not inherit git's class. The same
   // check applies to the program `env` or another wrapper actually runs.
-  if (isUnverifiedProgramPath(raw0)) return argResult('unparseable');
+  if (isUnverifiedProgramPath(raw0)) return close(argResult('unparseable'));
   const cmd = basenameCommand(raw0);
-  if (!cmd || raw0.includes('*')) return argResult('unparseable');
+  if (!cmd || raw0.includes('*')) return close(argResult('unparseable'));
 
   let result: ArgClass;
-  if (cmd === 'sudo' || cmd === 'su' || cmd === 'doas' || cmd === 'pkexec') {
+  if (CLOSED_WRAPPERS.has(cmd)) {
+    result = { ...classifyWrapperInner(slicedArgv, slicedWords), closedForm: true };
+  } else if (cmd === 'sudo' || cmd === 'su' || cmd === 'doas' || cmd === 'pkexec') {
     result = argResult('privilege');
   } else if (cmd === 'git') {
     result = classifyGit(slicedArgv);
@@ -1267,12 +1361,15 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   } else if (cmd === 'printenv' || cmd === 'export') {
     result = argResult('privilege');
   } else if (cmd === 'env') {
-    let j = 1;
-    const flags = flagSet(slicedArgv);
-    if (flags.has('-i') || flags.has('-0')) j = slicedArgv.findIndex((a, idx) => idx > 0 && !a.startsWith('-') && !isEnvAssign(a));
-    while (j < slicedArgv.length && (slicedArgv[j]?.startsWith('-') || isEnvAssign(slicedArgv[j] ?? ''))) j += 1;
-    if (j < 0 || j >= slicedArgv.length) result = argResult('privilege');
-    else result = classifyArgv(slicedArgv.slice(j), slicedWords.slice(j));
+    const prefix = envPrefix(slicedArgv);
+    if (prefix.end >= slicedArgv.length) {
+      // `env` and `env -i` with no utility still print the environment.
+      result = argResult('privilege');
+    } else if (prefix.closed) {
+      result = { ...classifyArgv(slicedArgv.slice(prefix.end), slicedWords.slice(prefix.end)), closedForm: true };
+    } else {
+      result = classifyArgv(slicedArgv.slice(prefix.end), slicedWords.slice(prefix.end));
+    }
   } else if (cmd === 'dd' || cmd === 'mkfs' || cmd.startsWith('mkfs.') || cmd === 'truncate' || cmd === 'shred') {
     result = argResult('destructive_local');
   } else if (cmd === 'find') {
@@ -1303,7 +1400,8 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   } else if (cmd === 'tsc' && (slicedArgv.includes('--noEmit') || slicedArgv.length === 1)) {
     result = argResult('read_only');
   } else if (INTERPRETERS.has(cmd) || cmd === 'eval') {
-    if (cmd === 'eval' || slicedArgv.includes('-c')) {
+    const shellExec = SHELLS.has(cmd) && shellCIndex(slicedArgv) >= 0;
+    if (cmd === 'eval' || shellExec) {
       const scriptWords: Word[] =
         cmd === 'eval'
           ? [
@@ -1314,6 +1412,9 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
           : slicedWords;
       const scriptArgv = cmd === 'eval' ? ['sh', '-c', ...slicedArgv.slice(1)] : slicedArgv;
       result = classifyShellC(scriptArgv, scriptWords);
+      // v1 does not treat the script body as an allowed command. A hard
+      // class inside the body is kept so BLOCK still wins.
+      if (shellExec) result = { ...result, closedForm: true };
     } else result = argResult('unparseable', { interpreterSink: true });
   } else if (cmd === 'base64') {
     const decode = slicedArgv.some((a) => a === '-d' || a === '-D' || a === '--decode');
@@ -1362,7 +1463,7 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
       result = mergeArg(result, nestedCommand(sub));
     }
   }
-  return result;
+  return close(result);
 }
 
 function isFdDup(op: string, target: string): boolean {
@@ -1438,6 +1539,7 @@ function partFromArg(result: ArgClass, text: string): LocalCommandPart {
     forceRemote: result.forceRemote,
     paths: result.paths,
     scopeRoots: result.scopeRoots,
+    closedForm: result.closedForm,
   };
 }
 
@@ -1485,6 +1587,7 @@ function statementParts(result: ArgClass, text: string): LocalCommandPart[] {
     forceRemote: result.forceRemote,
     paths: result.paths,
     scopeRoots: result.scopeRoots,
+    closedForm: result.closedForm,
   };
   if (result.segments.length === 0) return [own];
   // Inner segments stay separate. The collapsed class is kept as well so a
@@ -1827,6 +1930,16 @@ function stricterEffect(a: LocalCommandEffect, b: LocalCommandEffect): LocalComm
 }
 
 function effectForPart(part: LocalCommandPart, input: LocalCommandEffectInput): LocalCommandEffect {
+  // Hard BLOCK across the part's own class first. A closed form
+  // (assignment, env, shell -c, wrapper) must not turn that into UNCERTAIN,
+  // and must not open when the class itself would.
+  const effect = effectForClass(part, input);
+  if (effect === 'block') return 'block';
+  if (part.closedForm) return 'uncertain';
+  return effect;
+}
+
+function effectForClass(part: LocalCommandPart, input: LocalCommandEffectInput): LocalCommandEffect {
   const mandateText = input.mandateText ?? '';
   if (cwdEscapes(input.cwd)) {
     if (part.commandClass === 'read_only') return 'uncertain';
