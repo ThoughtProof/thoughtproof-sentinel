@@ -12,8 +12,10 @@
  * `ionice`) are closed in v1: UNCERTAIN, not the inner command. So are
  * `eval`, bare `env`, `source`, `.`, and a quoted or escaped command
  * name. A word that still contains an expansion is unbound: the inner
- * command's class is not the value of that expansion. A hard BLOCK on
- * any stage still wins. The body
+ * command's class is not the value of that expansion. A trailing `&`
+ * backgrounds a statement (`&&` and `>&` do not). `{...}`, `(...)`,
+ * `coproc`, `function`, `alias`, and `name()` are closed in v1. A hard
+ * BLOCK on any stage still wins. The body
  * of a script (`./run.sh`, a Makefile target, `npm test` via package.json)
  * is not visible either. `read_only` means "no direct write was
  * classified". It does not mean the command is safe.
@@ -193,6 +195,7 @@ const KNOWN_COMMANDS = new Set([
   'unbuffer',
   'source',
   '.',
+  'coproc',
   'xargs',
   'true',
   'false',
@@ -224,6 +227,7 @@ const CLOSED_WRAPPERS = new Set([
   'flock',
   'watch',
   'unbuffer',
+  'coproc',
 ]);
 const SHELLS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh', 'fish']);
 const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'ksh', 'python', 'python3', 'perl', 'ruby', 'node', 'php']);
@@ -316,6 +320,10 @@ interface Stage {
 
 interface Statement {
   stages: Stage[];
+  /** Statement-ending `&`. Not `&&` and not a redirection. */
+  background: boolean;
+  /** `{...}`, `(...)`, `function`, `alias`, or `name()`. Inner commands stay visible. */
+  opaque: boolean;
 }
 
 export type LocalCommandEffect = 'open' | 'block' | 'uncertain';
@@ -359,7 +367,7 @@ function looksLikeShellHead(text: string): boolean {
   return /^\$\(/.test(text) || text.startsWith('`') || text.startsWith('<(') || text.startsWith('>(');
 }
 
-function firstCommandToken(line: string): string {
+function rawCommandToken(line: string): string {
   let rest = line.trim();
   let guard = 0;
   while (guard++ < 8) {
@@ -369,8 +377,13 @@ function firstCommandToken(line: string): string {
   }
   if (looksLikeShellHead(rest)) return rest;
   const m = /^([^\s|;&<>]+)/.exec(rest);
-  if (!m) return '';
-  return commandSpell(m[1] ?? '');
+  return m?.[1] ?? '';
+}
+
+function firstCommandToken(line: string): string {
+  const raw = rawCommandToken(line);
+  if (looksLikeShellHead(raw)) return raw;
+  return commandSpell(raw);
 }
 
 function bareLooksLikeCommand(text: string): boolean {
@@ -384,11 +397,56 @@ function bareLooksLikeCommand(text: string): boolean {
   // a command does not start with one.
   const first = lines[0] ?? '';
   if (/^(?:&&|\|\||[;|&])/.test(first)) return false;
-  const head = firstCommandToken(first);
-  // `$(...)`, backticks, process substitution, and a `$` inside the command
-  // word are command forms. Their value stays unbound.
-  if (looksLikeShellHead(head) || /[\$`]/.test(head)) return true;
+  const raw = rawCommandToken(first);
+  const head = commandSpell(raw);
+  // Check the raw token. commandSpell's basename treats `\` as a path
+  // separator, which would hide `gi\t` and `git$'\x20'`.
+  if (looksLikeShellHead(raw) || /[\$`\\]/.test(raw) || raw.includes("$'") || raw.includes('$"')) {
+    return true;
+  }
+  if (looksLikeClosedShell(first)) return true;
   return KNOWN_COMMANDS.has(head) || looksLikeVariableCommand(first);
+}
+
+/** Grouping, background `&`, function, alias, or coproc. Not ordinary prose. */
+function looksLikeClosedShell(line: string): boolean {
+  const t = line.trim();
+  if (/^[{(]/.test(t)) return true;
+  if (/^function\s+[A-Za-z_][\w]*/.test(t)) return true;
+  if (/^alias\s+\S+=/.test(t)) return true;
+  if (/^coproc\b/.test(t)) return true;
+  if (/^[A-Za-z_][\w]*\(\)/.test(t)) return true;
+  return hasStatementAmpersand(t);
+}
+
+/** A `&` that ends a statement. Skips `&&`, `|&`, `>&`, `&>`, and quotes. */
+function hasStatementAmpersand(input: string): boolean {
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < input.length; i += 1) {
+    const c = input[i] ?? '';
+    if (quote) {
+      if (c === '\\' && quote === '"') {
+        i += 1;
+        continue;
+      }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '\\') {
+      i += 1;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      continue;
+    }
+    if (c !== '&') continue;
+    const prev = input[i - 1] ?? '';
+    const next = input[i + 1] ?? '';
+    if (prev === '&' || next === '&' || prev === '>' || next === '>' || prev === '|') continue;
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -482,6 +540,8 @@ function scanShell(input: string): ScanOk | ScanFail {
   let words: Word[] = [];
   let redirects: Redirect[] = [];
   let stageStart = 0;
+  let statementBackground = false;
+  let statementOpaque = false;
   const n = input.length;
   let i = 0;
 
@@ -498,8 +558,12 @@ function scanShell(input: string): ScanOk | ScanFail {
 
   const flushStatement = (end: number): void => {
     flushStage(end);
-    if (stages.length > 0) statements.push({ stages });
+    if (stages.length > 0) {
+      statements.push({ stages, background: statementBackground, opaque: statementOpaque });
+    }
     stages = [];
+    statementBackground = false;
+    statementOpaque = false;
     stageStart = end;
   };
 
@@ -543,7 +607,15 @@ function scanShell(input: string): ScanOk | ScanFail {
       stageStart = i;
       continue;
     }
-    if (c === '|' || c === ';' || c === '&') {
+    if (c === '&') {
+      // Statement-ending background. `&&` and redirections were handled above.
+      statementBackground = true;
+      flushStatement(i);
+      i += 1;
+      stageStart = i;
+      continue;
+    }
+    if (c === '|' || c === ';') {
       if (c === '|') flushStage(i);
       else flushStatement(i);
       i += 1;
@@ -579,7 +651,12 @@ function scanShell(input: string): ScanOk | ScanFail {
     const word = readWord(input, i);
     if (!word.ok) return fail();
     if (word.end === i) return fail();
-    words.push(word.word);
+    const token = word.word.text;
+    const grouping = !word.word.quoted && (token === '{' || token === '}' || token === '(' || token === ')');
+    const functionLike =
+      token === 'function' || token === 'alias' || /^[A-Za-z_][\w]*\(\)$/.test(token);
+    if (grouping || functionLike) statementOpaque = true;
+    if (!grouping) words.push(word.word);
     i = word.end;
   }
   flushStatement(n);
@@ -749,6 +826,25 @@ function readWord(
       substitutions.push(inner.body);
       tainted = true;
       i = inner.end;
+      continue;
+    }
+    if (c === '$' && (input[i + 1] === "'" || input[i + 1] === '"')) {
+      // ANSI-C $'...' and localized $"..." are not the bare command name.
+      const q = input[i + 1] ?? '';
+      quoted = true;
+      tainted = true;
+      i += 2;
+      while (i < n && input[i] !== q) {
+        if (input[i] === '\\' && i + 1 < n) {
+          text += input[i + 1];
+          i += 2;
+          continue;
+        }
+        text += input[i];
+        i += 1;
+      }
+      if (input[i] !== q) return { ok: false };
+      i += 1;
       continue;
     }
     if (c === '$') {
@@ -1629,6 +1725,25 @@ function classifyStatement(statement: Statement): ArgClass {
       return pieces;
     });
     merged = { ...merged, segments: perStage };
+  }
+  if (statement.opaque) {
+    for (const stage of statement.stages) {
+      for (let index = 1; index < stage.words.length; index += 1) {
+        const word = stage.words[index];
+        if (!word || word.quoted || word.substitutions.length > 0) continue;
+        if (!KNOWN_COMMANDS.has(word.text)) continue;
+        merged = mergeArg(
+          merged,
+          classifyArgv(
+            stage.words.slice(index).map((item) => item.text),
+            stage.words.slice(index),
+          ),
+        );
+      }
+    }
+  }
+  if (statement.background || statement.opaque) {
+    merged = { ...merged, closedForm: true };
   }
   return merged;
 }
