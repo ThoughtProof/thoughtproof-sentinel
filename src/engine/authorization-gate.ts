@@ -76,6 +76,18 @@ export interface AuthorizationMandate {
     recipient?: string;
     /** Did the principal EXPLICITLY grant an unlimited approval? Default false. */
     allowUnlimited?: boolean;
+    /**
+     * Workspace root for a local_command write (`rm -fr ./build`).
+     * Absent is not a grant. The parser does not touch the filesystem.
+     */
+    workspace?: string;
+    /** Normal git push / publish. Default false. Force-push still blocks. */
+    allowRemoteWrite?: boolean;
+    /**
+     * Network execute (`curl | sh`, `npx`). Default false.
+     * True downgrades that class from BLOCK to UNCERTAIN. It does not ALLOW.
+     */
+    allowNetwork?: boolean;
   };
   /** What the agent proposes to do. */
   action?: {
@@ -95,6 +107,10 @@ export interface AuthorizationMandate {
     /** Approval allowance. Accepts a number, or a string such as
      * "MAX_UINT256" / "unlimited" / a decimal/hex numeric string. */
     allowance?: string | number;
+    /** Shell text. Classified with the action prose; the strictest class wins. */
+    command?: string;
+    /** Working directory the caller claims. `..`, `~`, and `$` escape the scope. */
+    cwd?: string;
   };
 }
 

@@ -538,4 +538,33 @@ describe('validateVerifyRequest', () => {
       }
     });
   });
+
+  it('accepts local_command scope fields and rejects a bad workspace type', () => {
+    const ok = validateVerifyRequest({
+      ...validBody,
+      mode: 'action_authorization',
+      mandate: {
+        kind: 'local_command',
+        granted: { workspace: '/repo/algo-goals', allowRemoteWrite: false, allowNetwork: false },
+        action: { kind: 'local_command', command: 'git status --short', cwd: '/repo/algo-goals' },
+      },
+    });
+    expect(ok.valid).toBe(true);
+    if (ok.valid) {
+      expect(ok.data.mandate).toEqual({
+        kind: 'local_command',
+        granted: { workspace: '/repo/algo-goals', allowRemoteWrite: false, allowNetwork: false },
+        action: { kind: 'local_command', command: 'git status --short', cwd: '/repo/algo-goals' },
+      });
+    }
+    const bad = validateVerifyRequest({
+      ...validBody,
+      mode: 'action_authorization',
+      mandate: { granted: { workspace: 12 } },
+    });
+    expect(bad.valid).toBe(false);
+    if (!bad.valid) {
+      expect(bad.errors.some((e) => e.field === 'mandate.granted.workspace')).toBe(true);
+    }
+  });
 });

@@ -82,15 +82,20 @@ function expectBlock(result: MandateNormalizeResult, reason: string): void {
 }
 
 describe('mandate normalization', () => {
-  it('pins the concrete kinds as every action kind except unknown', () => {
+  it('pins action kinds; local_command is not a signed concrete action', () => {
     expect(MANDATE_NORMALIZATION_VERSION).toBe('sentinel.mandate.normalized.v1');
     expect(ACTION_KINDS).toEqual([
       'informational',
       'value_transfer',
       'permission',
       'deploy_ship',
+      'local_command',
       'unknown',
     ]);
+    expectBlock(
+      normalizeMandate({ action: { kind: 'local_command', command: 'git status' } }),
+      'action_not_concrete',
+    );
   });
 
   it('rejects an empty object and a mandate with no action', () => {

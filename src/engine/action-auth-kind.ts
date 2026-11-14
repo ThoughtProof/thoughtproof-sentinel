@@ -126,10 +126,26 @@
  * `granted.maxAmount` / `action.amount` / recipient / allowance are
  * preferred for the financial axes when present (data, not a second
  * regex). No pair-pass ALLOW promotion.
+ *
+ * `local_command` is a separate axis for shell and coding-agent commands.
+ * The parser in `local-command.ts` is the prose confirmation. Payment,
+ * permission, and ship signals still win. A caller-declared
+ * `local_command` does not widen: the parser must see a command form.
+ * Hard classes block before the model. `read_only` only opens the kind
+ * gate; it does not mean the command is safe.
  */
 
 import type { AuthorizationMandate } from './authorization-gate.js';
 import { allowanceLooksUnlimited } from './authorization-gate.js';
+import {
+  classifyCommandPayload,
+  classifyLocalCommand,
+  combineLocalCommandAnalysis,
+  localCommandEffect,
+  mandateAuthorizesLocalRepo,
+  type CommandClass,
+  type LocalCommandEffect,
+} from './local-command.js';
 import {
   extractLabeledSection,
   MCP_EVIDENCE_ACTION_LABEL,
@@ -147,6 +163,7 @@ export const ACTION_KINDS = [
   'value_transfer',
   'permission',
   'deploy_ship',
+  'local_command',
   'unknown',
 ] as const;
 
@@ -218,6 +235,25 @@ export interface ActionAuthClassification {
    * PASS hint on Amount / Recipient — never a public-ALLOW (#75).
    */
   deploy_ship_pair_match: boolean;
+  /**
+   * Shell class when the action payload is a command form. Null for prose.
+   * `network_fetch` is a download that does not execute (UNCERTAIN).
+   */
+  command_class: CommandClass | null;
+  /**
+   * local_command × matching mandate and the class gate is open.
+   * Hint only — the panel still decides ALLOW. Never set for a hard class.
+   */
+  local_command_pair_match: boolean;
+  /** True when the class gate is open (scope and mandate class agree). */
+  command_scope_ok: boolean;
+  /**
+   * `open` — no deterministic class block. `block` / `uncertain` are
+   * decided before the cascade. Null when the text is not a command.
+   */
+  local_command_effect: LocalCommandEffect | null;
+  /** Force-push, force-with-lease, or remote branch delete. */
+  command_force_remote: boolean;
   /**
    * Sentinel-authored axis hint for the verification question.
    * Null when we have nothing confident to tell the cascade.
@@ -1769,6 +1805,10 @@ export interface ActionAuthKindPairingContext {
   proseMandateKind?: ActionKind | null;
   actionKindSource?: ActionKindSource | null;
   mandateKindSource?: ActionKindSource | null;
+  /** Remote-write × deploy_ship pairing. Omitted → that pair stays closed. */
+  commandClass?: CommandClass | null;
+  /** Force-push / remote delete. Omitted is not an explicit force grant. */
+  forceRemote?: boolean | null;
 }
 
 export const UNCLASSIFIED_ABSTENTION_REASON =
@@ -1860,6 +1900,18 @@ export function callerDeclaredKindsDoNotWiden(
     return false;
   }
 
+  // local_command has no structured-field confirmation. Caller and parser
+  // (or local-repo prose) must agree. A payment mandate cannot be relabeled
+  // into a command allow, and a command cannot be relabeled into a payment.
+  const localCommandAxis =
+    actionKind === 'local_command' ||
+    mandateKind === 'local_command' ||
+    compareAction === 'local_command' ||
+    compareMandate === 'local_command';
+  if (localCommandAxis) {
+    return false;
+  }
+
   const actionCompatible =
     !actionFromCaller || proseAction === actionKind || proseAction === 'unknown';
   const mandateCompatible =
@@ -1915,6 +1967,18 @@ export function mandatePositivelyMatchesAction(
       } else {
         pairFits = false;
       }
+    }
+  } else if (actionKind === 'local_command') {
+    if (mandateKind === 'local_command') {
+      pairFits = true;
+    } else if (
+      mandateKind === 'deploy_ship' &&
+      context?.commandClass === 'remote_write' &&
+      context.forceRemote !== true
+    ) {
+      // A normal push/publish can sit on a deploy_ship mandate. Force-push
+      // and a merely local mandate do not.
+      pairFits = true;
     }
   }
   if (!pairFits) return false;
@@ -2035,6 +2099,15 @@ export function classifyActionAuthKind(
     ? `${cleanClaim}\n${cleanEvidence}`
     : sections.mandate;
 
+  const textCommand = classifyLocalCommand(actionText);
+  const structuredCommand =
+    typeof mandate?.action?.command === 'string' ? mandate.action.command.trim() : '';
+  // An explicit command field is always part of the payload. Unrecognized
+  // text is unparseable; it must not disappear behind a benign prose command.
+  const structuredCommandAnalysis = structuredCommand
+    ? classifyCommandPayload(structuredCommand)
+    : null;
+
   const mixedTransfer =
     hasEthAddress(actionText) || hasTransferVerbWithNumber(actionText);
 
@@ -2054,6 +2127,10 @@ export function classifyActionAuthKind(
   if (textValue && prose_action_kind === 'informational') prose_action_kind = 'value_transfer';
   if (textPermission && prose_action_kind === 'unknown') prose_action_kind = 'permission';
   if (textValue && prose_action_kind === 'unknown') prose_action_kind = 'value_transfer';
+  // Command form only fills unknown. Payment / permission / ship already won.
+  if (prose_action_kind === 'unknown' && textCommand.recognized) {
+    prose_action_kind = 'local_command';
+  }
 
   let prose_mandate_kind = classifyBlob(mandateText);
   const mandateHasPositiveShip = hasPositiveShipInstruction(mandateText);
@@ -2070,14 +2147,29 @@ export function classifyActionAuthKind(
   } else if (prose_mandate_kind === 'unknown' && DEPLOY_HEAD_RE.test(mandateText.trim())) {
     if (mandateHasPositiveShip) prose_mandate_kind = 'deploy_ship';
   }
+  if (prose_mandate_kind === 'unknown' && mandateAuthorizesLocalRepo(mandateText)) {
+    prose_mandate_kind = 'local_command';
+  }
 
   const callerActionKind = parseCallerActionKind(mandate?.action?.kind);
   const callerMandateKind = parseCallerActionKind(mandate?.kind);
-  const action_kind_source: ActionKindSource = callerActionKind ? 'caller' : 'prose';
-  const mandate_kind_source: ActionKindSource = callerMandateKind ? 'caller' : 'prose';
+  let action_kind_source: ActionKindSource = callerActionKind ? 'caller' : 'prose';
+  let mandate_kind_source: ActionKindSource = callerMandateKind ? 'caller' : 'prose';
 
   let action_kind = callerActionKind ?? prose_action_kind;
   let mandate_kind = callerMandateKind ?? prose_mandate_kind;
+
+  // A declared local_command must not hide a payment, permission, or ship.
+  const proseBeatsLocal = (kind: ActionKind): boolean =>
+    kind === 'value_transfer' || kind === 'permission' || kind === 'deploy_ship';
+  if (callerActionKind === 'local_command' && proseBeatsLocal(prose_action_kind)) {
+    action_kind = prose_action_kind;
+    action_kind_source = 'prose';
+  }
+  if (callerMandateKind === 'local_command' && proseBeatsLocal(prose_mandate_kind)) {
+    mandate_kind = prose_mandate_kind;
+    mandate_kind_source = 'prose';
+  }
 
   // Structured spend / approval still upgrades an undeclared action (existing
   // undeclared path). Does not rewrite caller-declared kinds or prose kinds.
@@ -2118,6 +2210,25 @@ export function classifyActionAuthKind(
       if (!callerMandateKind) mandate_kind = 'unknown';
     }
   }
+
+  const commandAnalysis = textCommand.recognized
+    ? structuredCommandAnalysis
+      ? combineLocalCommandAnalysis(textCommand, structuredCommandAnalysis)
+      : textCommand
+    : structuredCommandAnalysis;
+  const command_class = commandAnalysis?.commandClass ?? null;
+  const command_force_remote = commandAnalysis?.forceRemote === true;
+  const local_command_effect = commandAnalysis
+    ? localCommandEffect({
+        analysis: commandAnalysis,
+        mandateText,
+        mandateKind: mandate_kind,
+        workspace: mandate?.granted?.workspace,
+        allowRemoteWrite: mandate?.granted?.allowRemoteWrite === true,
+        allowNetwork: mandate?.granted?.allowNetwork === true,
+        cwd: mandate?.action?.cwd,
+      })
+    : null;
 
   const named_recipient_in_mandate = namedRecipientInMandate(mandateText, actionText);
 
@@ -2186,6 +2297,8 @@ export function classifyActionAuthKind(
     proseMandateKind: prose_mandate_kind,
     actionKindSource: action_kind_source,
     mandateKindSource: mandate_kind_source,
+    commandClass: command_class,
+    forceRemote: command_force_remote,
   };
   // Caller matching pair that prose does not confirm — fail-closed widen.
   const callerWidenBlocked =
@@ -2200,7 +2313,16 @@ export function classifyActionAuthKind(
   const agendaOperativeConflict =
     textHasAgendaOperativeSignal(actionText) || textHasAgendaOperativeSignal(mandateText);
 
-  const objective_mismatch = namedKindMismatch || callerWidenBlocked || agendaOperativeConflict;
+  // Hard classes keep their own block reason (effect === 'block'), so they
+  // are not also an objective_mismatch. A matching local_command pair whose
+  // class gate is open is not a mismatch. Everything else on this axis is.
+  const localKindMismatch =
+    action_kind === 'local_command' &&
+    local_command_effect !== 'block' &&
+    !mandatePositivelyMatchesAction(action_kind, mandate_kind, allowlistContext);
+
+  const objective_mismatch =
+    namedKindMismatch || callerWidenBlocked || agendaOperativeConflict || localKindMismatch;
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -2226,6 +2348,12 @@ export function classifyActionAuthKind(
     deployShipActionHasNoPaymentTarget(actionText) &&
     deployShipIdentifiersBound(mandateText, actionText);
   const deployShipPassHint = deploy_ship_pair_match;
+  const command_scope_ok = local_command_effect === 'open';
+  const local_command_pair_match =
+    action_kind === 'local_command' &&
+    local_command_effect === 'open' &&
+    !objective_mismatch &&
+    mandatePositivelyMatchesAction(action_kind, mandate_kind, allowlistContext);
 
   const silent =
     ((mixedTransfer || action_kind === 'value_transfer') &&
@@ -2246,7 +2374,9 @@ export function classifyActionAuthKind(
       valueTransferVsNonMatchingMandate ||
       permissionVsNonMatchingMandate ||
       financialPassHint ||
-      deployShipPassHint)
+      deployShipPassHint ||
+      local_command_pair_match ||
+      (action_kind === 'local_command' && objective_mismatch))
   ) {
     const parts = [
       `action_kind=${action_kind}`,
@@ -2279,6 +2409,13 @@ export function classifyActionAuthKind(
     if (deployShipPassHint) {
       parts.push('deploy_ship_pair_match=true');
     }
+    if (command_class) {
+      parts.push(`command_class=${command_class}`);
+      parts.push(`command_scope_ok=${command_scope_ok}`);
+    }
+    if (local_command_pair_match) {
+      parts.push('local_command_pair_match=true');
+    }
     axisHint = `${SENTINEL_AXIS_HINT_LABEL} ${parts.join('; ')}`;
   }
 
@@ -2300,6 +2437,11 @@ export function classifyActionAuthKind(
     financial_pair_match,
     amount_within_grant,
     deploy_ship_pair_match,
+    command_class,
+    local_command_pair_match,
+    command_scope_ok,
+    local_command_effect,
+    command_force_remote,
     axisHint,
   };
 }

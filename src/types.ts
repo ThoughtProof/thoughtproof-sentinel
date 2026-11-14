@@ -431,6 +431,14 @@ export interface SentinelVerifyResponse {
       unknown_mandate?: boolean;
       /** Both kinds unknown — UNCERTAIN abstention, not named mismatch. */
       unclassified_abstention?: boolean;
+      /** Shell class when the action was a command form. */
+      command_class?: string;
+      /**
+       * Deterministic shell gate. `open` means the kind gate is not a
+       * class block (the panel still decides ALLOW). `block` and
+       * `uncertain` are decided before the model and never become ALLOW.
+       */
+      local_command_effect?: 'open' | 'block' | 'uncertain';
       /**
        * `deterministic` = allowlist / abstention / mismatch gate decided
        * BLOCK|UNCERTAIN (not cascade confidence). `cascade` = promotion

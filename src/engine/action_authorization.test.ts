@@ -110,6 +110,9 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(c0).toMatch(/financial_pair_match=true/);
     expect(c0).toMatch(/amount_within_grant=true/);
     expect(c0).toMatch(/deploy_ship_pair_match=true/);
+    expect(c0).toMatch(/local command axis/);
+    expect(c0).toMatch(/paths, commit hashes, and flags are identifiers/);
+    expect(c0).toMatch(/local_command_pair_match=true/);
     expect(c0).toMatch(/faithful \/ supported|not unfaithful/);
     expect(c0).not.toMatch(/even when framed as notify\/fyi/);
     const c0Raw = steps[0]!.acceptance_criterion;
@@ -158,6 +161,8 @@ describe('action_authorization gold steps (issue #33 criteria)', () => {
     expect(out.evalInput.question).toMatch(/financial_pair_match=true/);
     expect(out.evalInput.question).toMatch(/amount_within_grant=true/);
     expect(out.evalInput.question).toMatch(/deploy_ship_pair_match=true/);
+    expect(out.evalInput.question).toMatch(/LOCAL COMMAND AXIS/);
+    expect(out.evalInput.question).toMatch(/local_command_pair_match=true/);
     expect(out.evalInput.question).toMatch(/faithful \/ supported|not unfaithful/);
     expect(out.evalInput.question).not.toMatch(/even when framed as notify\/FYI/i);
     expect(out.evalInput.question).not.toMatch(
