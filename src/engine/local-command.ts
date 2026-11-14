@@ -9,8 +9,11 @@
  * `NAME=value`, `env` with an option or assignment, `sh -c` / `bash -c`
  * (including `-lc`, `-ec`, and `--norc -c`), and a wrapper (`command`,
  * `builtin`, `exec`, `nohup`, `nice`, `time`, `timeout`, `stdbuf`,
- * `ionice`) are closed in v1: UNCERTAIN, not the inner command. A hard
- * BLOCK on any stage still wins. The body
+ * `ionice`) are closed in v1: UNCERTAIN, not the inner command. So are
+ * `eval`, bare `env`, `source`, `.`, and a quoted or escaped command
+ * name. A word that still contains an expansion is unbound: the inner
+ * command's class is not the value of that expansion. A hard BLOCK on
+ * any stage still wins. The body
  * of a script (`./run.sh`, a Makefile target, `npm test` via package.json)
  * is not visible either. `read_only` means "no direct write was
  * classified". It does not mean the command is safe.
@@ -182,6 +185,14 @@ const KNOWN_COMMANDS = new Set([
   'timeout',
   'stdbuf',
   'ionice',
+  'setsid',
+  'chrt',
+  'taskset',
+  'flock',
+  'watch',
+  'unbuffer',
+  'source',
+  '.',
   'xargs',
   'true',
   'false',
@@ -207,6 +218,12 @@ const CLOSED_WRAPPERS = new Set([
   'timeout',
   'stdbuf',
   'ionice',
+  'setsid',
+  'chrt',
+  'taskset',
+  'flock',
+  'watch',
+  'unbuffer',
 ]);
 const SHELLS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh', 'fish']);
 const INTERPRETERS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish', 'ksh', 'python', 'python3', 'perl', 'ruby', 'node', 'php']);
@@ -281,6 +298,8 @@ interface Word {
   tainted: boolean;
   /** Unquoted glob, `~`, or other shell expansion. A quoted literal is not expandable. */
   expandable: boolean;
+  /** Quotes or a backslash formed this word. A quoted command name is not the bare name. */
+  quoted?: boolean;
 }
 
 interface Redirect {
@@ -331,17 +350,27 @@ function isUnverifiedProgramPath(token: string): boolean {
   );
 }
 
+function commandSpell(token: string): string {
+  const stripped = token.trim().replace(/^\\/, '').replace(/['"]/g, '');
+  return basenameCommand(stripped);
+}
+
+function looksLikeShellHead(text: string): boolean {
+  return /^\$\(/.test(text) || text.startsWith('`') || text.startsWith('<(') || text.startsWith('>(');
+}
+
 function firstCommandToken(line: string): string {
   let rest = line.trim();
   let guard = 0;
   while (guard++ < 8) {
-    const env = /^[A-Za-z_][A-Za-z0-9_]*=\S*\s+/.exec(rest);
-    if (!env) break;
-    rest = rest.slice(env[0].length);
+    const env = /^[A-Za-z_][A-Za-z0-9_]*=\S*\s*/.exec(rest);
+    if (!env || !env[0].includes('=')) break;
+    rest = rest.slice(env[0].length).replace(/^[;\s]+/, '');
   }
+  if (looksLikeShellHead(rest)) return rest;
   const m = /^([^\s|;&<>]+)/.exec(rest);
   if (!m) return '';
-  return basenameCommand(m[1] ?? '');
+  return commandSpell(m[1] ?? '');
 }
 
 function bareLooksLikeCommand(text: string): boolean {
@@ -355,7 +384,11 @@ function bareLooksLikeCommand(text: string): boolean {
   // a command does not start with one.
   const first = lines[0] ?? '';
   if (/^(?:&&|\|\||[;|&])/.test(first)) return false;
-  return KNOWN_COMMANDS.has(firstCommandToken(first)) || looksLikeVariableCommand(first);
+  const head = firstCommandToken(first);
+  // `$(...)`, backticks, process substitution, and a `$` inside the command
+  // word are command forms. Their value stays unbound.
+  if (looksLikeShellHead(head) || /[\$`]/.test(head)) return true;
+  return KNOWN_COMMANDS.has(head) || looksLikeVariableCommand(first);
 }
 
 /**
@@ -579,6 +612,8 @@ function matchRedirect(
   if (digits && !rest.startsWith('>') && !rest.startsWith('<')) return null;
   for (const alt of alts) {
     if (rest.startsWith(alt.op)) {
+      // `<(...)` and `>(...)` are process substitutions, not redirects.
+      if ((alt.op === '<' || alt.op === '>') && rest[alt.op.length] === '(') continue;
       if (!digits && (alt.op === '<' || alt.op === '>' || alt.op.startsWith('>' ) || alt.op.startsWith('<'))) {
         return { end: j + alt.op.length, op: alt.op, heredoc: alt.heredoc, needsTarget: alt.needsTarget };
       }
@@ -611,7 +646,18 @@ function readWord(
   const substitutions: string[] = [];
   let tainted = false;
   let expandable = false;
+  let quoted = false;
   let quote: "'" | '"' | null = null;
+
+  if (input.startsWith('<(', start) || input.startsWith('>(', start)) {
+    const exp = readExpansion(`$${input.slice(start + 1)}`, 0);
+    if (!exp.ok || exp.kind !== 'subst') return { ok: false };
+    return {
+      ok: true,
+      word: { text: '', substitutions: [exp.body], tainted: true, expandable: false, quoted: false },
+      end: start + exp.end,
+    };
+  }
 
   const stop = (idx: number): boolean => {
     if (quote) return false;
@@ -623,7 +669,7 @@ function readWord(
   };
 
   if (start >= n || stop(start)) {
-    return { ok: true, word: { text: '', substitutions, tainted, expandable }, end: start };
+    return { ok: true, word: { text: '', substitutions, tainted, expandable, quoted }, end: start };
   }
 
   while (i < n) {
@@ -645,6 +691,7 @@ function readWord(
         i += 2;
         continue;
       }
+      quoted = true;
       if (quote === '"' && !/["\\$`]/.test(next)) {
         text += c;
         i += 1;
@@ -685,11 +732,13 @@ function readWord(
     // Globs expand unquoted. `~` expands only at the start of a word (`HEAD~3` does not).
     if (/[*?[\]{}]/.test(c) || (c === '~' && text.length === 0)) expandable = true;
     if (c === "'") {
+      quoted = true;
       quote = "'";
       i += 1;
       continue;
     }
     if (c === '"') {
+      quoted = true;
       quote = '"';
       i += 1;
       continue;
@@ -715,7 +764,7 @@ function readWord(
     i += 1;
   }
   if (quote) return { ok: false };
-  return { ok: true, word: { text, substitutions, tainted, expandable }, end: i };
+  return { ok: true, word: { text, substitutions, tainted, expandable, quoted }, end: i };
 }
 
 function readBacktick(
@@ -1166,15 +1215,18 @@ function classifyShellC(argv: string[], words: Word[]): ArgClass {
  * closed so the wrapper cannot open a gate.
  */
 function classifyWrapperInner(argv: string[], words: Word[]): ArgClass {
+  let pathAt = -1;
   for (let i = 1; i < argv.length; i += 1) {
     const token = argv[i] ?? '';
     if (!token || token.startsWith('-') || isEnvAssign(token)) continue;
     if (/^\d+(?:\.\d+)?$/.test(token)) continue;
     const base = basenameCommand(token);
-    if (CLOSED_WRAPPERS.has(base) || KNOWN_COMMANDS.has(base) || isUnverifiedProgramPath(token)) {
+    if (CLOSED_WRAPPERS.has(base) || KNOWN_COMMANDS.has(base)) {
       return classifyArgv(argv.slice(i), words.slice(i));
     }
+    if (pathAt < 0 && isUnverifiedProgramPath(token)) pathAt = i;
   }
+  if (pathAt >= 0) return classifyArgv(argv.slice(pathAt), words.slice(pathAt));
   return argResult('unparseable');
 }
 
@@ -1318,8 +1370,8 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
   if (!raw0 && word0 && word0.substitutions.length > 0) {
     const subs = word0.substitutions.map((s) => classifyCommandText(s));
     const fetched = subs.some((c) => c.fetcher || c.commandClass === 'network_fetch' || c.commandClass === 'network_exec');
-    if (fetched) return close(argResult('network_exec', { obfuscated: true }));
-    return close(subs.reduce(mergeArg, argResult('unparseable')));
+    if (fetched) return close(argResult('network_exec', { obfuscated: true, closedForm: true }));
+    return close({ ...subs.reduce(mergeArg, argResult('unparseable')), closedForm: true });
   }
   if (/^\$/.test(raw0) || (word0?.tainted && raw0.startsWith('$'))) {
     return close(argResult('unparseable'));
@@ -1365,10 +1417,9 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
     if (prefix.end >= slicedArgv.length) {
       // `env` and `env -i` with no utility still print the environment.
       result = argResult('privilege');
-    } else if (prefix.closed) {
-      result = { ...classifyArgv(slicedArgv.slice(prefix.end), slicedWords.slice(prefix.end)), closedForm: true };
     } else {
-      result = classifyArgv(slicedArgv.slice(prefix.end), slicedWords.slice(prefix.end));
+      // Bare `env git …` is closed in v1, same as `env` with options or assignments.
+      result = { ...classifyArgv(slicedArgv.slice(prefix.end), slicedWords.slice(prefix.end)), closedForm: true };
     }
   } else if (cmd === 'dd' || cmd === 'mkfs' || cmd.startsWith('mkfs.') || cmd === 'truncate' || cmd === 'shred') {
     result = argResult('destructive_local');
@@ -1412,9 +1463,9 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
           : slicedWords;
       const scriptArgv = cmd === 'eval' ? ['sh', '-c', ...slicedArgv.slice(1)] : slicedArgv;
       result = classifyShellC(scriptArgv, scriptWords);
-      // v1 does not treat the script body as an allowed command. A hard
-      // class inside the body is kept so BLOCK still wins.
-      if (shellExec) result = { ...result, closedForm: true };
+      // v1 does not treat an eval or shell -c body as an allowed command.
+      // A hard class inside the body is kept so BLOCK still wins.
+      if (cmd === 'eval' || shellExec) result = { ...result, closedForm: true };
     } else result = argResult('unparseable', { interpreterSink: true });
   } else if (cmd === 'base64') {
     const decode = slicedArgv.some((a) => a === '-d' || a === '-D' || a === '--decode');
@@ -1435,6 +1486,8 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
     result = argResult('privilege');
   } else if (READ_BINARIES.has(cmd)) {
     result = classifyReadBinary(cmd, slicedArgv);
+  } else if (cmd === 'source' || cmd === '.') {
+    result = argResult('unparseable', { closedForm: true });
   } else if (cmd === 'xargs' || cmd === 'make') {
     // xargs runs another program. That program is not classified by name.
     result = argResult('unparseable');
@@ -1463,6 +1516,12 @@ function classifyArgv(argv: string[], words: Word[]): ArgClass {
       result = mergeArg(result, nestedCommand(sub));
     }
   }
+  // A substitution or other expansion is not the expanded word. `git$(echo
+  // evil)` is not `git`, and a safe inner command does not release that value.
+  // A quoted or escaped command name is not the bare name either.
+  if (slicedWords.some((w) => w.substitutions.length > 0 || w.tainted) || word0?.quoted === true) {
+    result = { ...result, closedForm: true };
+  }
   return close(result);
 }
 
@@ -1482,6 +1541,9 @@ function applyRedirects(result: ArgClass, redirects: Redirect[]): ArgClass {
     if (targetWord) {
       for (const sub of targetWord.substitutions) {
         next = mergeArg(next, nestedCommand(sub));
+      }
+      if (targetWord.substitutions.length > 0 || targetWord.tainted) {
+        next = { ...next, closedForm: true };
       }
     }
     const target = targetWord?.text ?? '';
