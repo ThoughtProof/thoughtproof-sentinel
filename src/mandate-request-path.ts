@@ -30,11 +30,16 @@ import {
   type MandateReplayCommand,
 } from './mandate-replay-store.js';
 import {
+  isPrincipalEnvironment,
   verdictWithPrincipalCheck,
   verifyPrincipalMandate,
   type PrincipalMandateResult,
   type PrincipalManifestStore,
 } from './principal-key-manifest.js';
+import {
+  createProductiveManifestStore,
+  readProductiveAccountPolicy,
+} from './principal-manifest-store.js';
 
 export const MANDATE_PROOF_ENFORCE_ENV = 'SENTINEL_MANDATE_PROOF_ENFORCE';
 
@@ -47,8 +52,11 @@ export type MandateAccountPolicy = 'protected' | 'legacy' | 'unreadable';
 
 export interface MandateRequestDeps {
   nowSeconds: () => number;
-  /** Missing, thrown, or any other value is unreadable. Never an implicit legacy. */
-  readPolicy: (accountId: string) => MandateAccountPolicy;
+  /**
+   * Missing, thrown, rejected, or any other value is unreadable.
+   * Never an implicit legacy. A promise is awaited.
+   */
+  readPolicy: (accountId: string) => MandateAccountPolicy | Promise<MandateAccountPolicy>;
   manifestStore: PrincipalManifestStore | null;
   /**
    * Omit to use the dedicated replay client.
@@ -72,10 +80,12 @@ export function defaultMandateRequestDeps(
   env: Record<string, unknown> = process.env,
 ): MandateRequestDeps {
   const target = env.SENTINEL_MANDATE_TARGET_ENVIRONMENT;
+  const environment = isPrincipalEnvironment(target) ? target : undefined;
+  const storeInput = { environment, env };
   return {
     nowSeconds: () => Math.floor(Date.now() / 1000),
-    readPolicy: () => 'unreadable',
-    manifestStore: null,
+    readPolicy: (accountId: string) => readProductiveAccountPolicy(accountId, storeInput),
+    manifestStore: createProductiveManifestStore(storeInput),
     targetEnvironment: typeof target === 'string' ? target : undefined,
     env,
   };
@@ -155,9 +165,9 @@ function block(requestId: string, reason: string): MandatePathDecision {
   };
 }
 
-function readPolicy(deps: MandateRequestDeps, accountId: string): MandateAccountPolicy {
+async function readPolicy(deps: MandateRequestDeps, accountId: string): Promise<MandateAccountPolicy> {
   try {
-    const status = deps.readPolicy(accountId);
+    const status = await deps.readPolicy(accountId);
     if (status === 'protected' || status === 'legacy') return status;
     return 'unreadable';
   } catch {
@@ -312,7 +322,7 @@ export async function evaluateMandateRequestPath(
     if (!account.ok) return account.decision;
 
     if (!proof.present) {
-      const policy = readPolicy(deps, account.accountId);
+      const policy = await readPolicy(deps, account.accountId);
       if (policy === 'legacy') return { action: 'continue' };
       if (policy === 'protected') return block(input.requestId, 'mandate_proof_required');
       return unavailable(input.requestId, 'POLICY_UNAVAILABLE');
@@ -322,7 +332,7 @@ export async function evaluateMandateRequestPath(
     if (checked.kind === 'block') return block(input.requestId, checked.reason);
     if (checked.kind === 'unavailable') return unavailable(input.requestId, checked.code);
 
-    const policy = readPolicy(deps, account.accountId);
+    const policy = await readPolicy(deps, account.accountId);
     if (policy !== 'legacy' && policy !== 'protected') {
       return unavailable(input.requestId, 'POLICY_UNAVAILABLE');
     }

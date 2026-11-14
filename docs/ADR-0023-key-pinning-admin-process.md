@@ -319,14 +319,14 @@ The audit entry is the status-and-counts object from the audit section. It does 
 
 An accepted rotate keeps the previous keys. A `retired` kid stays `retired`. A `revoked` kid stays `revoked`. The new key is a new `kid` and a new `x` with status `active`. Acceptance is `authorizesExecution: false`. It is not a verdict and it is not ALLOW.
 
-The manifest store adapter is still not chosen. Tests pass a fake store. No production store is wired.
+The manifest store adapter is the existing Upstash Redis client, with a separate key prefix from replay and from the rate limiter. `pinPrincipalKeyAsAdmin` compare-and-sets that store. It does not create an account-policy row. A missing or deleted policy row stays unreadable. Tests can pass a fake command. This draft does not run a pin against production. `SENTINEL_MANDATE_PROOF_ENFORCE` stays unset. Activation requires, separately proven, signer keypairs bound per account, migration, deployment mapping, and an explicitly authorized activation.
 
 ## Non-goals
 
 - No self-service pin, rotation, retirement, or revocation.
 - No automated registration and no agent-registered key.
 - No change to `registerPrincipalKey`. It stays locked. `pinPrincipalKeyAsAdmin` is a separate function. Shipping it does not permit a production pin, does not wire verification, and does not enable an account.
-- No wiring into `POST /sentinel/verify`, no enablement, and no suite run.
+- No enablement and no suite run. The request-path default store is the Redis manifest. Enforcement stays off unless `SENTINEL_MANDATE_PROOF_ENFORCE` is exactly `true`, and this document does not set that variable.
 - No use of the verify API key or `X-Sentinel-Agent-Id` as registration authority.
 - No caller-supplied principal manifest and no caller-supplied JWKS URL.
 - No private key in the store, the evidence record, the audit log, or this document.

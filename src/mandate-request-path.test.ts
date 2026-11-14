@@ -7,12 +7,14 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   MANDATE_PROOF_ENFORCE_ENV,
+  defaultMandateRequestDeps,
   evaluateMandateRequestPath,
   mandateProofEnforceEnabled,
   verdictAfterVerifiedMandate,
   type MandateRequestDeps,
   type MandateVerifiedContinuation,
 } from './mandate-request-path.js';
+import { readProductiveAccountPolicy } from './principal-manifest-store.js';
 import { normalizeMandate } from './mandate-normalize.js';
 import { MANDATE_VERIFICATION_UNAVAILABLE_MESSAGE } from './mandate-no-auth.js';
 import {
@@ -562,6 +564,101 @@ describe('evaluateMandateRequestPath', () => {
       expect(decision.body).not.toHaveProperty('verdict');
     }
     expect(replay.calls).toBe(0);
+  });
+
+  it('blocks a missing policy row, a deleted protected row, and a policy error', async () => {
+    const body = {
+      claim: 'FYI',
+      evidence: 'status',
+      mode: 'action_authorization',
+    };
+    const missingCommand = {
+      environment: 'production' as const,
+      env: {},
+      command: { async eval() { return 'missing'; } },
+    };
+    for (const accountId of ['acct_v3api', 'acct_grokbot', 'acct_nightly']) {
+      const decision = await evaluate(body, {
+        env: { SENTINEL_API_KEYS: `${API_KEY}:direct:agent:${accountId}` },
+        readPolicy: (id) => readProductiveAccountPolicy(id, missingCommand),
+      });
+      expect(decision.action).toBe('unavailable');
+      expect(decision.action).not.toBe('continue');
+      if (decision.action === 'unavailable') {
+        expect(decision.status).toBe(503);
+        expect(decision.body.code).toBe('POLICY_UNAVAILABLE');
+        expect(decision.body).not.toHaveProperty('verdict');
+      }
+      const json = JSON.stringify(decision);
+      expect(json).not.toContain('ALLOW');
+      expect(json).not.toContain(API_KEY);
+      expect(json).not.toContain(accountId);
+    }
+
+    let protectedPresent = true;
+    const deletable = {
+      environment: 'production' as const,
+      env: {},
+      command: {
+        async eval() {
+          return protectedPresent ? 'doc\n2\nprotected' : 'missing';
+        },
+      },
+    };
+    expect(await readProductiveAccountPolicy('acct_v3api', deletable)).toBe('protected');
+    const whileProtected = await evaluate(body, {
+      env: { SENTINEL_API_KEYS: `${API_KEY}:direct:v3api:acct_v3api` },
+      readPolicy: (id) => readProductiveAccountPolicy(id, deletable),
+    });
+    expect(whileProtected.action).toBe('block');
+    if (whileProtected.action === 'block') expect(whileProtected.body.reason).toBe('mandate_proof_required');
+    protectedPresent = false;
+    const deleted = await evaluate(body, {
+      env: { SENTINEL_API_KEYS: `${API_KEY}:direct:v3api:acct_v3api` },
+      readPolicy: (id) => readProductiveAccountPolicy(id, deletable),
+    });
+    expect(deleted.action).toBe('unavailable');
+    expect(deleted.action).not.toBe('continue');
+    if (deleted.action === 'unavailable') {
+      expect(deleted.status).toBe(503);
+      expect(deleted.body.code).toBe('POLICY_UNAVAILABLE');
+    }
+    expect(JSON.stringify(deleted)).not.toContain('ALLOW');
+
+    const errored = await evaluate(body, {
+      readPolicy: (id) => readProductiveAccountPolicy(id, {
+        environment: 'production',
+        env: {},
+        command: {
+          async eval() {
+            throw new Error('redis token leaked-policy');
+          },
+        },
+      }),
+    });
+    expect(errored.action).toBe('unavailable');
+    expect(errored.action).not.toBe('continue');
+    if (errored.action === 'unavailable') {
+      expect(errored.status).toBe(503);
+      expect(errored.body.code).toBe('POLICY_UNAVAILABLE');
+      expect(JSON.stringify(errored.body)).not.toContain('leaked-policy');
+    }
+    expect(JSON.stringify(errored)).not.toContain('ALLOW');
+
+    const explicitLegacy = await evaluate(body, {
+      env: { SENTINEL_API_KEYS: `${API_KEY}:direct:v3api:acct_v3api` },
+      readPolicy: (id) => readProductiveAccountPolicy(id, {
+        environment: 'production',
+        env: {},
+        command: { async eval() { return 'doc\n1\nlegacy'; } },
+      }),
+    });
+    expect(explicitLegacy).toEqual({ action: 'continue' });
+
+    const defaults = defaultMandateRequestDeps({});
+    expect(defaults.manifestStore).not.toBeNull();
+    expect(await defaults.manifestStore?.load('acct_v3api')).toEqual({ answered: false });
+    expect(await defaults.readPolicy('acct_v3api')).toBe('unreadable');
   });
 
   it('blocks a proof account id that does not equal the server account', async () => {

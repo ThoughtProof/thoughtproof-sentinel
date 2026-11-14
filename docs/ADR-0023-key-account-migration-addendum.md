@@ -58,14 +58,28 @@ The report keys are `deterministic`, `authorizes_execution`, `records`, `distinc
 
 ## Activation
 
-Merging this draft and a deterministic census do not activate mandate enforcement. `defaultMandateRequestDeps` still supplies `manifestStore: null` and `readPolicy: () => 'unreadable'`. A protected check cannot load a pinned key from a null store, and an unreadable policy is HTTP 503 `POLICY_UNAVAILABLE`, not legacy and not protected.
+Merging the census and `pinPrincipalKeyAsAdmin` does not activate mandate enforcement. `defaultMandateRequestDeps` uses the Redis-backed manifest store and account-policy reader. `SENTINEL_MANDATE_PROOF_ENFORCE` stays unset. This is not an enablement GO.
 
-Activation additionally requires both of these, on top of a separate enablement GO:
+Activation requires four conditions, each proven separately:
 
-- A productive manifest store that answers for the account. The null default is not that store.
-- A readable account policy. The default reader does not return `legacy` or `protected`.
+1. **Signer keypairs exist and are bound per account.** A dry-run fingerprint of `SENTINEL_PRINCIPAL_PUBLIC_KEY` shows the operator which public key would be pinned. It does not by itself record that the key is stored for that account.
+2. **Migration.** Every API key has one account id. Census `deterministic: true` proves only that API-key-to-account mapping. It does not prove a signer is bound.
+3. **Deployment mapping.** The deployed key record and `SENTINEL_MANDATE_TARGET_ENVIRONMENT` name the same accounts that were migrated.
+4. **Explicitly authorized activation.** That authorization is a separate founder GO. This draft does not set the enforce flag and does not mark an account protected.
 
-Until both exist, do not treat a merged pin function or a green census as permission to set `SENTINEL_MANDATE_PROOF_ENFORCE` or to enable an account.
+The store is the existing Upstash Redis, on key prefixes that are not the replay nonce and not the rate-limit key. A missing client, an invalid client, a bad reply, a throw, or a silent call past 2000 ms fails closed: manifest load is `{ answered: false }` and policy is `unreadable`.
+
+A missing or deleted policy row is `unreadable` for every account, including `acct_v3api`, `acct_grokbot`, and `acct_nightly`. There is no implicit `legacy` default. When enforcement is on, that request is HTTP 503 `POLICY_UNAVAILABLE`. It does not continue, and it is not ALLOW. A store error is the same closed result. An explicit stored `legacy` or `protected` row is still that status. Deleting a `protected` row does not become `legacy`.
+
+The census is deterministic only when every existing key has one account id in the record. A fixture with those three account ids reports `deterministic: true`. An unmapped fixture of the same three keys does not. This draft does not change `SENTINEL_API_KEYS`.
+
+## Operator pin
+
+`scripts/pin-key-account.ts` selects a key by `key_fp` from `SENTINEL_API_KEYS` in the process environment and, only with `--apply`, calls `pinPrincipalKeyAsAdmin`. Dry-run is the default. Run it with `node --experimental-strip-types --disable-warning=ExperimentalWarning --import ./scripts/register-ts-extension.mjs`. The script prints fingerprints and status. It does not print key values, and it does not run against production from this repository.
+
+Dry-run and `--apply` both read `SENTINEL_PRINCIPAL_PUBLIC_KEY` from the environment, not from an argument. Dry-run checks OKP Ed25519, `kid`, `status: active`, and the validity window, and prints `signer_fp` (`key_fp` of `x`). The report sets `census_proves` to `api_key_account_mapping_only` and `signer_binding_proven` to false. `--apply` does not create a policy row. Policy creation is a separate explicit step. The approved API-key fingerprints are `104867493888` (`acct_v3api`), `00f666d19701` (`acct_grokbot`), and `74541b14c65c` (`acct_nightly`). The agent id is not the account id.
+
+Do not treat this store, a green census, or a dry-run signer fingerprint as permission to set `SENTINEL_MANDATE_PROOF_ENFORCE` or to mark an account protected.
 
 ## Non-goals
 
