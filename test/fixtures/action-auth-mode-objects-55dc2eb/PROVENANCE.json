@@ -1,0 +1,18 @@
+{
+  "purpose": "Real action_authorization mode objects built by the 55dc2eb builder for the 27 suite scenarios. LOCAL_COMMAND_CRITERION scope fix, acceptance point 1.",
+  "baseline_commit": "55dc2eb836d027227318e17600f836110ce0a00f",
+  "baseline_builder_blobs": {
+    "src/engine/modes/action_authorization.ts": "2b8028e744d21a529f58c2d8fc431b59e5021236",
+    "src/engine/modes/types.ts": "799a8050f7721c0cc3cd7c9b194bac2ae5077da9",
+    "src/engine/action-auth-kind.ts": "41b4f741adcbf3c7617c3966120093e50f89527e",
+    "src/engine/authorization-gate.ts": "9d7a077336c86b43397e94ad27391f592dcfe3bf",
+    "src/step-quote-provenance.ts": "15b633c0a79d4dcee69be9e3bf03bf97c2fac034"
+  },
+  "generator": "scripts/gen-action-auth-55dc2eb-mode-objects.ts",
+  "input_shape": "{ id, claim, evidence, mode: \"action_authorization\", mandate? } per scenario (engine verify() call shape)",
+  "scenarios_file": "scenarios/action-authorization-suite.json",
+  "scenarios_sha256": "92f379b9450b1ca089aa47401e3e1d987b1c15ae306dd2148008521e9b3cd3d8",
+  "n_cases": 27,
+  "objects_sha256": "48b65ed2cee0eeb16d4106eb0767d10193be93ca26db8ab2446c235188c54538",
+  "network": "none"
+}
