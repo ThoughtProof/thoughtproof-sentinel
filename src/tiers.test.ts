@@ -25,15 +25,15 @@ describe('Sentinel tiers', () => {
     expect(cp.false_allows).toBe(0);
   });
 
-  it('standard runs the Nano→Swift cascade at $0.008 and is the default', () => {
+  it('standard runs the Pro→Swift cascade at $0.008 and is the default', () => {
     const std = getTierConfig('standard');
     expect(std.price_usd).toBe(0.008);
-    expect(std.cascade).toEqual(['serv-nano', 'serv-swift']);
+    expect(std.cascade).toEqual(['serv-pro', 'serv-swift']);
     expect(std.default).toBe(true);
     expect(std.false_allows).toBe(0);
   });
 
-  it('swift is a hidden alias of standard (same cascade)', () => {
+  it('swift stays the hidden Nano→Swift cascade (unchanged)', () => {
     const sw = getTierConfig('swift');
     expect(sw.cascade).toEqual(['serv-nano', 'serv-swift']);
     expect(sw.hidden).toBe(true);
