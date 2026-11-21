@@ -11,6 +11,7 @@
 import type { EvalInput, GoldStep } from 'pot-cli/plv';
 import type { SentinelMode } from '../../types.js';
 import type { AuthorizationMandate } from '../authorization-gate.js';
+import type { ActionAuthTimelineModelMeta } from '../action-auth-timeline.js';
 
 export interface ModeInput {
   id: string;
@@ -24,6 +25,11 @@ export interface ModeInput {
 export interface ModeOutput {
   evalInput: EvalInput;
   evalMode: 'faithfulness' | 'support';
+  /**
+   * action_authorization only, and only when SENTINEL_AA_TIMELINE_CANONICAL
+   * is on. Absent when the flag is off, so existing mode objects stay identical.
+   */
+  timeline?: ActionAuthTimelineModelMeta;
 }
 
 /**
