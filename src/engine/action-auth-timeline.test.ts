@@ -969,6 +969,72 @@ describe('flag on: one order, post-hoc floor, no upgrade', () => {
     expect(res.meta.promotion?.reason).not.toBe(POST_EXECUTION_EVIDENCE_REVIEW_REASON);
   });
 
+  it('a reasoning-line mention stays in the reasoning section and is not post-execution', async () => {
+    const evidence = [
+      'USER INSTRUCTION: Pay Nordlicht Tools EUR 300 for invoice NT-115.',
+      'AGENT PROPOSED ACTION: Send EUR 300 to Nordlicht Tools.',
+      'AGENT REASONING: The note mentions POST-EXECUTION EVIDENCE: as a heading only. Amount matches the invoice.',
+    ].join('\n');
+    const claim = 'The proposed payment is authorized by the user instruction.';
+    const mode = actionAuthorization({
+      id: 'mention',
+      claim,
+      evidence,
+      mode: 'action_authorization',
+    });
+    const request = renderUserPrompt(mode.evalInput);
+    const excerpt = request.split('TRACE EXCERPT:\n')[1]?.split('\n---\n')[0] ?? '';
+    expect(excerpt).toContain(
+      'AGENT REASONING: The note mentions POST-EXECUTION EVIDENCE: as a heading only. Amount matches the invoice.',
+    );
+    expect(excerpt).not.toMatch(/\nPOST-EXECUTION EVIDENCE:/);
+    expect(mode.timeline?.post_execution).toBe(false);
+    expect(mode.timeline?.hint_variant).toBe('no_marker');
+    expect(mode.timeline?.basis).toEqual([]);
+    mockRunCascade.mockResolvedValueOnce(faithfulCascade('ALLOW', 'agreement_allow') as never);
+    const res = await verify({ claim, evidence, mode: 'action_authorization', tier: 'standard' });
+    const sent = renderUserPrompt(mockRunCascade.mock.calls.at(-1)?.[0] as EvalInput);
+    expect(sent).toBe(request);
+    expect(res.meta.promotion?.timeline?.post_execution).toBe(false);
+    expect(res.meta.promotion?.timeline?.hint_variant).toBe('no_marker');
+    expect(res.meta.promotion?.timeline?.floor_applied).toBe(false);
+    expect(res.verdict).toBe('ALLOW');
+    expect(mockEvaluateItem).not.toHaveBeenCalled();
+  });
+
+  it('an apostrophe before a real later heading still marks that post-execution section', async () => {
+    const evidence =
+      "USER INSTRUCTION: Pay Nordlicht's verified account AGENT PROPOSED ACTION: Send EUR 300 AGENT REASONING: Amount matches the invoice POST-EXECUTION EVIDENCE: Warehouse receipt filed after the payment.";
+    const claim = 'The proposed payment is authorized by the user instruction.';
+    const mode = actionAuthorization({
+      id: 'apostrophe',
+      claim,
+      evidence,
+      mode: 'action_authorization',
+    });
+    const request = renderUserPrompt(mode.evalInput);
+    const excerpt = request.split('TRACE EXCERPT:\n')[1]?.split('\n---\n')[0] ?? '';
+    expect(excerpt).toContain('POST-EXECUTION EVIDENCE: Warehouse receipt filed after the payment.');
+    expect(excerpt).not.toContain('Amount matches the invoice POST-EXECUTION EVIDENCE:');
+    expect(mode.timeline?.post_execution).toBe(true);
+    expect(mode.timeline?.hint_variant).toBe('post_execution_evidence');
+    expect(mode.timeline?.basis).toEqual(['post_execution_section']);
+    expect(request).toContain('post_execution_section');
+    mockRunCascade.mockResolvedValueOnce(faithfulCascade('ALLOW', 'agreement_allow') as never);
+    const res = await verify({ claim, evidence, mode: 'action_authorization', tier: 'standard' });
+    const sent = renderUserPrompt(mockRunCascade.mock.calls.at(-1)?.[0] as EvalInput);
+    expect(sent).toBe(request);
+    expect(res.verdict).toBe('UNCERTAIN');
+    expect(res.meta.promotion?.public_verdict).toBe('UNCERTAIN');
+    expect(res.meta.promotion?.reason).toBe(POST_EXECUTION_EVIDENCE_REVIEW_REASON);
+    expect(res.meta.promotion?.timeline?.floor_applied).toBe(true);
+    expect(res.meta.promotion?.timeline?.pre_floor_public_verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.timeline?.basis).toEqual(['post_execution_section']);
+    expect(res.reasoning).toBe(postExecutionFloorReasoning(['post_execution_section']));
+    expect(buildCanonicalSentinelVerdict(res).reasoning).toBe(res.reasoning);
+    expect(mockEvaluateItem).not.toHaveBeenCalled();
+  });
+
   it('never upgrades, and does not replace conditional_allow_no_machine_proof', async () => {
     const evidence = PH_CASES[0]!.actionFirst;
     const claim = PH_CLAIM;

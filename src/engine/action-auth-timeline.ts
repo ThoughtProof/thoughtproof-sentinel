@@ -98,14 +98,42 @@ export interface CanonicalResult {
   reason?: string;
 }
 
-function countOcc(hay: string, needle: string): number {
-  let n = 0;
-  let i = 0;
-  while ((i = hay.indexOf(needle, i)) !== -1) {
-    n++;
-    i += needle.length;
+interface SectionHit {
+  label: string;
+  role: Role;
+  at: number;
+}
+
+/**
+ * One section scan for canonicalization and for post-execution detection.
+ * A label counts only when `isDelimitedSectionLabel` accepts it. A raw
+ * indexOf hit inside reasoning prose is not a section boundary.
+ */
+function findDelimitedSections(evidence: string, labels: ReadonlyArray<readonly [string, Role]>): SectionHit[] {
+  const hits: SectionHit[] = [];
+  for (const [label, role] of labels) {
+    let at = evidence.indexOf(label);
+    while (at !== -1) {
+      if (isDelimitedSectionLabel(evidence, at)) hits.push({ label, role, at });
+      at = evidence.indexOf(label, at + label.length);
+    }
   }
-  return n;
+  hits.sort((a, b) => a.at - b.at);
+  return hits;
+}
+
+function sectionBody(evidence: string, hit: SectionHit, nextAt: number): string {
+  const start = hit.at + hit.label.length;
+  return (nextAt < 0 ? evidence.slice(start) : evidence.slice(start, nextAt)).trim();
+}
+
+/** Empty post-execution headings are not sections, for either caller. */
+function withoutEmptyPostSections(evidence: string, hits: SectionHit[]): SectionHit[] {
+  return hits.filter((hit, i) => {
+    if (hit.role !== 'post_execution') return true;
+    const nextAt = hits[i + 1]?.at ?? -1;
+    return sectionBody(evidence, hit, nextAt).length > 0;
+  });
 }
 
 export function canonicalizeActionAuthEvidence(evidence: string): CanonicalResult {
@@ -114,19 +142,17 @@ export function canonicalizeActionAuthEvidence(evidence: string): CanonicalResul
     ['suite', SUITE_LABELS],
     ['mcp', MCP_LABELS],
   ] as const) {
-    const hits = labels
-      .map(([label, role]) => ({ label, role, n: countOcc(ev, label), at: ev.indexOf(label) }))
-      .filter((h) => h.n > 0);
-    const roles = new Set(hits.map((h) => h.role));
+    const found = findDelimitedSections(ev, labels);
+    const roles = new Set(found.map((h) => h.role));
     if (!((roles.has('mandate') || roles.has('user_mandate')) && roles.has('action') && roles.has('reasoning'))) {
       continue;
     }
-    if (hits.some((h) => h.n > 1)) {
+    if (found.some((h) => found.filter((o) => o.label === h.label).length > 1)) {
       return { text: ev, format: 'unchanged', reordered: false, reason: `ambiguous_${format}_label_repeated` };
     }
-    hits.sort((a, b) => a.at - b.at);
+    const hits = withoutEmptyPostSections(ev, found);
     const sections: Array<{ role: Role; text: string }> = [];
-    if (hits[0].at > 0 && ev.slice(0, hits[0].at).trim()) {
+    if (hits[0] && hits[0].at > 0 && ev.slice(0, hits[0].at).trim()) {
       sections.push({ role: 'preamble', text: ev.slice(0, hits[0].at).trim() });
     }
     hits.forEach((h, i) =>
@@ -181,7 +207,6 @@ const CREATED_RE = new RegExp(
   String.raw`\b(EVIDENCE CREATED AT|REASONING CREATED AT|evidence_created_at|reasoning_created_at)\s*:\s*` + ISO,
   'gi',
 );
-const POST_SECTION_LABELS = ['POST-EXECUTION EVIDENCE:', 'Post-execution evidence:'] as const;
 const SECTION_LABELS = [
   'USER INSTRUCTION:',
   'WALLET BALANCE:',
@@ -243,7 +268,9 @@ function isDelimitedSectionLabel(evidence: string, index: number): boolean {
   if (index > 0 && !/\s/.test(evidence.charAt(index - 1))) return false;
   const lineStart = index === 0 ? 0 : evidence.lastIndexOf('\n', index - 1) + 1;
   const prefix = evidence.slice(lineStart, index);
-  if (/["'“”‘’`]/.test(prefix)) return false;
+  // Double and curly quotes hide a heading. An ASCII apostrophe (month's,
+  // Nordlicht's) does not: it is ordinary text before a real later heading.
+  if (/["“”‘’`]/.test(prefix)) return false;
   const trimmed = prefix.trim();
   if (trimmed.length === 0) return true;
   if (!SECTION_LABELS.some((label) => trimmed.startsWith(label))) return false;
@@ -251,37 +278,14 @@ function isDelimitedSectionLabel(evidence: string, index: number): boolean {
   return true;
 }
 
-function nextDelimitedLabel(evidence: string, from: number): number {
-  let best = -1;
-  for (const label of SECTION_LABELS) {
-    let at = evidence.indexOf(label, from);
-    while (at !== -1) {
-      if (isDelimitedSectionLabel(evidence, at)) {
-        if (best < 0 || at < best) best = at;
-        break;
-      }
-      at = evidence.indexOf(label, at + label.length);
-    }
-  }
-  return best;
-}
-
 /**
- * A post-execution section is a delimited heading with a non-empty body.
- * An empty heading, a quoted heading, or the same words inside prose are not.
+ * Same delimited hits canonicalization keeps. An empty heading, a quoted
+ * heading, or a mention inside a reasoning line is not a section.
  */
 function hasNonEmptyPostExecutionSection(evidence: string): boolean {
-  for (const label of POST_SECTION_LABELS) {
-    let at = evidence.indexOf(label);
-    while (at !== -1) {
-      if (isDelimitedSectionLabel(evidence, at)) {
-        const bodyStart = at + label.length;
-        const next = nextDelimitedLabel(evidence, bodyStart);
-        const body = (next < 0 ? evidence.slice(bodyStart) : evidence.slice(bodyStart, next)).trim();
-        if (body.length > 0) return true;
-      }
-      at = evidence.indexOf(label, at + label.length);
-    }
+  for (const labels of [SUITE_LABELS, MCP_LABELS]) {
+    const hits = withoutEmptyPostSections(evidence, findDelimitedSections(evidence, labels));
+    if (hits.some((h) => h.role === 'post_execution')) return true;
   }
   return false;
 }
