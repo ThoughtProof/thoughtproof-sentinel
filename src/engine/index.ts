@@ -34,6 +34,12 @@ import {
   recordActionAuthUnknownKinds,
 } from './action-auth-kind.js';
 import {
+  actionAuthTimelineCanonicalEnabled,
+  applyTimelineFloor,
+  neutralizeCallerTimelineHint,
+  postExecutionFloorReasoning,
+} from './action-auth-timeline.js';
+import {
   LOCAL_COMMAND_BLOCK_REASON,
   LOCAL_COMMAND_UNCERTAIN_REASON,
 } from './local-command.js';
@@ -85,9 +91,17 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   // permission, or value_transfer + bounded amount-compatible approval.
   // Computed before the cascade so budget-exhaust and agreement_allow cannot
   // fail-open. Same classifier the mode handler uses for SENTINEL_AXIS_HINT.
+  // Flag off: classify the caller evidence, same as before. Flag on: strip
+  // forged SENTINEL_TIMELINE_HINT lines first so they cannot steer the kind.
+  // The mode handler neutralizes again; that second pass is a no-op.
+  const timelineCanonical =
+    req.mode === 'action_authorization' && actionAuthTimelineCanonicalEnabled();
+  const actionAuthEvidence = timelineCanonical
+    ? neutralizeCallerTimelineHint(req.evidence)
+    : req.evidence;
   const actionAuthKind =
     req.mode === 'action_authorization'
-      ? classifyActionAuthKind(req.claim, req.evidence, req.mandate)
+      ? classifyActionAuthKind(req.claim, actionAuthEvidence, req.mandate)
       : null;
   const unknownKinds = actionAuthKind
     ? recordActionAuthUnknownKinds(actionAuthKind.action_kind, actionAuthKind.mandate_kind)
@@ -353,6 +367,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const internalVerdict = cascadeOutput.result.verdict;
   let verdict = mapVerdict(internalVerdict, req.mode);
   let promotionMeta: SentinelVerifyResponse['meta']['promotion'] | undefined;
+  let timelineFloorApplied = false;
+  let timelineFloorBasis: string[] = [];
 
   // 3b. trade_reasoning step_2-only promotion (ADR-0018). If the conservative
   //     remap produced UNCERTAIN but the two FACTUAL steps (thresholds,
@@ -431,14 +447,42 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       forceRemote: actionAuthKind?.command_force_remote === true,
     });
     verdict = decision.publicVerdict;
+    // F2 floor, flag on only. Downgrade ALLOW → UNCERTAIN when post-hoc
+    // evidence is present. The published public verdict is post-floor.
+    // The pre-floor verdict is a separate timeline field, not public_verdict.
+    // Flag off does not read the timeline and adds no receipt fields.
+    // conditional_allow_no_machine_proof is already UNCERTAIN, so this floor
+    // does not replace that reason.
+    const preFloorPublicVerdict = decision.trace.public_verdict;
+    const floor = timelineCanonical
+      ? applyTimelineFloor(
+          preFloorPublicVerdict,
+          decision.reason,
+          modeOutput.timeline?.post_execution === true,
+        )
+      : { verdict: preFloorPublicVerdict, reason: decision.reason, floor_applied: false as const };
+    verdict = floor.verdict;
+    if (floor.floor_applied) {
+      timelineFloorApplied = true;
+      timelineFloorBasis = modeOutput.timeline?.basis ?? [];
+    }
     promotionMeta = {
       cascade_reason: decision.trace.cascade_reason,
       internal_verdict: decision.trace.internal_verdict,
       mapped_verdict: decision.trace.mapped_verdict,
-      public_verdict: decision.trace.public_verdict,
+      public_verdict: floor.verdict,
       promoted: decision.promoted,
-      reason: decision.reason,
+      reason: floor.reason,
       decision_basis: decision.decision_basis,
+      ...(timelineCanonical && modeOutput.timeline
+        ? {
+            timeline: {
+              ...modeOutput.timeline,
+              floor_applied: floor.floor_applied,
+              pre_floor_public_verdict: preFloorPublicVerdict,
+            },
+          }
+        : {}),
       steps_all_pass: decision.trace.steps_all_pass,
       machine_condition_proof_present: decision.trace.machine_condition_proof_present,
       machine_condition_proof_accepted: decision.trace.machine_condition_proof_accepted,
@@ -550,11 +594,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   }
 
   const durationMs = Date.now() - startMs;
-  const publicReasoning = unclassifiedAbstention
-    ? UNCLASSIFIED_ABSTENTION_REASON
-    : objectiveMismatch && internalVerdict !== 'BLOCK'
-      ? OBJECTIVE_MISMATCH_BLOCK_REASON
-      : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
+  // Flag off never sets timelineFloorApplied, so this branch is the previous text.
+  // When the floor downgrades ALLOW, the cascade's ALLOW wording must not ship.
+  const publicReasoning = timelineFloorApplied
+    ? postExecutionFloorReasoning(timelineFloorBasis)
+    : unclassifiedAbstention
+      ? UNCLASSIFIED_ABSTENTION_REASON
+      : objectiveMismatch && internalVerdict !== 'BLOCK'
+        ? OBJECTIVE_MISMATCH_BLOCK_REASON
+        : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
 
   return {
     id,
