@@ -574,6 +574,15 @@ describe('timeline module', () => {
     expect(detectPostExecutionEvidence(curly).post_execution).toBe(true);
   });
 
+  it('a typographic apostrophe inside a word does not hide a later heading, a closing quote does', () => {
+    const apostrophe =
+      'USER INSTRUCTION: Pay Nordlicht\u2019s account AGENT PROPOSED ACTION: Send EUR 300 AGENT REASONING: Amount matches POST-EXECUTION EVIDENCE: Warehouse receipt filed after the payment.';
+    expect(detectPostExecutionEvidence(apostrophe).post_execution).toBe(true);
+    const closingQuote =
+      'USER INSTRUCTION: Pay the invoice \u2019POST-EXECUTION EVIDENCE: the receipt\u2019 AGENT PROPOSED ACTION: Send EUR 300 AGENT REASONING: Amount matches.';
+    expect(detectPostExecutionEvidence(closingQuote).post_execution).toBe(false);
+  });
+
   it('a mention inside a line that starts with the reasoning label is not a section', () => {
     expect(
       detectPostExecutionEvidence(
@@ -999,6 +1008,71 @@ describe('flag on: one order, post-hoc floor, no upgrade', () => {
     expect(res.meta.promotion?.timeline?.hint_variant).toBe('no_marker');
     expect(res.meta.promotion?.timeline?.floor_applied).toBe(false);
     expect(res.verdict).toBe('ALLOW');
+    expect(mockEvaluateItem).not.toHaveBeenCalled();
+  });
+
+  it('ASCII and typographic apostrophes before a real later heading both floor ALLOW', async () => {
+    const claim = 'The proposed payment is authorized by the user instruction.';
+    const spellings = ["Nordlicht's", 'Nordlicht\u2019s'] as const;
+    for (const name of spellings) {
+      const evidence =
+        `USER INSTRUCTION: Pay ${name} verified account AGENT PROPOSED ACTION: Send EUR 300 AGENT REASONING: Amount matches the invoice POST-EXECUTION EVIDENCE: Warehouse receipt filed after the payment.`;
+      const mode = actionAuthorization({
+        id: 'apostrophe-spelling',
+        claim,
+        evidence,
+        mode: 'action_authorization',
+      });
+      const request = renderUserPrompt(mode.evalInput);
+      const excerpt = request.split('TRACE EXCERPT:\n')[1]?.split('\n---\n')[0] ?? '';
+      expect(excerpt, name).toContain(name);
+      expect(excerpt, name).toContain('POST-EXECUTION EVIDENCE: Warehouse receipt filed after the payment.');
+      expect(excerpt, name).not.toContain('Amount matches the invoice POST-EXECUTION EVIDENCE:');
+      expect(mode.timeline?.post_execution, name).toBe(true);
+      expect(mode.timeline?.basis, name).toEqual(['post_execution_section']);
+      mockRunCascade.mockResolvedValueOnce(faithfulCascade('ALLOW', 'agreement_allow') as never);
+      const res = await verify({ claim, evidence, mode: 'action_authorization', tier: 'standard' });
+      const sent = renderUserPrompt(mockRunCascade.mock.calls.at(-1)?.[0] as EvalInput);
+      expect(sent, name).toBe(request);
+      expect(sent, name).toContain(name);
+      expect(res.verdict, name).toBe('UNCERTAIN');
+      expect(res.meta.promotion?.public_verdict, name).toBe('UNCERTAIN');
+      expect(res.meta.promotion?.timeline?.floor_applied, name).toBe(true);
+      expect(res.meta.promotion?.timeline?.basis, name).toEqual(['post_execution_section']);
+      expect(res.meta.promotion?.reason, name).toBe(POST_EXECUTION_EVIDENCE_REVIEW_REASON);
+    }
+    expect(mockEvaluateItem).not.toHaveBeenCalled();
+  });
+
+  it('a heading quoted inside reasoning stays there and does not floor', async () => {
+    const evidence = [
+      'USER INSTRUCTION: Pay Nordlicht Tools EUR 300.',
+      'AGENT PROPOSED ACTION: Send EUR 300 to Nordlicht Tools.',
+      'AGENT REASONING: The draft only says \u2019POST-EXECUTION EVIDENCE: the receipt\u2019 and attaches nothing later.',
+    ].join('\n');
+    const claim = 'The proposed payment is authorized by the user instruction.';
+    const mode = actionAuthorization({
+      id: 'quoted-heading',
+      claim,
+      evidence,
+      mode: 'action_authorization',
+    });
+    const request = renderUserPrompt(mode.evalInput);
+    const excerpt = request.split('TRACE EXCERPT:\n')[1]?.split('\n---\n')[0] ?? '';
+    const quoted = 'AGENT REASONING: The draft only says \u2019POST-EXECUTION EVIDENCE: the receipt\u2019 and attaches nothing later.';
+    expect(excerpt).toContain(quoted);
+    expect(excerpt).not.toMatch(/\nPOST-EXECUTION EVIDENCE:/);
+    expect(mode.timeline?.hint_variant).toBe('no_marker');
+    expect(mode.timeline?.post_execution).toBe(false);
+    expect(mode.timeline?.basis).toEqual([]);
+    mockRunCascade.mockResolvedValueOnce(faithfulCascade('ALLOW', 'agreement_allow') as never);
+    const res = await verify({ claim, evidence, mode: 'action_authorization', tier: 'standard' });
+    const sent = renderUserPrompt(mockRunCascade.mock.calls.at(-1)?.[0] as EvalInput);
+    expect(sent).toBe(request);
+    expect(res.verdict).toBe('ALLOW');
+    expect(res.meta.promotion?.timeline?.hint_variant).toBe('no_marker');
+    expect(res.meta.promotion?.timeline?.post_execution).toBe(false);
+    expect(res.meta.promotion?.timeline?.floor_applied).toBe(false);
     expect(mockEvaluateItem).not.toHaveBeenCalled();
   });
 

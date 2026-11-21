@@ -257,6 +257,28 @@ function compareInstants(a: TimelineInstant, b: TimelineInstant): number {
 
 const REASONING_LINE_MENTION = /^(?:AGENT REASONING:|Agent reasoning:)\s+\S/;
 
+function isUnicodeLetter(ch: string): boolean {
+  return ch.length === 1 && /\p{L}/u.test(ch);
+}
+
+/**
+ * A quotation mark earlier on this line hides a heading. U+2019 between two
+ * letters (Nordlicht’s) is an apostrophe, same as ASCII '. A ’ that opens or
+ * closes a quotation of the heading still hides it. The evidence text is not
+ * rewritten.
+ */
+function prefixHidesHeading(prefix: string): boolean {
+  for (let i = 0; i < prefix.length; i++) {
+    const ch = prefix.charAt(i);
+    if (ch === '\u2019') {
+      if (isUnicodeLetter(prefix.charAt(i - 1)) && isUnicodeLetter(prefix.charAt(i + 1))) continue;
+      return true;
+    }
+    if (ch === '"' || ch === '\u201C' || ch === '\u201D' || ch === '\u2018' || ch === '`') return true;
+  }
+  return false;
+}
+
 /**
  * A heading is delimited on its own line, or as a sibling label in a
  * single-line suite packet. The check stays on the current line: a closing
@@ -268,9 +290,7 @@ function isDelimitedSectionLabel(evidence: string, index: number): boolean {
   if (index > 0 && !/\s/.test(evidence.charAt(index - 1))) return false;
   const lineStart = index === 0 ? 0 : evidence.lastIndexOf('\n', index - 1) + 1;
   const prefix = evidence.slice(lineStart, index);
-  // Double and curly quotes hide a heading. An ASCII apostrophe (month's,
-  // Nordlicht's) does not: it is ordinary text before a real later heading.
-  if (/["“”‘’`]/.test(prefix)) return false;
+  if (prefixHidesHeading(prefix)) return false;
   const trimmed = prefix.trim();
   if (trimmed.length === 0) return true;
   if (!SECTION_LABELS.some((label) => trimmed.startsWith(label))) return false;
