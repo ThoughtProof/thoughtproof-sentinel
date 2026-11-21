@@ -5,6 +5,7 @@ import type {
   GateViolation,
   GateViolationKind,
 } from './engine/authorization-gate.js';
+import type { ActionAuthTimelineReceiptMeta } from './engine/action-auth-timeline.js';
 import type { RateLimitBackend } from './upstash-env.js';
 
 export type { RateLimitBackend };
@@ -449,6 +450,13 @@ export interface SentinelVerifyResponse {
       release_id?: string;
       /** Policy id for this promotion layer revision. */
       policy?: string;
+      /**
+       * F2 timeline floor for action_authorization. Present only when
+       * SENTINEL_AA_TIMELINE_CANONICAL is on. `public_verdict` on this
+       * promotion object is the post-floor verdict. The pre-floor verdict
+       * is `timeline.pre_floor_public_verdict`.
+       */
+      timeline?: ActionAuthTimelineReceiptMeta;
     };
     /**
      * Installed pot-cli semver, attached at the API edge (ADR-0022).
