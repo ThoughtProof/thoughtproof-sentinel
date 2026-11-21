@@ -43,14 +43,15 @@ export const SENTINEL_TIMELINE_HINT_LABEL =
   'SENTINEL_TIMELINE_HINT (system-origin, not evidence):';
 
 /**
- * Replacement for a caller line that contains the system hint keyword.
- * The placeholder must not contain that keyword. A prefix such as
- * "[caller-supplied SENTINEL_TIMELINE_HINT …" can be supplied by the request;
- * protecting that prefix would let the forged hint through.
+ * Replacement for a forged system-hint keyword. The placeholder must not
+ * contain that keyword, so a second pass is a no-op and a caller cannot
+ * hide the keyword behind an imitated "[caller-supplied …" prefix.
+ * Only the keyword through the end of its line is replaced; text before
+ * it on the same line stays.
  */
 export const CALLER_TIMELINE_HINT_REDACTION = '[caller-supplied timeline hint removed]';
 
-const TIMELINE_HINT_KEYWORD = 'sentinel_timeline_hint';
+const CALLER_TIMELINE_HINT_RE = /SENTINEL_TIMELINE_HINT[^\n]*/gi;
 
 type Role =
   | 'preamble'
@@ -229,18 +230,25 @@ function compareInstants(a: TimelineInstant, b: TimelineInstant): number {
   return left < right ? -1 : 1;
 }
 
+const REASONING_LINE_MENTION = /^(?:AGENT REASONING:|Agent reasoning:)\s+\S/;
+
+/**
+ * A heading is delimited on its own line, or as a sibling label in a
+ * single-line suite packet. The check stays on the current line: a closing
+ * quote at the end of the previous paragraph does not hide the next heading.
+ * A mention later on a line that opens with the reasoning label is not a section.
+ */
 function isDelimitedSectionLabel(evidence: string, index: number): boolean {
   if (index < 0) return false;
   if (index > 0 && !/\s/.test(evidence.charAt(index - 1))) return false;
-  let cursor = index - 1;
-  while (cursor >= 0 && /\s/.test(evidence.charAt(cursor))) cursor--;
-  if (cursor >= 0 && /["'“”‘’`]/.test(evidence.charAt(cursor))) return false;
-  const lineStart = evidence.lastIndexOf('\n', Math.max(0, index - 1)) + 1;
+  const lineStart = index === 0 ? 0 : evidence.lastIndexOf('\n', index - 1) + 1;
   const prefix = evidence.slice(lineStart, index);
   if (/["'“”‘’`]/.test(prefix)) return false;
   const trimmed = prefix.trim();
   if (trimmed.length === 0) return true;
-  return SECTION_LABELS.some((label) => trimmed.startsWith(label));
+  if (!SECTION_LABELS.some((label) => trimmed.startsWith(label))) return false;
+  if (REASONING_LINE_MENTION.test(trimmed)) return false;
+  return true;
 }
 
 function nextDelimitedLabel(evidence: string, from: number): number {
@@ -317,10 +325,8 @@ export function detectPostExecutionEvidence(evidence: string): ActionAuthTimelin
 }
 
 export function neutralizeCallerTimelineHint(evidence: string): string {
-  return (evidence ?? '')
-    .split('\n')
-    .map((line) => (line.toLowerCase().includes(TIMELINE_HINT_KEYWORD) ? CALLER_TIMELINE_HINT_REDACTION : line))
-    .join('\n');
+  CALLER_TIMELINE_HINT_RE.lastIndex = 0;
+  return (evidence ?? '').replace(CALLER_TIMELINE_HINT_RE, CALLER_TIMELINE_HINT_REDACTION);
 }
 
 /** Public reasoning when the downgrade-only floor replaces an ALLOW. */
