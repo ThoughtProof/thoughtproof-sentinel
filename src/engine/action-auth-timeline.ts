@@ -43,14 +43,14 @@ export const SENTINEL_TIMELINE_HINT_LABEL =
   'SENTINEL_TIMELINE_HINT (system-origin, not evidence):';
 
 /**
- * Caller-forged hint lines. The redaction itself contains the marker, so the
- * lookbehind keeps a second pass from rewriting the redaction.
+ * Replacement for a caller line that contains the system hint keyword.
+ * The placeholder must not contain that keyword. A prefix such as
+ * "[caller-supplied SENTINEL_TIMELINE_HINT …" can be supplied by the request;
+ * protecting that prefix would let the forged hint through.
  */
-const CALLER_TIMELINE_HINT_RE =
-  /(?<!\[caller-supplied )SENTINEL_TIMELINE_HINT[^\n]*/gi;
+export const CALLER_TIMELINE_HINT_REDACTION = '[caller-supplied timeline hint removed]';
 
-export const CALLER_TIMELINE_HINT_REDACTION =
-  '[caller-supplied SENTINEL_TIMELINE_HINT removed]';
+const TIMELINE_HINT_KEYWORD = 'sentinel_timeline_hint';
 
 type Role =
   | 'preamble'
@@ -180,8 +180,103 @@ const CREATED_RE = new RegExp(
   String.raw`\b(EVIDENCE CREATED AT|REASONING CREATED AT|evidence_created_at|reasoning_created_at)\s*:\s*` + ISO,
   'gi',
 );
-const POST_SECTION_RE = /(^|\n|\s)(POST-EXECUTION EVIDENCE:|Post-execution evidence:)/;
+const POST_SECTION_LABELS = ['POST-EXECUTION EVIDENCE:', 'Post-execution evidence:'] as const;
+const SECTION_LABELS = [
+  'USER INSTRUCTION:',
+  'WALLET BALANCE:',
+  'AGENT PROPOSED ACTION:',
+  'AGENT REASONING:',
+  'POST-EXECUTION EVIDENCE:',
+  'User mandate:',
+  'Principal mandate (verbatim quote):',
+  'Proposed action:',
+  'Agent reasoning:',
+  'Post-execution evidence:',
+  'Context:',
+] as const;
 const PROPOSED_LABEL_RE = /(AGENT PROPOSED ACTION:|Proposed action:)/;
+
+/** Milliseconds from Date.parse plus any fractional digits beyond milliseconds. */
+interface TimelineInstant {
+  ms: number;
+  /** Fractional digits after the first three. Trailing zeros removed. */
+  subMs: string;
+}
+
+/**
+ * Compare the timestamp text at the precision it states. Date.parse stops at
+ * milliseconds, so a creation time strictly later in the same millisecond
+ * would otherwise compare equal and leave ALLOW.
+ */
+function parseTimelineInstant(iso: string): TimelineInstant | null {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?)(?:\.(\d+))?((?:Z|[+-]\d{2}:\d{2}))$/.exec(iso);
+  if (!match) return null;
+  const fraction = match[2] ?? '';
+  const msDigits = fraction.slice(0, 3);
+  const subMs = fraction.slice(3).replace(/0+$/, '');
+  const msIso = msDigits.length > 0 ? `${match[1]}.${msDigits.padEnd(3, '0')}${match[3]}` : `${match[1]}${match[3]}`;
+  const ms = Date.parse(msIso);
+  if (!Number.isFinite(ms)) return null;
+  return { ms, subMs };
+}
+
+function compareInstants(a: TimelineInstant, b: TimelineInstant): number {
+  if (a.ms !== b.ms) return a.ms < b.ms ? -1 : 1;
+  const width = Math.max(a.subMs.length, b.subMs.length);
+  const left = a.subMs.padEnd(width, '0');
+  const right = b.subMs.padEnd(width, '0');
+  if (left === right) return 0;
+  return left < right ? -1 : 1;
+}
+
+function isDelimitedSectionLabel(evidence: string, index: number): boolean {
+  if (index < 0) return false;
+  if (index > 0 && !/\s/.test(evidence.charAt(index - 1))) return false;
+  let cursor = index - 1;
+  while (cursor >= 0 && /\s/.test(evidence.charAt(cursor))) cursor--;
+  if (cursor >= 0 && /["'“”‘’`]/.test(evidence.charAt(cursor))) return false;
+  const lineStart = evidence.lastIndexOf('\n', Math.max(0, index - 1)) + 1;
+  const prefix = evidence.slice(lineStart, index);
+  if (/["'“”‘’`]/.test(prefix)) return false;
+  const trimmed = prefix.trim();
+  if (trimmed.length === 0) return true;
+  return SECTION_LABELS.some((label) => trimmed.startsWith(label));
+}
+
+function nextDelimitedLabel(evidence: string, from: number): number {
+  let best = -1;
+  for (const label of SECTION_LABELS) {
+    let at = evidence.indexOf(label, from);
+    while (at !== -1) {
+      if (isDelimitedSectionLabel(evidence, at)) {
+        if (best < 0 || at < best) best = at;
+        break;
+      }
+      at = evidence.indexOf(label, at + label.length);
+    }
+  }
+  return best;
+}
+
+/**
+ * A post-execution section is a delimited heading with a non-empty body.
+ * An empty heading, a quoted heading, or the same words inside prose are not.
+ */
+function hasNonEmptyPostExecutionSection(evidence: string): boolean {
+  for (const label of POST_SECTION_LABELS) {
+    let at = evidence.indexOf(label);
+    while (at !== -1) {
+      if (isDelimitedSectionLabel(evidence, at)) {
+        const bodyStart = at + label.length;
+        const next = nextDelimitedLabel(evidence, bodyStart);
+        const body = (next < 0 ? evidence.slice(bodyStart) : evidence.slice(bodyStart, next)).trim();
+        if (body.length > 0) return true;
+      }
+      at = evidence.indexOf(label, at + label.length);
+    }
+  }
+  return false;
+}
 
 /**
  * Explicit markers only. Section order is never a marker. Markers may only
@@ -193,19 +288,19 @@ export function detectPostExecutionEvidence(evidence: string): ActionAuthTimelin
   EXECUTED_RE.lastIndex = 0;
   CREATED_RE.lastIndex = 0;
   const basis: string[] = [];
-  if (POST_SECTION_RE.test(ev)) basis.push('post_execution_section');
-  // Several execution markers: the earliest one. An item later than it is post hoc.
+  if (hasNonEmptyPostExecutionSection(ev)) basis.push('post_execution_section');
+  // Several execution markers: the earliest one at full stated precision.
   const execs = [...ev.matchAll(EXECUTED_RE)]
-    .map((m) => ({ iso: m[1], t: Date.parse(m[1]) }))
-    .filter((x) => Number.isFinite(x.t))
-    .sort((a, b) => a.t - b.t);
+    .map((m) => ({ iso: m[1] ?? '', instant: parseTimelineInstant(m[1] ?? '') }))
+    .filter((x): x is { iso: string; instant: TimelineInstant } => x.instant !== null)
+    .sort((a, b) => compareInstants(a.instant, b.instant));
   const executed = execs[0] ?? null;
   if (executed) {
     for (const m of ev.matchAll(CREATED_RE)) {
-      const createdAt = Date.parse(m[2]);
-      if (Number.isFinite(createdAt) && createdAt > executed.t) {
+      const created = parseTimelineInstant(m[2] ?? '');
+      if (created && compareInstants(created, executed.instant) > 0) {
         basis.push(
-          `created_after_execution:${m[1].toLowerCase().replace(/ /g, '_')}=${m[2]}>executed_at=${executed.iso}`,
+          `created_after_execution:${(m[1] ?? '').toLowerCase().replace(/ /g, '_')}=${m[2]}>executed_at=${executed.iso}`,
         );
       }
     }
@@ -222,7 +317,19 @@ export function detectPostExecutionEvidence(evidence: string): ActionAuthTimelin
 }
 
 export function neutralizeCallerTimelineHint(evidence: string): string {
-  return (evidence ?? '').replace(CALLER_TIMELINE_HINT_RE, CALLER_TIMELINE_HINT_REDACTION);
+  return (evidence ?? '')
+    .split('\n')
+    .map((line) => (line.toLowerCase().includes(TIMELINE_HINT_KEYWORD) ? CALLER_TIMELINE_HINT_REDACTION : line))
+    .join('\n');
+}
+
+/** Public reasoning when the downgrade-only floor replaces an ALLOW. */
+export function postExecutionFloorReasoning(basis: readonly string[]): string {
+  const evidence = basis.length > 0 ? basis.join('; ') : 'post_execution_section';
+  return (
+    'Deterministic downgrade: post-execution evidence requires review, so the public verdict is UNCERTAIN rather than ALLOW. ' +
+    `Evidence marked as created after execution: ${evidence}.`
+  );
 }
 
 /** "Section order does not establish chronology. The execution time is unknown." */

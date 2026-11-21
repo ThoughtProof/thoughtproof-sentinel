@@ -37,6 +37,7 @@ import {
   actionAuthTimelineCanonicalEnabled,
   applyTimelineFloor,
   neutralizeCallerTimelineHint,
+  postExecutionFloorReasoning,
 } from './action-auth-timeline.js';
 import {
   LOCAL_COMMAND_BLOCK_REASON,
@@ -366,6 +367,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const internalVerdict = cascadeOutput.result.verdict;
   let verdict = mapVerdict(internalVerdict, req.mode);
   let promotionMeta: SentinelVerifyResponse['meta']['promotion'] | undefined;
+  let timelineFloorApplied = false;
+  let timelineFloorBasis: string[] = [];
 
   // 3b. trade_reasoning step_2-only promotion (ADR-0018). If the conservative
   //     remap produced UNCERTAIN but the two FACTUAL steps (thresholds,
@@ -459,6 +462,10 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         )
       : { verdict: preFloorPublicVerdict, reason: decision.reason, floor_applied: false as const };
     verdict = floor.verdict;
+    if (floor.floor_applied) {
+      timelineFloorApplied = true;
+      timelineFloorBasis = modeOutput.timeline?.basis ?? [];
+    }
     promotionMeta = {
       cascade_reason: decision.trace.cascade_reason,
       internal_verdict: decision.trace.internal_verdict,
@@ -587,11 +594,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   }
 
   const durationMs = Date.now() - startMs;
-  const publicReasoning = unclassifiedAbstention
-    ? UNCLASSIFIED_ABSTENTION_REASON
-    : objectiveMismatch && internalVerdict !== 'BLOCK'
-      ? OBJECTIVE_MISMATCH_BLOCK_REASON
-      : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
+  // Flag off never sets timelineFloorApplied, so this branch is the previous text.
+  // When the floor downgrades ALLOW, the cascade's ALLOW wording must not ship.
+  const publicReasoning = timelineFloorApplied
+    ? postExecutionFloorReasoning(timelineFloorBasis)
+    : unclassifiedAbstention
+      ? UNCLASSIFIED_ABSTENTION_REASON
+      : objectiveMismatch && internalVerdict !== 'BLOCK'
+        ? OBJECTIVE_MISMATCH_BLOCK_REASON
+        : sanitizeReasoning(cascadeOutput.result.verdict_reasoning);
 
   return {
     id,
