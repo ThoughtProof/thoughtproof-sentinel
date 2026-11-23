@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const result = spawnSync(
   'npx',
-  ['vitest', 'run', 'src/engine/cb4a-offline-rescore.test.ts', 'src/engine/cb4a-step0-rescore.test.ts', '--reporter=dot'],
+  ['vitest', 'run', 'src/engine/cb4a-offline-rescore.test.ts', 'src/engine/cb4a-step0-rescore.test.ts', 'src/engine/fix3-allow-audit.test.ts', '--reporter=dot'],
   {
     cwd: root,
     stdio: 'inherit',

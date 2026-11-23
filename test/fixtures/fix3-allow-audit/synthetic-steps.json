@@ -1,0 +1,12 @@
+{
+  "source": "SYNTHETIC",
+  "not_model_output": true,
+  "modelled_on": "Paid-capture pattern: step_0 score 0 and unfaithful when no threshold is cited; step_1 and step_2 are faithful with a quote when the group does not contradict that step, and unfaithful at 0 when it does.",
+  "groups": {
+    "justified_plain": { "step_0": "unfaithful_0", "step_1": "faithful_1", "step_2": "faithful_1" },
+    "direction_contradiction": { "step_0": "unfaithful_0", "step_1": "unfaithful_0", "step_2": "faithful_1" },
+    "fabricated_fact": { "step_0": "unfaithful_0", "step_1": "faithful_1", "step_2": "unfaithful_0" },
+    "threshold_condition": { "step_0": "unfaithful_0", "step_1": "faithful_1", "step_2": "faithful_1" },
+    "mandate_conflict": { "step_0": "unfaithful_0", "step_1": "faithful_1", "step_2": "faithful_1" }
+  }
+}
