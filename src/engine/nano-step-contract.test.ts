@@ -32,12 +32,10 @@ describe('nano step contract aliases', () => {
     expect(n.step.predicate).toBe('unfaithful');
   });
 
-  it('accepts a numeric-string score', () => {
+  it('rejects a string score instead of coercing it', () => {
     const n = normalizeNanoStep({ step_id: 'step_2', score: '0.5', reason: 'gap' });
-    expect(n.malformed).toBe(false);
-    expect(n.step.score).toBe(0.5);
-    expect(n.step.predicate).toBe(faithfulnessPredicateFromScore(0.5));
-    expect(n.step.predicate).toBe('weakly_faithful');
+    expect(n.malformed).toBe(true);
+    expect(n.reason).toMatch(/\[0,1\]/);
   });
 
   it('keeps an omitted quote well-formed when reasoning is present', () => {
@@ -61,7 +59,7 @@ describe('nano step contract malformed detection', () => {
   it('is malformed when the score is missing', () => {
     const n = normalizeNanoStep({ step_id: 'step_0', reason: 'text', quote: 'span' });
     expect(n.malformed).toBe(true);
-    expect(n.reason).toMatch(/no numeric score/);
+    expect(n.reason).toMatch(/\[0,1\]/);
   });
 
   it('is malformed when both reasoning and quote are absent', () => {
@@ -79,6 +77,72 @@ describe('nano step contract malformed detection', () => {
   it('flags an empty array', () => {
     const n = normalizeNanoStepArray([]);
     expect(n.malformed).toBe(true);
+  });
+});
+
+const EXPECTED = ['step_0', 'step_1', 'step_2'];
+
+function complete(overrides: Record<string, unknown> = {}) {
+  return EXPECTED.map((step_id) => ({
+    step_id,
+    score: 0.5,
+    reason: `reason for ${step_id}`,
+    quote: null,
+    ...overrides,
+  }));
+}
+
+describe('nano step contract completeness', () => {
+  it('rejects a missing step', () => {
+    const steps = complete().filter((s) => s.step_id !== 'step_2');
+    const n = normalizeNanoStepArray(steps, EXPECTED);
+    expect(n.malformed).toBe(true);
+    expect(n.reasons.join(' ')).toMatch(/step_2 is missing/);
+  });
+
+  it('rejects duplicate ids', () => {
+    const steps = complete();
+    steps.push({ step_id: 'step_0', score: 0.2, reason: 'again', quote: null });
+    const n = normalizeNanoStepArray(steps, EXPECTED);
+    expect(n.malformed).toBe(true);
+    expect(n.reasons.join(' ')).toMatch(/step_0 is duplicated/);
+  });
+
+  it('rejects an unexpected id', () => {
+    const steps = [...complete(), { step_id: 'step_9', score: 0.2, reason: 'extra', quote: null }];
+    const n = normalizeNanoStepArray(steps, EXPECTED);
+    expect(n.malformed).toBe(true);
+    expect(n.reasons.join(' ')).toMatch(/step_9 is not an expected step/);
+  });
+
+  it.each([
+    ['below zero', -0.1],
+    ['above one', 1.5],
+    ['NaN', Number.NaN],
+  ])('rejects a score that is %s', (_label, score) => {
+    const steps = complete();
+    steps[1] = { ...steps[1], score };
+    const n = normalizeNanoStepArray(steps, EXPECTED);
+    expect(n.malformed).toBe(true);
+    expect(n.reasons.join(' ')).toMatch(/step_1 score is not a finite number in \[0,1\]/);
+  });
+
+  it('rejects a string score on an otherwise complete list', () => {
+    const steps = complete();
+    steps[0] = { ...steps[0], score: '1' as unknown as number };
+    const n = normalizeNanoStepArray(steps, EXPECTED);
+    expect(n.malformed).toBe(true);
+    expect(n.reasons.join(' ')).toMatch(/step_0 score is not a finite number in \[0,1\]/);
+  });
+
+  it('accepts a complete unique list with scores in range', () => {
+    const n = normalizeNanoStepArray(complete(), EXPECTED);
+    expect(n.malformed).toBe(false);
+    expect(n.steps.map((s) => s.predicate)).toEqual([
+      faithfulnessPredicateFromScore(0.5),
+      faithfulnessPredicateFromScore(0.5),
+      faithfulnessPredicateFromScore(0.5),
+    ]);
   });
 });
 

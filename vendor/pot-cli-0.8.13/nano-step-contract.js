@@ -8,10 +8,14 @@
  * coerceQuote is not modified. A step that has a score and reasoning (or a
  * quote) but no quote still goes through PROV_FAIL_01 / PROV_FAIL_02.
  *
- * Malformed, after aliasing, means no finite score, or neither non-empty
- * reasoning nor a non-empty quote string. Explicit null quotes are absent
- * quotes. `reason` is accepted as `reasoning`. `predicate` is recomputed
- * from the score and is never required.
+ * Malformed, after aliasing, means any of:
+ *   - a score that is not a finite number in [0, 1] (strings are not coerced)
+ *   - neither non-empty reasoning nor a non-empty quote
+ *   - when expected step ids are supplied: a missing id, a duplicate id,
+ *     or an id that was not requested
+ * Explicit null quotes are absent quotes. `reason` is accepted as
+ * `reasoning`. `predicate` is recomputed from the score and is never required.
+ * An incomplete list is malformed and must be retried, not scored.
  */
 
 export const MALFORMED_NANO_STEP_MARKER = 'sentinel-malformed-nano-step';
@@ -73,13 +77,10 @@ function nonEmptyText(value) {
  * @param {unknown} value
  * @returns {number | null}
  */
-function finiteScore(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '') {
-    const n = Number(value);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
+function unitIntervalScore(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  if (value < 0 || value > 1) return null;
+  return value;
 }
 
 /**
@@ -94,10 +95,10 @@ export function normalizeNanoStep(step) {
   if (!nonEmptyText(out.reasoning) && nonEmptyText(out.reason)) {
     out.reasoning = String(out.reason).trim();
   }
-  const score = finiteScore(out.score);
+  const score = unitIntervalScore(out.score);
   const id = typeof out.step_id === 'string' ? out.step_id : '?';
   if (score == null) {
-    return { step: out, malformed: true, reason: `${id} has no numeric score` };
+    return { step: out, malformed: true, reason: `${id} score is not a finite number in [0,1]` };
   }
   out.score = score;
   // Do not trust the model's predicate. serv-nano emits verdict: pass/fail
@@ -117,20 +118,34 @@ export function normalizeNanoStep(step) {
 
 /**
  * @param {unknown} steps
+ * @param {readonly string[] | undefined} expectedIds step ids the request asked for.
+ *   When set, the array must contain each id once and no others.
  * @returns {{ steps: Record<string, unknown>[], malformed: boolean, reasons: string[] }}
  */
-export function normalizeNanoStepArray(steps) {
+export function normalizeNanoStepArray(steps, expectedIds) {
   if (!Array.isArray(steps)) {
     return { steps: [], malformed: true, reasons: ['response is not an array'] };
   }
-  if (steps.length === 0) {
-    return { steps: [], malformed: true, reasons: ['no steps'] };
-  }
   const reasons = [];
+  const seen = new Set();
   const out = steps.map((step) => {
     const n = normalizeNanoStep(step);
+    const id = typeof n.step.step_id === 'string' ? n.step.step_id : '';
+    if (!id) reasons.push('step is missing step_id');
+    else if (seen.has(id)) reasons.push(`${id} is duplicated`);
+    else seen.add(id);
+    if (expectedIds && id && !expectedIds.includes(id)) {
+      reasons.push(`${id} is not an expected step`);
+    }
     if (n.malformed) reasons.push(n.reason);
     return n.step;
   });
+  if (expectedIds) {
+    for (const id of expectedIds) {
+      if (!seen.has(id)) reasons.push(`${id} is missing`);
+    }
+  } else if (out.length === 0) {
+    reasons.push('no steps');
+  }
   return { steps: out, malformed: reasons.length > 0, reasons };
 }

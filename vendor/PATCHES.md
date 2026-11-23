@@ -36,7 +36,11 @@ that call. The patch:
 - accepts `reason` as an alias of `reasoning`;
 - recomputes `predicate` from the numeric score and does not require the
   model's `predicate` (serv-nano sends `verdict: pass/fail` instead);
-- if a step still has no score, or neither reasoning nor a quote, retries
+- the reply must contain each requested step id once. A missing, duplicate,
+  or unexpected id is malformed, as is a score that is not a finite number
+  in [0, 1]. A numeric string is not coerced;
+- if a step is still malformed (no in-range score, neither reasoning nor a
+  quote, or an incomplete id set), retries
   serv-nano once with the same strict contract;
 - if it is still malformed, throws `MalformedNanoStepError`. The existing
   cascade `primary_error_fallback` then runs the tier's secondary model.

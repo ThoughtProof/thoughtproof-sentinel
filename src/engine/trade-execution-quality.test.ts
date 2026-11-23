@@ -49,19 +49,34 @@ describe('trade_execution step quality counters', () => {
     expect(shares.malformed_fallback_share).toBe(0);
   });
 
-  it('counts a malformed-step fallback on the primary model', () => {
+  it('puts swift fallback step shares on swift, not on nano', () => {
     resetTradeExecutionQualityForTests();
+    const lines: string[] = [];
     recordTradeExecutionStepQuality(sample({
       surfacedModel: 'serv-swift',
+      primaryModel: 'serv-nano',
       cascadeReason: 'primary_error_fallback',
       malformedStepFallback: true,
-      steps: [{ templatedReasoning: false, nullQuote: false }],
-    }), () => {}, () => {});
-    expect(tradeExecutionQualityShares('serv-nano').malformed_fallback_share).toBe(1);
-    expect(tradeExecutionQualityShares('serv-nano').primary_block_share).toBe(0);
-    expect(tradeExecutionQualityShares('serv-swift').malformed_fallback_share).toBe(0);
-    expect(tradeExecutionQualityShares('serv-swift').null_quote_share).toBe(0);
-    expect(tradeExecutionQualityShares('serv-swift').templated_reasoning_share).toBe(0);
+      steps: [
+        { templatedReasoning: true, nullQuote: true },
+        { templatedReasoning: false, nullQuote: true },
+        { templatedReasoning: false, nullQuote: false },
+      ],
+    }), (line) => lines.push(line), () => {});
+    const logged = JSON.parse(lines[0]) as { step_model: string; surfaced_model: string };
+    expect(logged.step_model).toBe('serv-swift');
+    expect(logged.surfaced_model).toBe('serv-swift');
+    const swift = tradeExecutionQualityShares('serv-swift');
+    const nano = tradeExecutionQualityShares('serv-nano');
+    expect(swift.steps).toBe(3);
+    expect(swift.templated_reasoning_share).toBeCloseTo(1 / 3);
+    expect(swift.null_quote_share).toBeCloseTo(2 / 3);
+    expect(swift.malformed_fallback_share).toBe(0);
+    expect(nano.steps).toBe(0);
+    expect(nano.templated_reasoning_share).toBeNull();
+    expect(nano.null_quote_share).toBeNull();
+    expect(nano.malformed_fallback_share).toBe(1);
+    expect(nano.primary_block_share).toBe(0);
   });
 
   it('warns when the primary_block share crosses the threshold', () => {

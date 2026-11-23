@@ -54,7 +54,7 @@ if (!js.includes('options.nanoStepContract === true')) {
   js = js.replace(callAnchor, callPatched);
 }
 
-if (!js.includes('nanoStepContract = false')) {
+if (!js.includes('normalizeNanoStepArray(first.data, expectedIds)')) {
   const start = js.indexOf('async function evaluateStepsWithLLM(');
   const end = js.indexOf('// ─── Tier-1 result → StepEvaluation converter');
   if (start < 0 || end < 0 || end < start) {

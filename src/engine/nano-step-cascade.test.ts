@@ -106,6 +106,39 @@ describe('serv-nano strict contract (offline fetch)', () => {
     expect(step1?.score).toBe(1);
   });
 
+  it('retries once when the first list omits a step, then accepts the complete alias', async () => {
+    nanoBodies = [
+      { status: 200, content: JSON.stringify([{ step_id: 'step_0', score: 0, reason: 'only one step' }]) },
+      { status: 200, content: aliasedSteps() },
+    ];
+    const result = await evaluateItem(tradeInput(), 'serv-nano', {
+      mode: 'faithfulness',
+      maxTokens: 256,
+      nanoStepContract: true,
+    });
+    expect(calls.filter((c) => c.model === 'serv-nano')).toHaveLength(2);
+    expect(result.step_evaluations).toHaveLength(3);
+  });
+
+  it('falls back to swift when the retry is still missing a step, and does not ALLOW', async () => {
+    const one = JSON.stringify([{ step_id: 'step_0', score: 0, reason: 'only one step' }]);
+    nanoBodies = [
+      { status: 200, content: one },
+      { status: 200, content: one },
+    ];
+    const out = await runSentinelCascade({
+      evalInput: tradeInput(),
+      evalMode: 'faithfulness',
+      tier: 'standard',
+      nanoStepContract: true,
+    });
+    expect(out.malformedStepFallback).toBe(true);
+    expect(out.cascadeReason).toBe('primary_error_fallback');
+    expect(out.result.verdict).toBe('HOLD');
+    expect(mapVerdict(out.result.verdict, 'trade_execution')).toBe('UNCERTAIN');
+    expect(countsAsAllow(mapVerdict(out.result.verdict, 'trade_execution'))).toBe(false);
+  });
+
   it('retries nano once when the first parse has no score, then accepts the alias', async () => {
     nanoBodies = [
       { status: 200, content: JSON.stringify([{ step_id: 'step_0', verdict: 'fail', reason: 'nope' }]) },

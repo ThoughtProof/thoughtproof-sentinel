@@ -11,7 +11,7 @@ export function normalizeNanoStep(step: unknown): {
   malformed: boolean;
   reason: string;
 };
-export function normalizeNanoStepArray(steps: unknown): {
+export function normalizeNanoStepArray(steps: unknown, expectedIds?: readonly string[]): {
   steps: Record<string, unknown>[];
   malformed: boolean;
   reasons: string[];

@@ -3,8 +3,10 @@
 `mode=trade_execution` writes one JSON line per verification:
 
 ```json
-{"event":"sentinel.trade_execution.step_quality","surfaced_model":"serv-nano","primary_model":"serv-nano","cascade_reason":"primary_block","steps":3,"templated_reasoning_steps":3,"null_or_absent_quotes":3,"malformed_step_fallback":false,"primary_block":true}
+{"event":"sentinel.trade_execution.step_quality","surfaced_model":"serv-swift","primary_model":"serv-nano","step_model":"serv-swift","cascade_reason":"primary_error_fallback","steps":3,"templated_reasoning_steps":1,"null_or_absent_quotes":2,"malformed_step_fallback":true,"primary_block":false}
 ```
+
+`step_model` is the model that produced the steps on the receipt (`surfaced_model`). Quote and templated-reasoning shares are that model's. A swift fallback is not added to serv-nano's step totals. `primary_block` and `malformed_step_fallback` stay on `primary_model`.
 
 The line carries counts only. It does not include the claim, the evidence, quotes, or reasoning text.
 
@@ -21,16 +23,21 @@ A log drain should aggregate the per-request lines. Example over a newline-delim
 
 ```bash
 jq -s '
-  [.[] | select(.event=="sentinel.trade_execution.step_quality")]
-  | group_by(.primary_model)
-  | map({
+  def rows: [.[] | select(.event=="sentinel.trade_execution.step_quality")];
+  {
+    steps: (rows | group_by(.step_model) | map({
+      model: .[0].step_model,
+      n: length,
+      templated_reasoning_share: (map(.templated_reasoning_steps) | add) / (map(.steps) | add),
+      null_quote_share: (map(.null_or_absent_quotes) | add) / (map(.steps) | add)
+    })),
+    primary: (rows | group_by(.primary_model) | map({
       model: .[0].primary_model,
       n: length,
       primary_block_share: (map(select(.primary_block)) | length) / length,
-      malformed_fallback_share: (map(select(.malformed_step_fallback)) | length) / length,
-      templated_reasoning_share: (map(.templated_reasoning_steps) | add) / (map(.steps) | add),
-      null_quote_share: (map(.null_or_absent_quotes) | add) / (map(.steps) | add)
-    })
+      malformed_fallback_share: (map(select(.malformed_step_fallback)) | length) / length
+    }))
+  }
 ' drain.jsonl
 ```
 

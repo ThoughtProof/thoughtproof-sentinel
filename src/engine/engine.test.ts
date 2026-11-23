@@ -445,13 +445,7 @@ describe('Sentinel Engine', () => {
       mockEvaluateItem.mockResolvedValueOnce(result as any);
 
       const res = await verify({
-        // A cited threshold that the evidence does not contradict, so the
-        // step_0 not-applicable rule leaves this model failure in place and
-        // the empty prose still takes the synthesized fallback.
-        claim: 'Enter only if RSI requires 70%.',
-        evidence: 'the test quote is in the source',
-        mode: 'trade_execution',
-        tier: 'checkpoint',
+        claim: 'test', evidence: 'the test quote is in the source', mode: 'trade_execution', tier: 'checkpoint',
       });
 
       const obj = res.objections[0];

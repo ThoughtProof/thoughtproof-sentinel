@@ -6,10 +6,9 @@
  */
 import { readFileSync } from 'node:fs';
 import { runCascade } from 'pot-cli/cascade';
-import { deriveVerdict, type GoldStep, type ItemResult } from 'pot-cli/plv';
+import { deriveVerdict, type GoldStep } from 'pot-cli/plv';
 import { mapVerdict } from './verdict.js';
 import { countsAsAllow } from './trade-execution-quality.js';
-import { applyTradeExecutionStep0 } from './trade-execution-step0.js';
 import { parseRecordedStepArray, replayFaithfulness } from './replay-faithfulness.js';
 
 export const TRADE_GOLD: GoldStep[] = [
@@ -154,16 +153,12 @@ function replaySteps(
   evidence: string,
   model: string,
   contract: boolean,
-  step0: boolean,
-  claim: string,
 ): ItemResult | null {
   const replayed = replayFaithfulness(steps, evidence, TRADE_GOLD, {
     nanoStepContract: contract,
     model,
   });
-  if (!replayed.result) return null;
-  if (!step0) return replayed.result;
-  return applyTradeExecutionStep0(replayed.result, claim, evidence, TRADE_GOLD);
+  return replayed.result;
 }
 
 function strictSteps(attempts: string[]): { steps: unknown[] | null; malformed: boolean } {
@@ -195,8 +190,7 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
 }> {
   const nanoCurrent: ScoredDraw[] = [];
   const fix1: ScoredDraw[] = [];
-  const fix1Step0: ScoredDraw[] = [];
-  const fix1Step0Swift: ScoredDraw[] = [];
+  const fix1Swift: ScoredDraw[] = [];
   const aliasOnly: ScoredDraw[] = [];
   let nanoMatch = 0;
   let nanoCompared = 0;
@@ -207,15 +201,14 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
     const cse = fixture.cases[String(draw.cycle)];
     if (!cse) continue;
     const base = { cycle: draw.cycle, draw: draw.draw, set: cse.set, outcome: cse.outcome };
-    const swift = replaySteps(draw.swift, cse.evidence, 'serv-swift', false, false, cse.claim);
-    const swiftStep0 = replaySteps(draw.swift, cse.evidence, 'serv-swift', false, true, cse.claim);
+    const swift = replaySteps(draw.swift, cse.evidence, 'serv-swift', false);
     const swiftPublic = swift ? mapVerdict(swift.verdict, 'trade_execution') : 'ERROR';
     if (draw.recordedSwiftPublic) {
       swiftCompared += 1;
       if (swiftPublic === draw.recordedSwiftPublic) swiftMatch += 1;
     }
 
-    const current = replaySteps(draw.nano, cse.evidence, 'serv-nano', false, false, cse.claim);
+    const current = replaySteps(draw.nano, cse.evidence, 'serv-nano', false);
     const currentPublic = await cascadeVerdict(current, swift);
     if (draw.recordedNanoPublic) {
       nanoCompared += 1;
@@ -223,7 +216,7 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
     }
     nanoCurrent.push({ ...base, verdict: currentPublic });
 
-    const aliased = replaySteps(draw.nano, cse.evidence, 'serv-nano', true, false, cse.claim);
+    const aliased = replaySteps(draw.nano, cse.evidence, 'serv-nano', true);
     aliasOnly.push({
       ...base,
       verdict: aliased ? await cascadeVerdict(aliased, swift) : 'ERROR',
@@ -231,46 +224,37 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
 
     const strict = strictSteps(draw.strictAttempts);
     const strictItem = strict.steps
-      ? replaySteps(strict.steps, cse.evidence, 'serv-nano', true, false, cse.claim)
-      : null;
-    const strictItemStep0 = strict.steps
-      ? replaySteps(strict.steps, cse.evidence, 'serv-nano', true, true, cse.claim)
+      ? replaySteps(strict.steps, cse.evidence, 'serv-nano', true)
       : null;
 
     fix1.push({
       ...base,
       verdict: strict.malformed || !strictItem ? 'ERROR' : await cascadeVerdict(strictItem, swift),
     });
-    fix1Step0.push({
+    // Malformed nano uses the recorded swift item. A permissive swift verdict
+    // is clamped to HOLD by the cascade, which maps to UNCERTAIN.
+    fix1Swift.push({
       ...base,
-      verdict: strict.malformed || !strictItemStep0 ? 'ERROR' : await cascadeVerdict(strictItemStep0, swiftStep0),
-    });
-    fix1Step0Swift.push({
-      ...base,
-      verdict: await cascadeVerdict(strict.malformed ? null : strictItemStep0, swiftStep0),
+      verdict: await cascadeVerdict(strict.malformed ? null : strictItem, swift),
     });
   }
 
   const grokCurrent: ScoredDraw[] = [];
   const grokFix1: ScoredDraw[] = [];
-  const grokFix3: ScoredDraw[] = [];
   let grokMatch = 0;
   let grokFix1Same = 0;
   for (const draw of fixture.grok) {
     const cse = fixture.cases[String(draw.cycle)];
     if (!cse) continue;
     const base = { cycle: draw.cycle, draw: draw.draw, set: cse.set, outcome: cse.outcome };
-    const current = replaySteps(draw.steps, cse.evidence, 'grok-4.3', false, false, cse.claim);
-    const fix1Item = replaySteps(draw.steps, cse.evidence, 'grok-4.3', true, false, cse.claim);
-    const fix3Item = replaySteps(draw.steps, cse.evidence, 'grok-4.3', true, true, cse.claim);
+    const current = replaySteps(draw.steps, cse.evidence, 'grok-4.3', false);
+    const fix1Item = replaySteps(draw.steps, cse.evidence, 'grok-4.3', true);
     const currentPublic = current ? mapVerdict(current.verdict, 'trade_execution') : 'ERROR';
     const fix1Public = fix1Item ? mapVerdict(fix1Item.verdict, 'trade_execution') : 'ERROR';
-    const fix3Public = fix3Item ? mapVerdict(fix3Item.verdict, 'trade_execution') : 'ERROR';
     if (currentPublic === draw.recordedPublic) grokMatch += 1;
     if (currentPublic === fix1Public) grokFix1Same += 1;
     grokCurrent.push({ ...base, verdict: currentPublic });
     grokFix1.push({ ...base, verdict: fix1Public });
-    grokFix3.push({ ...base, verdict: fix3Public });
   }
 
   const g = fixture.grok.length;
@@ -278,14 +262,12 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
     columns: {
       current_main: tally(nanoCurrent),
       fix1_strict_recorded: tally(fix1),
-      fix1_plus_fix3: tally(fix1Step0),
-      fix1_plus_fix3_swift_fallback: tally(fix1Step0Swift),
+      fix1_swift_fallback: tally(fix1Swift),
       alias_only_on_raw_nano: tally(aliasOnly),
     },
     grok: {
       current_main: tally(grokCurrent),
       fix1: tally(grokFix1),
-      fix1_plus_fix3: tally(grokFix3),
     },
     sanity: {
       nano_current_matches_recorded: `${nanoMatch}/${nanoCompared}`,
@@ -311,12 +293,10 @@ function signedOutcome(action: string, r24h: number): 'winner' | 'loser' | 'flat
 
 export function rescoreNov23(fixture: Nov23Fixture): {
   current: RateBlock;
-  fix3: RateBlock;
   replay_matches_recorded_block_or_not: string;
   not_rescored: string[];
 } {
   const current: ScoredDraw[] = [];
-  const fix3: ScoredDraw[] = [];
   let match = 0;
   for (const row of fixture.rows) {
     const claim = fixture.claims[String(row.cycle)];
@@ -340,29 +320,16 @@ export function rescoreNov23(fixture: Nov23Fixture): {
       predicate: s.predicate as 'unfaithful',
     }));
     const derived = deriveVerdict(steps, TRADE_GOLD);
-    const item: ItemResult = {
-      id: `c${row.cycle}`,
-      step_evaluations: steps,
-      verdict: derived.verdict,
-      verdict_reasoning: derived.reasoning,
-      provenance_violations: [],
-    };
     const replayed = mapVerdict(derived.verdict, 'trade_execution');
     if (replayed === recorded) match += 1;
-    const adjusted = claim
-      ? applyTradeExecutionStep0(item, claim.claim, '', TRADE_GOLD)
-      : item;
-    const verdict = mapVerdict(adjusted.verdict, 'trade_execution');
-    fix3.push({ ...base, verdict: countsAsAllow(verdict, row.http) ? verdict : verdict });
   }
   return {
     current: tally(current),
-    fix3: tally(fix3),
     replay_matches_recorded_block_or_not: `${match}/${fixture.rows.length}`,
     not_rescored: [
       'Fix 1 is not applied: the Nov 23 file stores Sentinel objections after provenance, not serv-nano JSON.',
       'Swift fallback is not applied: 974 of 996 calls never invoked swift, and the file has no raw swift text.',
-      'The 22 calls that did invoke swift keep their recorded public verdict when step_0 already passes; otherwise step_0 is adjusted on the surfaced steps only.',
+      'step_0 not-applicable is not on this branch.',
     ],
   };
 }

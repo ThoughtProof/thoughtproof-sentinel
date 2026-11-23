@@ -84,7 +84,8 @@ Return a JSON array with one evaluation object per step. ONLY JSON, no prose.`;
     const first = await callModelStructured(model, messages, { ...callOpts, retries: 2 });
     if (!useNanoContract)
         return first.data;
-    let normalized = normalizeNanoStepArray(first.data);
+    const expectedIds = stepsToEvaluate.map((s) => `step_${s.index}`);
+    let normalized = normalizeNanoStepArray(first.data, expectedIds);
     if (!normalized.malformed)
         return normalized.steps;
     const retry = await callModelStructured(model, [
@@ -94,7 +95,7 @@ Return a JSON array with one evaluation object per step. ONLY JSON, no prose.`;
             content: `${userPrompt}\n\nYour previous reply was malformed (${normalized.reasons.join('; ')}). Reply again with ONLY the strict JSON array.${NANO_STRICT_OUTPUT_SUFFIX}`,
         },
     ], { ...callOpts, retries: 0 });
-    normalized = normalizeNanoStepArray(retry.data);
+    normalized = normalizeNanoStepArray(retry.data, expectedIds);
     if (normalized.malformed)
         throw new MalformedNanoStepError(normalized.reasons);
     return normalized.steps;

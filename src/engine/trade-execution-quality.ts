@@ -184,20 +184,29 @@ export function recordTradeExecutionStepQuality(
   const nullQuotes = sample.steps.filter((s) => s.nullQuote).length;
   const primaryBlock = sample.cascadeReason === 'primary_block';
 
-  const models = new Set<string>([sample.primaryModel, sample.surfacedModel]);
-  for (const model of models) {
-    const b = bucket(model);
-    const ownsSteps = model === sample.surfacedModel;
-    push(b.requests, 1);
-    push(b.stepCounts, ownsSteps ? sample.steps.length : 0);
-    push(b.templatedSteps, ownsSteps ? templated : 0);
-    push(b.nullQuotes, ownsSteps ? nullQuotes : 0);
-    push(b.malformed, model === sample.primaryModel && sample.malformedStepFallback ? 1 : 0);
-    push(b.primaryBlock, model === sample.primaryModel && primaryBlock ? 1 : 0);
+  // Quote and templated-reasoning shares belong to the model that wrote the
+  // steps on the receipt. A swift fallback must not be counted as nano.
+  const surfaced = bucket(sample.surfacedModel);
+  push(surfaced.requests, 1);
+  push(surfaced.stepCounts, sample.steps.length);
+  push(surfaced.templatedSteps, templated);
+  push(surfaced.nullQuotes, nullQuotes);
+  const sameModel = sample.surfacedModel === sample.primaryModel;
+  push(surfaced.malformed, sameModel && sample.malformedStepFallback ? 1 : 0);
+  push(surfaced.primaryBlock, sameModel && primaryBlock ? 1 : 0);
+  if (!sameModel) {
+    const primary = bucket(sample.primaryModel);
+    push(primary.requests, 1);
+    push(primary.stepCounts, 0);
+    push(primary.templatedSteps, 0);
+    push(primary.nullQuotes, 0);
+    push(primary.malformed, sample.malformedStepFallback ? 1 : 0);
+    push(primary.primaryBlock, primaryBlock ? 1 : 0);
   }
 
   const alerts: TradeExecutionQualityAlert[] = [];
   const sharesByModel: Record<string, TradeExecutionQualityShares> = {};
+  const models = new Set<string>([sample.primaryModel, sample.surfacedModel]);
   for (const model of models) {
     const b = bucket(model);
     const shares = tradeExecutionQualityShares(model);
@@ -221,6 +230,7 @@ export function recordTradeExecutionStepQuality(
     surfaced_model: sample.surfacedModel,
     primary_model: sample.primaryModel,
     cascade_reason: sample.cascadeReason,
+    step_model: sample.surfacedModel,
     steps: sample.steps.length,
     templated_reasoning_steps: templated,
     null_or_absent_quotes: nullQuotes,

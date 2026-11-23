@@ -94,7 +94,10 @@ export function replayFaithfulness(
 ): ReplayOutcome {
   let steps: unknown = rawSteps;
   if (opts.nanoStepContract && isNanoModel(opts.model)) {
-    const normalized = normalizeNanoStepArray(rawSteps);
+    const normalized = normalizeNanoStepArray(
+      rawSteps,
+      gold.map((g) => `step_${g.index}`),
+    );
     if (normalized.malformed) {
       return { malformed: true, reasons: normalized.reasons, result: null };
     }
