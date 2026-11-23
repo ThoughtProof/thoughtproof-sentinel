@@ -281,6 +281,7 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       // Strict nano contract is trade_execution only. Other modes keep the
       // published pot-cli prompt and parser. CONFIRM_BLOCKS is unchanged.
       nanoStepContract: req.mode === 'trade_execution',
+      tradeExecutionStep0: req.mode === 'trade_execution',
     });
   } catch (err) {
     budget.clear();

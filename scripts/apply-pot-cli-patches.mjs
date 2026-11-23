@@ -70,6 +70,29 @@ if (!js.includes('coerceQuote(ev.quote)')) {
   process.exit(1);
 }
 
+const safeVerdict = `    let stepsForVerdict = processedEvals;
+    if (typeof options.adjustStepsBeforeVerdict === 'function') {
+        const adjustedSteps = options.adjustStepsBeforeVerdict(stepsForVerdict, item);
+        if (Array.isArray(adjustedSteps))
+            stepsForVerdict = adjustedSteps;
+    }
+    const derived = deriveVerdict(stepsForVerdict, item.gold_plan_steps);`;
+const brokenVerdict = `    if (typeof options.adjustStepsBeforeVerdict === 'function') {
+        const adjustedSteps = options.adjustStepsBeforeVerdict(processedEvals, item);
+        if (Array.isArray(adjustedSteps))
+            processedEvals = adjustedSteps;
+    }
+    const derived = deriveVerdict(processedEvals, item.gold_plan_steps);`;
+const plainVerdict = '    const derived = deriveVerdict(processedEvals, item.gold_plan_steps);';
+if (js.includes(brokenVerdict)) {
+  js = js.replace(brokenVerdict, safeVerdict);
+} else if (js.includes(plainVerdict) && !js.includes('let stepsForVerdict')) {
+  js = js.replace(plainVerdict, safeVerdict);
+}
+if (js.includes('let stepsForVerdict') && js.includes('step_evaluations: processedEvals,')) {
+  js = js.replace('step_evaluations: processedEvals,', 'step_evaluations: stepsForVerdict,');
+}
+
 writeFileSync(evaluator, js);
 
 let dts = readFileSync(evaluatorDts, 'utf8');
@@ -91,7 +114,22 @@ if (!dts.includes('nanoStepContract?: boolean')) {
     process.exit(1);
   }
   dts = dts.replace(dtsAnchor, dtsPatched);
-  writeFileSync(evaluatorDts, dts);
 }
+if (!dts.includes('adjustStepsBeforeVerdict')) {
+  const hookAnchor = '    nanoStepContract?: boolean;\n}';
+  const hookPatched = `    nanoStepContract?: boolean;
+    /**
+     * After provenance and before the mandate-conflict cap. trade_execution
+     * uses this so a not-applicable step_0 cannot erase that HOLD.
+     */
+    adjustStepsBeforeVerdict?: (steps: StepEvaluation[], item: EvalInput) => StepEvaluation[];
+}`;
+  if (!dts.includes(hookAnchor)) {
+    console.error('[apply-pot-cli-patches] EvalOptions nanoStepContract anchor missing');
+    process.exit(1);
+  }
+  dts = dts.replace(hookAnchor, hookPatched);
+}
+writeFileSync(evaluatorDts, dts);
 
 console.log('[apply-pot-cli-patches] pot-cli 0.8.13 nano step contract applied');
