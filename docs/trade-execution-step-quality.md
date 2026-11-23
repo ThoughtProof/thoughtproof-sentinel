@@ -23,22 +23,27 @@ A log drain should aggregate the per-request lines. Example over a newline-delim
 
 ```bash
 jq -s '
-  def rows: [.[] | select(.event=="sentinel.trade_execution.step_quality")];
+  def rows: [.[]
+    | select(.event=="sentinel.trade_execution.step_quality"
+        and .cascade_error != true
+        and .steps > 0)];
   {
     steps: (rows | group_by(.step_model) | map({
       model: .[0].step_model,
       n: length,
-      templated_reasoning_share: (map(.templated_reasoning_steps) | add) / (map(.steps) | add),
-      null_quote_share: (map(.null_or_absent_quotes) | add) / (map(.steps) | add)
+      templated_reasoning_share: ((map(.templated_reasoning_steps) | add) / (map(.steps) | add)),
+      null_quote_share: ((map(.null_or_absent_quotes) | add) / (map(.steps) | add))
     })),
     primary: (rows | group_by(.primary_model) | map({
       model: .[0].primary_model,
       n: length,
-      primary_block_share: (map(select(.primary_block)) | length) / length,
-      malformed_fallback_share: (map(select(.malformed_step_fallback)) | length) / length
+      primary_block_share: ((map(select(.primary_block)) | length) / length),
+      malformed_fallback_share: ((map(select(.malformed_step_fallback)) | length) / length)
     }))
   }
 ' drain.jsonl
 ```
+
+`cascade_error` rows have `steps: 0`. They are dropped before the division so an all-error batch does not divide by zero, and a null `step_model` is not a model bucket.
 
 Alert when `primary_block_share >= 0.90` or `null_quote_share >= 0.80`. Both were ~1.0 on the 23 Nov 2026 CB4A replay and ~0.13 / low in the June–July window.
