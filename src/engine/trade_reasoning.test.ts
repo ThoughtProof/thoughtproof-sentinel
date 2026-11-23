@@ -133,8 +133,15 @@ describe('trade_reasoning mode (ADR-0018)', () => {
       primaryModel: 'nano', secondaryModel: 'pro', secondaryInvoked: true, degradedMode: false, errors: [], totalLatencyMs: 100,
     } as any);
 
-    const res = await verify(req({ mode: 'trade_execution' }));
-    expect(res.verdict).toBe('UNCERTAIN'); // trade_execution never promotes
+    const res = await verify(req({
+      mode: 'trade_execution',
+      // Plain order, thesis matches BUY, no extra justification. The
+      // trade_reasoning promoter must still not run. The plain-order
+      // reading ALLOWs this shape instead of leaving the weak step_2 as
+      // UNCERTAIN.
+      evidence: 'Thesis: XLM shows an uptrend and support holds near the shelf.',
+    }));
+    expect(res.verdict).toBe('ALLOW');
     expect(res.meta.promotion).toBeUndefined();
   });
 

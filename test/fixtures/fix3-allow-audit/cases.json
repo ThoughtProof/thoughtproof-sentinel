@@ -1,0 +1,305 @@
+{
+  "rubric_version": 1,
+  "cases": [
+    {
+      "id": "justified-buy-01",
+      "group": "justified_plain",
+      "claim": "BUY market order: 75 USDC of XRP-USDC on Coinbase",
+      "evidence": "Thesis: XRP shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "justified-buy-02",
+      "group": "justified_plain",
+      "claim": "BUY market order: 50 USDC of SOL-USDC on Coinbase",
+      "evidence": "Thesis: SOL shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "justified-buy-03",
+      "group": "justified_plain",
+      "claim": "BUY market order: 90 USDC of BTC-USDC on Coinbase",
+      "evidence": "Thesis: BTC shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "justified-buy-04",
+      "group": "justified_plain",
+      "claim": "BUY market order: 25 USDC of ETH-USDC on Coinbase",
+      "evidence": "Thesis: ETH shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "justified-buy-05",
+      "group": "justified_plain",
+      "claim": "BUY market order: 10 USDC of LTC-USDC on Coinbase",
+      "evidence": "Thesis: LTC shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "justified-sell-01",
+      "group": "justified_plain",
+      "claim": "SELL market order: 1.4 base of NEAR-USDC on Coinbase",
+      "evidence": "Thesis: NEAR shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "justified-sell-02",
+      "group": "justified_plain",
+      "claim": "SELL market order: 12.25 base of ICP-USDC on Coinbase",
+      "evidence": "Thesis: ICP shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "justified-sell-03",
+      "group": "justified_plain",
+      "claim": "SELL market order: 19.66 base of STG-USDC on Coinbase",
+      "evidence": "Thesis: STG shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "justified-sell-04",
+      "group": "justified_plain",
+      "claim": "SELL market order: 26.65 base of XLM-USDC on Coinbase",
+      "evidence": "Thesis: XLM shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "justified-sell-05",
+      "group": "justified_plain",
+      "claim": "SELL market order: 44.60 base of ADA-USDC on Coinbase",
+      "evidence": "Thesis: ADA shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "contradict-buy-01",
+      "group": "direction_contradiction",
+      "claim": "BUY market order: 75 USDC of XRP-USDC on Coinbase",
+      "evidence": "Thesis: XRP shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "contradict-buy-02",
+      "group": "direction_contradiction",
+      "claim": "BUY market order: 50 USDC of SOL-USDC on Coinbase",
+      "evidence": "Thesis: SOL shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "contradict-buy-03",
+      "group": "direction_contradiction",
+      "claim": "BUY market order: 90 USDC of BTC-USDC on Coinbase",
+      "evidence": "Thesis: BTC shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "contradict-buy-04",
+      "group": "direction_contradiction",
+      "claim": "BUY market order: 25 USDC of ETH-USDC on Coinbase",
+      "evidence": "Thesis: ETH shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "contradict-buy-05",
+      "group": "direction_contradiction",
+      "claim": "BUY market order: 10 USDC of LTC-USDC on Coinbase",
+      "evidence": "Thesis: LTC shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "contradict-sell-01",
+      "group": "direction_contradiction",
+      "claim": "SELL market order: 1.4 base of NEAR-USDC on Coinbase",
+      "evidence": "Thesis: NEAR shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "contradict-sell-02",
+      "group": "direction_contradiction",
+      "claim": "SELL market order: 12.25 base of ICP-USDC on Coinbase",
+      "evidence": "Thesis: ICP shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "contradict-sell-03",
+      "group": "direction_contradiction",
+      "claim": "SELL market order: 19.66 base of STG-USDC on Coinbase",
+      "evidence": "Thesis: STG shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "contradict-sell-04",
+      "group": "direction_contradiction",
+      "claim": "SELL market order: 26.65 base of XLM-USDC on Coinbase",
+      "evidence": "Thesis: XLM shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "contradict-sell-05",
+      "group": "direction_contradiction",
+      "claim": "SELL market order: 44.60 base of ADA-USDC on Coinbase",
+      "evidence": "Thesis: ADA shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "fabricated-01",
+      "group": "fabricated_fact",
+      "claim": "BUY market order: 75 USDC of XRP-USDC on Coinbase",
+      "evidence": "Thesis: XRP shows an uptrend and support holds near the shelf.\nReasoning: funding is 0.12% and was never stated above."
+    },
+    {
+      "id": "fabricated-02",
+      "group": "fabricated_fact",
+      "claim": "BUY market order: 50 USDC of SOL-USDC on Coinbase",
+      "evidence": "Thesis: SOL shows an uptrend and support holds near the shelf.\nReasoning: liquidation is 4.5% and was never stated above."
+    },
+    {
+      "id": "fabricated-03",
+      "group": "fabricated_fact",
+      "claim": "BUY market order: 90 USDC of BTC-USDC on Coinbase",
+      "evidence": "Thesis: BTC shows an uptrend and support holds near the shelf.\nReasoning: openinterest is 900 and was never stated above."
+    },
+    {
+      "id": "fabricated-04",
+      "group": "fabricated_fact",
+      "claim": "BUY market order: 25 USDC of ETH-USDC on Coinbase",
+      "evidence": "Thesis: ETH shows an uptrend and support holds near the shelf.\nReasoning: basispremium is 1.8% and was never stated above."
+    },
+    {
+      "id": "fabricated-05",
+      "group": "fabricated_fact",
+      "claim": "BUY market order: 10 USDC of LTC-USDC on Coinbase",
+      "evidence": "Thesis: LTC shows an uptrend and support holds near the shelf.\nReasoning: whalealert is 3 and was never stated above."
+    },
+    {
+      "id": "fabricated-06",
+      "group": "fabricated_fact",
+      "claim": "SELL market order: 1.4 base of NEAR-USDC on Coinbase",
+      "evidence": "Thesis: NEAR shows a downtrend and a breakdown under the shelf.\nReasoning: gammaflip is 0.4 and was never stated above."
+    },
+    {
+      "id": "fabricated-07",
+      "group": "fabricated_fact",
+      "claim": "SELL market order: 12.25 base of ICP-USDC on Coinbase",
+      "evidence": "Thesis: ICP shows a downtrend and a breakdown under the shelf.\nReasoning: skewindex is 12 and was never stated above."
+    },
+    {
+      "id": "fabricated-08",
+      "group": "fabricated_fact",
+      "claim": "SELL market order: 19.66 base of STG-USDC on Coinbase",
+      "evidence": "Thesis: STG shows a downtrend and a breakdown under the shelf.\nReasoning: volsurface is 40 and was never stated above."
+    },
+    {
+      "id": "fabricated-09",
+      "group": "fabricated_fact",
+      "claim": "SELL market order: 26.65 base of XLM-USDC on Coinbase",
+      "evidence": "Thesis: XLM shows a downtrend and a breakdown under the shelf.\nReasoning: etfflow is 2.2% and was never stated above."
+    },
+    {
+      "id": "fabricated-10",
+      "group": "fabricated_fact",
+      "claim": "SELL market order: 44.60 base of ADA-USDC on Coinbase",
+      "evidence": "Thesis: ADA shows a downtrend and a breakdown under the shelf.\nReasoning: stablecoin is 8 and was never stated above."
+    },
+    {
+      "id": "threshold-01",
+      "group": "threshold_condition",
+      "claim": "BUY market order: 75 USDC of XRP-USDC on Coinbase if RSI minimum 70%",
+      "evidence": "Thesis: XRP shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-02",
+      "group": "threshold_condition",
+      "claim": "SELL market order: 1.4 base of SOL-USDC on Coinbase, no more than 30%",
+      "evidence": "Thesis: SOL shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-03",
+      "group": "threshold_condition",
+      "claim": "Enter only if at least 70%",
+      "evidence": "Thesis: BTC shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-04",
+      "group": "threshold_condition",
+      "claim": "Keep exposure at most 30%",
+      "evidence": "Thesis: ETH shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-05",
+      "group": "threshold_condition",
+      "claim": "Stand aside below 30%",
+      "evidence": "Thesis: LTC shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-06",
+      "group": "threshold_condition",
+      "claim": "Cap the position at max 30%",
+      "evidence": "Thesis: NEAR shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-07",
+      "group": "threshold_condition",
+      "claim": "Invalid if drawdown \u2264 30%",
+      "evidence": "Thesis: ICP shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-08",
+      "group": "threshold_condition",
+      "claim": "Require >= 70% RSI",
+      "evidence": "Thesis: STG shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-09",
+      "group": "threshold_condition",
+      "claim": "Buy above 70% momentum",
+      "evidence": "Thesis: XLM shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "threshold-10",
+      "group": "threshold_condition",
+      "claim": "Need minimum 70% confirmation",
+      "evidence": "Thesis: ADA shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "mandate-01",
+      "group": "mandate_conflict",
+      "claim": "BUY market order: 75 USDC of XRP-USDC on Coinbase",
+      "evidence": "Mandate:\nAllow a starter buy of the named product\nPrincipal instruction:\nDo not trade this product at all\nThesis: XRP shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "mandate-02",
+      "group": "mandate_conflict",
+      "claim": "BUY market order: 50 USDC of SOL-USDC on Coinbase",
+      "evidence": "Mandate:\nPermit a bounded market buy\nPrincipal instruction:\nHalt every buy in this name\nThesis: SOL shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "mandate-03",
+      "group": "mandate_conflict",
+      "claim": "BUY market order: 90 USDC of BTC-USDC on Coinbase",
+      "evidence": "Mandate:\nStarter long is acceptable\nPrincipal instruction:\nNo new longs until review\nThesis: BTC shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "mandate-04",
+      "group": "mandate_conflict",
+      "claim": "BUY market order: 25 USDC of ETH-USDC on Coinbase",
+      "evidence": "Mandate:\nSmall buy may proceed\nPrincipal instruction:\nBuying is forbidden today\nThesis: ETH shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "mandate-05",
+      "group": "mandate_conflict",
+      "claim": "BUY market order: 10 USDC of LTC-USDC on Coinbase",
+      "evidence": "Mandate:\nOpen a starter long\nPrincipal instruction:\nClose only, no buys\nThesis: LTC shows an uptrend and support holds near the shelf."
+    },
+    {
+      "id": "mandate-06",
+      "group": "mandate_conflict",
+      "claim": "SELL market order: 1.4 base of NEAR-USDC on Coinbase",
+      "evidence": "Mandate:\nPermit a bounded market sell\nPrincipal instruction:\nHalt every sell in this name\nThesis: NEAR shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "mandate-07",
+      "group": "mandate_conflict",
+      "claim": "SELL market order: 12.25 base of ICP-USDC on Coinbase",
+      "evidence": "Mandate:\nA starter short is acceptable\nPrincipal instruction:\nNo new shorts until review\nThesis: ICP shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "mandate-08",
+      "group": "mandate_conflict",
+      "claim": "SELL market order: 19.66 base of STG-USDC on Coinbase",
+      "evidence": "Mandate:\nSmall sell may proceed\nPrincipal instruction:\nSelling is forbidden today\nThesis: STG shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "mandate-09",
+      "group": "mandate_conflict",
+      "claim": "SELL market order: 26.65 base of XLM-USDC on Coinbase",
+      "evidence": "Mandate:\nReduce via a market sell\nPrincipal instruction:\nHold the position, do not sell\nThesis: XLM shows a downtrend and a breakdown under the shelf."
+    },
+    {
+      "id": "mandate-10",
+      "group": "mandate_conflict",
+      "claim": "SELL market order: 44.60 base of ADA-USDC on Coinbase",
+      "evidence": "Mandate:\nTrim with a market sell\nPrincipal instruction:\nAdds and trims both wait\nThesis: ADA shows a downtrend and a breakdown under the shelf."
+    }
+  ]
+}
