@@ -18,6 +18,7 @@ import type {
   SentinelStepObjection,
 } from '../types.js';
 
+import { TIER_CONFIGS } from '../tiers.js';
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
 import {
@@ -57,6 +58,7 @@ import {
 } from './budget.js';
 import { randomUUID } from 'crypto';
 import { finiteScore, receiptConfidence } from '../confidence.js';
+import { recordTradeExecutionCascadeError, recordTradeExecutionStepQuality } from './trade-execution-quality.js';
 
 /**
  * Run a single Sentinel verification.
@@ -276,6 +278,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
       signal: budget.controller.signal,
       budgetStartedAt: budget.startedAt,
       budgetMs: budget.budgetMs,
+      // Strict nano contract is trade_execution only. Other modes keep the
+      // published pot-cli prompt and parser. CONFIRM_BLOCKS is unchanged.
+      nanoStepContract: req.mode === 'trade_execution',
     });
   } catch (err) {
     budget.clear();
@@ -358,6 +363,14 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
           ...(req.agent_context ? { agent_context: req.agent_context } : {}),
         },
       };
+    }
+    if (req.mode === 'trade_execution') {
+      const stages = TIER_CONFIGS[tier].cascade;
+      recordTradeExecutionCascadeError({
+        verificationId: id,
+        primaryModel: stages[0] ?? 'unknown',
+        secondaryModel: stages[1] ?? null,
+      });
     }
     throw err;
   }
@@ -551,10 +564,16 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   // action_authorization that is sanitized evidence (caller structural_fact
   // neutralized, no system hint mixed in). Other modes: trace_steps === claim evidence.
   const evidence = modeOutput.evalInput.trace_steps ?? req.evidence ?? '';
-  const rawObjections = normalizeCascadeSteps(steps, evidence).map((s) => {
+  const qualityFlags: { templatedReasoning: boolean; nullQuote: boolean }[] = [];
+  const rawObjections = normalizeCascadeSteps(steps, evidence).map((s, i) => {
     const criterion = criterionByStepId.get(s.step_id) ?? '';
     const prose = s.reasoning.trim();
     const fallbackCriterion = omitInformationalCriterionBody ? '' : criterion;
+    const originalQuote = steps[i]?.quote;
+    qualityFlags.push({
+      templatedReasoning: prose.length === 0,
+      nullQuote: originalQuote == null || String(originalQuote).trim() === '',
+    });
     return {
       step_id: s.step_id,
       criterion,
@@ -568,6 +587,19 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         : synthesizeReasoning(String(s.predicate), fallbackCriterion, s.quote),
     };
   });
+
+  if (req.mode === 'trade_execution') {
+    const primaryModel = cascadeOutput.modelsUsed[0] ?? 'unknown';
+    const surfacedModel = cascadeOutput.stepModel ?? primaryModel;
+    recordTradeExecutionStepQuality({
+      verificationId: id,
+      surfacedModel,
+      primaryModel,
+      cascadeReason: cascadeOutput.cascadeReason ?? null,
+      malformedStepFallback: cascadeOutput.malformedStepFallback === true,
+      steps: qualityFlags,
+    });
+  }
 
   // 5b. Objection evidence bind (surface gate only — verdict unchanged).
   // Numeric specialist reasons are claims; where checkable against mandate /

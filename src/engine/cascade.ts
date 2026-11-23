@@ -19,6 +19,7 @@ import {
   type ItemResult,
   type EvalMode,
 } from 'pot-cli/plv';
+import { MALFORMED_NANO_STEP_MARKER } from '../../vendor/pot-cli-0.8.13/nano-step-contract.js';
 
 import { runCascade, type CascadeConfig } from 'pot-cli/cascade';
 import type { SentinelTier } from '../types.js';
@@ -38,6 +39,11 @@ export interface CascadeInput {
   /** Wall-clock start for elapsed reporting (defaults to now). */
   budgetStartedAt?: number;
   budgetMs?: number;
+  /**
+   * trade_execution only. Asks the vendored pot-cli patch to use the strict
+   * nano contract. Other modes leave the published evaluator untouched.
+   */
+  nanoStepContract?: boolean;
 }
 
 export interface CascadeOutput {
@@ -48,6 +54,19 @@ export interface CascadeOutput {
   degradedMode?: boolean;
   /** True if cascade completed under budget without abort. */
   budget_ok?: boolean;
+  /** Cascade error strings (primary_error_fallback and similar). */
+  cascadeErrors?: string[];
+  /**
+   * True when the primary threw MalformedNanoStepError and the secondary ran.
+   * HTTP 401/429/5xx are primary errors too, but they are not this flag.
+   */
+  malformedStepFallback?: boolean;
+  /**
+   * Model whose step_evaluations are on the receipt. This is the secondary
+   * only when that call returned a result. A swift call that was attempted
+   * and failed leaves the primary's steps, so this stays serv-nano.
+   */
+  stepModel?: string;
 }
 
 /**
@@ -66,6 +85,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
   const evalOptions: EvalOptions = {
     mode: input.evalMode,
     maxTokens: 4096,
+    ...(input.nanoStepContract ? { nanoStepContract: true } : {}),
   };
 
   // Partial knowledge for budget exhaustion: only BLOCK is preservable.
@@ -116,6 +136,8 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
         result,
         modelsUsed: [stages[0]],
         budget_ok: true,
+        malformedStepFallback: false,
+        stepModel: stages[0],
       };
     }
 
@@ -149,13 +171,20 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     if (cr.secondaryInvoked && stages[1]) {
       modelsUsed.push(stages[1]);
     }
+    // Receipt steps are secondary's only when that result exists. secondaryInvoked
+    // stays true when swift was called and threw (secondary_error_fallback).
+    const stepModel = cr.secondary ? stages[1] : stages[0];
 
+    const cascadeErrors = cr.errors ?? [];
     return {
       result,
       modelsUsed,
       cascadeReason: cr.reason,
       degradedMode: cr.degradedMode === true,
       budget_ok: true,
+      cascadeErrors,
+      malformedStepFallback: cascadeErrors.some((e) => e.includes(MALFORMED_NANO_STEP_MARKER)),
+      stepModel,
     };
   } catch (err) {
     if (err instanceof EngineBudgetExhaustedError) {
