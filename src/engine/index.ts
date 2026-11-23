@@ -16,11 +16,12 @@ import type {
   SentinelVerifyResponse,
   SentinelTier,
   SentinelStepObjection,
+  TradeExecutionCascadeTrace,
 } from '../types.js';
 
 import { TIER_CONFIGS } from '../tiers.js';
 import { getModeHandler } from './modes/index.js';
-import { runSentinelCascade } from './cascade.js';
+import { runSentinelCascade, snapshotCascadeSteps, type CascadeOutput } from './cascade.js';
 import {
   mapVerdict,
   canPromoteStep2Only,
@@ -538,12 +539,13 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const modelSteps = cascadeOutput.result.step_evaluations;
   let steps = modelSteps;
   let plainOrderReason: string | null = null;
+  let plainOrderDecision: ReturnType<typeof resolveTradeExecutionPlainOrder> | null = null;
   if (req.mode === 'trade_execution') {
-    const decision = resolveTradeExecutionPlainOrder(req.claim, req.evidence ?? '', modelSteps);
-    if (decision.applied) {
-      verdict = decision.publicVerdict;
-      steps = decision.steps;
-      plainOrderReason = decision.reasoning;
+    plainOrderDecision = resolveTradeExecutionPlainOrder(req.claim, req.evidence ?? '', modelSteps);
+    if (plainOrderDecision.applied) {
+      verdict = plainOrderDecision.publicVerdict;
+      steps = plainOrderDecision.steps;
+      plainOrderReason = plainOrderDecision.reasoning;
     }
   }
   let avgScore = steps.length > 0
@@ -683,6 +685,42 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         : {}),
       ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(req.agent_context ? { agent_context: req.agent_context } : {}),
+      ...cascadeTrace(cascadeOutput.modelTrace, plainOrderDecision),
+    },
+  };
+}
+
+/**
+ * Attach the frozen model snapshot plus the plain-order reading.
+ * Returns nothing for other modes. Does not read env or the request prompt.
+ */
+function cascadeTrace(
+  trace: CascadeOutput['modelTrace'],
+  decision: ReturnType<typeof resolveTradeExecutionPlainOrder> | null,
+): { cascade_trace: TradeExecutionCascadeTrace } | Record<string, never> {
+  if (!trace || !decision) return {};
+  const assessment = decision.assessment;
+  return {
+    cascade_trace: {
+      cascade_reason: trace.cascadeReason,
+      primary_verdict: trace.primaryVerdict,
+      secondary_verdict: trace.secondaryVerdict,
+      steps_source: trace.stepsSource,
+      primary_steps: trace.primarySteps,
+      ...(trace.secondarySteps ? { secondary_steps: trace.secondarySteps } : {}),
+      resolver: {
+        applied: decision.applied,
+        reason: decision.reason,
+        rewritten_steps: snapshotCascadeSteps(decision.steps),
+        assessment: {
+          plain: assessment.plain,
+          thresholdCited: assessment.thresholdCited,
+          thresholdContradicted: assessment.thresholdContradicted,
+          direction: assessment.direction,
+          fabrication: assessment.fabrication,
+          mandateConflict: assessment.mandateConflict,
+        },
+      },
     },
   };
 }

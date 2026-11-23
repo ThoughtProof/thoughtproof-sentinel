@@ -474,6 +474,12 @@ export interface SentinelVerifyResponse {
      */
     digest_salt?: string;
     /**
+     * trade_execution diagnostic. Captured from the model results before the
+     * plain-order resolver rewrites receipt steps. Not a verdict input and
+     * not part of the signed canonical body (v1 or v2).
+     */
+    cascade_trace?: TradeExecutionCascadeTrace;
+    /**
      * Reliability Option 3 — engine budget / timeout trace.
      * Present when cascade hit ENGINE_BUDGET_MS (45s) before Vercel wall (60s).
      */
@@ -488,6 +494,44 @@ export interface SentinelVerifyResponse {
       known_internal_verdict: string | null;
       public_verdict: 'BLOCK' | 'UNCERTAIN';
       late_result_ignored: boolean;
+    };
+  };
+}
+
+/** One raw model step, frozen before the plain-order resolver runs. */
+export interface CascadeTraceStep {
+  step_id: string;
+  predicate: string;
+  score: number;
+  reasoning: string;
+  quote: string | null;
+}
+
+/**
+ * trade_execution only. primary_steps are nano's raw steps even when the
+ * receipt shows swift. The resolver block records what the plain-order
+ * reading did after that snapshot.
+ */
+export interface TradeExecutionCascadeTrace {
+  cascade_reason: string | null;
+  primary_verdict: string | null;
+  secondary_verdict: string | null;
+  /** Model whose steps are on the receipt (serv-nano, or serv-swift when it returned). */
+  steps_source: string;
+  primary_steps: CascadeTraceStep[];
+  /** Present only when the secondary model returned a result. */
+  secondary_steps?: CascadeTraceStep[];
+  resolver: {
+    applied: boolean;
+    reason: string;
+    rewritten_steps: CascadeTraceStep[];
+    assessment: {
+      plain: boolean;
+      thresholdCited: boolean;
+      thresholdContradicted: boolean;
+      direction: 'conflict' | 'aligned' | 'insufficient';
+      fabrication: boolean;
+      mandateConflict: boolean;
     };
   };
 }
