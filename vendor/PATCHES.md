@@ -13,8 +13,42 @@ is the npm tarball below, not a GitHub source archive.
 `@pot-sdk2/bridge` stays pinned to `1.2.0`. Engines stay Node.js `>=22`.
 `GET /sentinel/health` reports the installed package version as `pot_cli`.
 
-No vendor patch is applied. There is no `postinstall`, no `patch-package`,
-and no `file:` dependency on `vendor/`. `vendor/pot-cli-0.8.10-tp.2.tgz`
+`scripts/apply-pot-cli-patches.mjs` runs from `postinstall` and patches the
+installed `0.8.13` dist in place. It does not change the npm pin, the
+lockfile integrity, or `coerceQuote`. Reverting `coerceQuote` is intentionally
+out of scope: under 0.8.8 an omitted `quote` threw, and the cascade then
+let a lone swift ALLOW through.
+
+The patch is `vendor/pot-cli-0.8.13/nano-step-contract.js`, copied to
+`node_modules/pot-cli/dist/plan/nano-step-contract.js`, plus a replacement of
+`evaluateStepsWithLLM` (`evaluate-steps-with-llm.snippet.js`). It is inert
+unless the caller passes `nanoStepContract: true`. Sentinel sets that flag
+only for `mode=trade_execution`, and only serv-nano faithfulness calls use it.
+
+What the patch does, and why it lives in pot-cli: the faithfulness prompt,
+the JSON parse, and the one model retry all happen inside private
+`evaluateStepsWithLLM`, before Sentinel sees a step. A Sentinel-side wrapper
+cannot alias `reason` → `reasoning` or ask nano again without reimplementing
+that call. The patch:
+
+- appends a strict output contract to the system prompt (the base
+  `FAITHFULNESS_EVALUATOR_PROMPT` string is not edited);
+- accepts `reason` as an alias of `reasoning`;
+- recomputes `predicate` from the numeric score and does not require the
+  model's `predicate` (serv-nano sends `verdict: pass/fail` instead);
+- if a step still has no score, or neither reasoning nor a quote, retries
+  serv-nano once with the same strict contract;
+- if it is still malformed, throws `MalformedNanoStepError`. The existing
+  cascade `primary_error_fallback` then runs the tier's secondary model.
+  On the default `standard` tier that secondary is serv-swift, and the
+  0.8.9+ clamp turns a permissive secondary verdict into HOLD. Checkpoint
+  (nano solo) has no secondary: the throw stays an error, never ALLOW.
+
+A missing quote on a step that already has a score and reasoning is not
+malformed. `coerceQuote` and `PROV_FAIL_01` still cap score ≥ 0.75 with a
+null quote at 0.25. That provenance rule is unchanged.
+
+`vendor/pot-cli-0.8.10-tp.2.tgz`
 is a historical rollback artifact (tp.1 was never shipped). The tp.2
 markers (`coerceQuote` rejecting `"undefined"` / `"null"`,
 `appendReasoningNote`, MCP `Principal mandate (verbatim quote):`, and

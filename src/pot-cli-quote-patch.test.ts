@@ -70,6 +70,18 @@ describe('published pot-cli identity with the Sentinel fixes', () => {
     expect(src).toContain('USER INSTRUCTION:');
     expect(src).toContain('recoverCiteableQuote(coerceQuote(ev.quote)');
     expect(src).toContain('appendReasoningNote(processed.reasoning');
+    // Vendored nano contract is applied on top of 0.8.13. It must not remove
+    // coerceQuote, and it stays opt-in via nanoStepContract.
+    expect(src).toContain("from './nano-step-contract.js'");
+    expect(src).toContain('options.nanoStepContract === true');
+    expect(src).toContain('MalformedNanoStepError');
+    const contract = readFileSync(
+      join(process.cwd(), 'node_modules', 'pot-cli', 'dist', 'plan', 'nano-step-contract.js'),
+      'utf8',
+    );
+    expect(contract).toContain('sentinel-malformed-nano-step');
+    expect(contract).toContain('STRICT OUTPUT CONTRACT');
+    expect(contract).toContain('faithfulnessPredicateFromScore');
     // Unpatched 0.8.10 used reasoning += which produces the undefined prefix.
     expect(src).not.toMatch(
       /processed\.reasoning \+= ['"] \[PROVENANCE DOWNGRADE: quote invalid or missing\]['"]/,
