@@ -61,6 +61,12 @@ export interface CascadeOutput {
    * HTTP 401/429/5xx are primary errors too, but they are not this flag.
    */
   malformedStepFallback?: boolean;
+  /**
+   * Model whose step_evaluations are on the receipt. This is the secondary
+   * only when that call returned a result. A swift call that was attempted
+   * and failed leaves the primary's steps, so this stays serv-nano.
+   */
+  stepModel?: string;
 }
 
 /**
@@ -131,6 +137,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
         modelsUsed: [stages[0]],
         budget_ok: true,
         malformedStepFallback: false,
+        stepModel: stages[0],
       };
     }
 
@@ -164,6 +171,9 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     if (cr.secondaryInvoked && stages[1]) {
       modelsUsed.push(stages[1]);
     }
+    // Receipt steps are secondary's only when that result exists. secondaryInvoked
+    // stays true when swift was called and threw (secondary_error_fallback).
+    const stepModel = cr.secondary ? stages[1] : stages[0];
 
     const cascadeErrors = cr.errors ?? [];
     return {
@@ -174,6 +184,7 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
       budget_ok: true,
       cascadeErrors,
       malformedStepFallback: cascadeErrors.some((e) => e.includes(MALFORMED_NANO_STEP_MARKER)),
+      stepModel,
     };
   } catch (err) {
     if (err instanceof EngineBudgetExhaustedError) {

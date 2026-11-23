@@ -84,7 +84,12 @@ function emptyBucket(): ModelBucket {
   };
 }
 
+let cascadeErrorCount = 0;
 const buckets = new Map<string, ModelBucket>();
+
+export function tradeExecutionCascadeErrorCount(): number {
+  return cascadeErrorCount;
+}
 
 function bucket(model: string): ModelBucket {
   let b = buckets.get(model);
@@ -169,6 +174,31 @@ export function countsAsAllow(
 
 export function resetTradeExecutionQualityForTests(): void {
   buckets.clear();
+  cascadeErrorCount = 0;
+}
+
+/**
+ * Both models failed before any receipt existed. Steps are not attributed.
+ */
+export function recordTradeExecutionCascadeError(
+  sample: { verificationId: string; primaryModel: string; secondaryModel: string | null },
+  log: (line: string) => void = (line) => console.log(line),
+): void {
+  cascadeErrorCount += 1;
+  log(JSON.stringify({
+    event: TRADE_EXECUTION_QUALITY_EVENT,
+    verification_id: sample.verificationId,
+    cascade_error: true,
+    step_model: null,
+    surfaced_model: null,
+    primary_model: sample.primaryModel,
+    secondary_model: sample.secondaryModel,
+    steps: 0,
+    templated_reasoning_steps: 0,
+    null_or_absent_quotes: 0,
+    malformed_step_fallback: false,
+    primary_block: false,
+  }));
 }
 
 /**

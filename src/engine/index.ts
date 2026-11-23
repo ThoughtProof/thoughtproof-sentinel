@@ -18,6 +18,7 @@ import type {
   SentinelStepObjection,
 } from '../types.js';
 
+import { TIER_CONFIGS } from '../tiers.js';
 import { getModeHandler } from './modes/index.js';
 import { runSentinelCascade } from './cascade.js';
 import {
@@ -57,7 +58,7 @@ import {
 } from './budget.js';
 import { randomUUID } from 'crypto';
 import { finiteScore, receiptConfidence } from '../confidence.js';
-import { recordTradeExecutionStepQuality } from './trade-execution-quality.js';
+import { recordTradeExecutionCascadeError, recordTradeExecutionStepQuality } from './trade-execution-quality.js';
 
 /**
  * Run a single Sentinel verification.
@@ -363,6 +364,14 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         },
       };
     }
+    if (req.mode === 'trade_execution') {
+      const stages = TIER_CONFIGS[tier].cascade;
+      recordTradeExecutionCascadeError({
+        verificationId: id,
+        primaryModel: stages[0] ?? 'unknown',
+        secondaryModel: stages[1] ?? null,
+      });
+    }
     throw err;
   }
   budget.clear();
@@ -580,8 +589,8 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   });
 
   if (req.mode === 'trade_execution') {
-    const surfacedModel = cascadeOutput.modelsUsed[cascadeOutput.modelsUsed.length - 1] ?? 'unknown';
-    const primaryModel = cascadeOutput.modelsUsed[0] ?? surfacedModel;
+    const primaryModel = cascadeOutput.modelsUsed[0] ?? 'unknown';
+    const surfacedModel = cascadeOutput.stepModel ?? primaryModel;
     recordTradeExecutionStepQuality({
       verificationId: id,
       surfacedModel,

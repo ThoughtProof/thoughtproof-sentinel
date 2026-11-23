@@ -6,7 +6,7 @@
 {"event":"sentinel.trade_execution.step_quality","surfaced_model":"serv-swift","primary_model":"serv-nano","step_model":"serv-swift","cascade_reason":"primary_error_fallback","steps":3,"templated_reasoning_steps":1,"null_or_absent_quotes":2,"malformed_step_fallback":true,"primary_block":false}
 ```
 
-`step_model` is the model that produced the steps on the receipt (`surfaced_model`). Quote and templated-reasoning shares are that model's. A swift fallback is not added to serv-nano's step totals. `primary_block` and `malformed_step_fallback` stay on `primary_model`.
+`step_model` is the model whose steps are on the receipt. It is not the last model called. When swift is invoked and errors, the receipt still carries nano's steps and `step_model` is `serv-nano`. A swift success that supplies the receipt steps uses `serv-swift`. When both models fail, the log is `cascade_error: true` with `step_model: null` and `steps: 0`, and neither model's step counters move.
 
 The line carries counts only. It does not include the claim, the evidence, quotes, or reasoning text.
 
