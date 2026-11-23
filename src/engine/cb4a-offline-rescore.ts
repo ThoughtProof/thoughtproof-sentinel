@@ -6,7 +6,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { runCascade } from 'pot-cli/cascade';
-import { deriveVerdict, type GoldStep } from 'pot-cli/plv';
+import { deriveVerdict, type GoldStep, type ItemResult } from 'pot-cli/plv';
 import { mapVerdict } from './verdict.js';
 import { countsAsAllow } from './trade-execution-quality.js';
 import { parseRecordedStepArray, replayFaithfulness } from './replay-faithfulness.js';
@@ -177,7 +177,10 @@ function strictSteps(attempts: string[]): { steps: unknown[] | null; malformed: 
   return { steps: null, malformed: true };
 }
 
-export async function rescorePaid(fixture: PaidFixture): Promise<{
+export async function rescorePaid(
+  fixture: PaidFixture,
+  step0?: (result: ItemResult, claim: string, evidence: string) => ItemResult,
+): Promise<{
   columns: Record<string, RateBlock>;
   grok: Record<string, RateBlock>;
   sanity: {
@@ -191,6 +194,8 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
   const nanoCurrent: ScoredDraw[] = [];
   const fix1: ScoredDraw[] = [];
   const fix1Swift: ScoredDraw[] = [];
+  const fix1Step0: ScoredDraw[] = [];
+  const fix1Step0Swift: ScoredDraw[] = [];
   const aliasOnly: ScoredDraw[] = [];
   let nanoMatch = 0;
   let nanoCompared = 0;
@@ -237,10 +242,21 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
       ...base,
       verdict: await cascadeVerdict(strict.malformed ? null : strictItem, swift),
     });
+    if (step0 && strictItem) {
+      const nano3 = step0(strictItem, cse.claim, cse.evidence);
+      const swift3 = swift ? step0(swift, cse.claim, cse.evidence) : null;
+      fix1Step0.push({ ...base, verdict: await cascadeVerdict(nano3, swift3) });
+      fix1Step0Swift.push({ ...base, verdict: await cascadeVerdict(nano3, swift3) });
+    } else if (step0) {
+      const swift3 = swift ? step0(swift, cse.claim, cse.evidence) : null;
+      fix1Step0.push({ ...base, verdict: 'ERROR' });
+      fix1Step0Swift.push({ ...base, verdict: await cascadeVerdict(null, swift3) });
+    }
   }
 
   const grokCurrent: ScoredDraw[] = [];
   const grokFix1: ScoredDraw[] = [];
+  const grokFix3: ScoredDraw[] = [];
   let grokMatch = 0;
   let grokFix1Same = 0;
   for (const draw of fixture.grok) {
@@ -255,6 +271,14 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
     if (currentPublic === fix1Public) grokFix1Same += 1;
     grokCurrent.push({ ...base, verdict: currentPublic });
     grokFix1.push({ ...base, verdict: fix1Public });
+    if (step0 && current) {
+      grokFix3.push({
+        ...base,
+        verdict: mapVerdict(step0(current, cse.claim, cse.evidence).verdict, 'trade_execution'),
+      });
+    } else if (step0) {
+      grokFix3.push({ ...base, verdict: 'ERROR' });
+    }
   }
 
   const g = fixture.grok.length;
@@ -263,11 +287,18 @@ export async function rescorePaid(fixture: PaidFixture): Promise<{
       current_main: tally(nanoCurrent),
       fix1_strict_recorded: tally(fix1),
       fix1_swift_fallback: tally(fix1Swift),
+      ...(step0
+        ? {
+            fix1_plus_fix3: tally(fix1Step0),
+            fix1_plus_fix3_swift_fallback: tally(fix1Step0Swift),
+          }
+        : {}),
       alias_only_on_raw_nano: tally(aliasOnly),
     },
     grok: {
       current_main: tally(grokCurrent),
       fix1: tally(grokFix1),
+      ...(step0 ? { fix1_plus_fix3: tally(grokFix3) } : {}),
     },
     sanity: {
       nano_current_matches_recorded: `${nanoMatch}/${nanoCompared}`,
@@ -291,12 +322,17 @@ function signedOutcome(action: string, r24h: number): 'winner' | 'loser' | 'flat
   return 'flat';
 }
 
-export function rescoreNov23(fixture: Nov23Fixture): {
+export function rescoreNov23(
+  fixture: Nov23Fixture,
+  step0?: (result: ItemResult, claim: string, evidence: string) => ItemResult,
+): {
   current: RateBlock;
+  fix3?: RateBlock;
   replay_matches_recorded_block_or_not: string;
   not_rescored: string[];
 } {
   const current: ScoredDraw[] = [];
+  const fix3: ScoredDraw[] = [];
   let match = 0;
   for (const row of fixture.rows) {
     const claim = fixture.claims[String(row.cycle)];
@@ -322,14 +358,26 @@ export function rescoreNov23(fixture: Nov23Fixture): {
     const derived = deriveVerdict(steps, TRADE_GOLD);
     const replayed = mapVerdict(derived.verdict, 'trade_execution');
     if (replayed === recorded) match += 1;
+    if (step0 && claim) {
+      const item: ItemResult = {
+        id: `c${row.cycle}`,
+        step_evaluations: steps,
+        verdict: derived.verdict,
+        verdict_reasoning: derived.reasoning,
+        provenance_violations: [],
+      };
+      const adjusted = step0(item, claim.claim, '');
+      fix3.push({ ...base, verdict: mapVerdict(adjusted.verdict, 'trade_execution') });
+    }
   }
   return {
     current: tally(current),
+    ...(step0 ? { fix3: tally(fix3) } : {}),
     replay_matches_recorded_block_or_not: `${match}/${fixture.rows.length}`,
     not_rescored: [
       'Fix 1 is not applied: the Nov 23 file stores Sentinel objections after provenance, not serv-nano JSON.',
       'Swift fallback is not applied: 974 of 996 calls never invoked swift, and the file has no raw swift text.',
-      'step_0 not-applicable is not on this branch.',
+      ...(step0 ? [] : ['step_0 not-applicable is not applied unless a step0 adjuster is passed.']),
     ],
   };
 }

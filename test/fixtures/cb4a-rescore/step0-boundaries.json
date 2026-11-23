@@ -1,0 +1,30 @@
+{
+  "plain": [
+    "BUY market order: 75 USDC of XRP-USDC on Coinbase",
+    "SELL market order: 1.4 base of SOL-USDC on Coinbase",
+    "SELL market order: 76.15649842 base of XRP-USDC on Coinbase",
+    "BUY market order: 10 USDC of STG-USDC on Coinbase"
+  ],
+  "upper": [
+    "no more than 30%",
+    "at most 30%",
+    "below 30%",
+    "max 30%",
+    "≤ 30%",
+    "<= 30%"
+  ],
+  "lower": [
+    "at least 70%",
+    "minimum 70%",
+    "above 70%",
+    "≥ 70%",
+    ">= 70%",
+    "RSI minimum 70%"
+  ],
+  "ambiguous": [
+    "BUY if it looks good",
+    "BUY market order: 75 USDC of XRP-USDC on Coinbase if RSI minimum 70%",
+    "SELL market order: 1.4 base of SOL-USDC on Coinbase, no more than 30%",
+    "maybe sell"
+  ]
+}

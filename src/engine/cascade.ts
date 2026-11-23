@@ -20,6 +20,7 @@ import {
   type EvalMode,
 } from 'pot-cli/plv';
 import { MALFORMED_NANO_STEP_MARKER } from '../../vendor/pot-cli-0.8.13/nano-step-contract.js';
+import { adjustTradeExecutionSteps } from './trade-execution-step0.js';
 
 import { runCascade, type CascadeConfig } from 'pot-cli/cascade';
 import type { SentinelTier } from '../types.js';
@@ -44,6 +45,11 @@ export interface CascadeInput {
    * nano contract. Other modes leave the published evaluator untouched.
    */
   nanoStepContract?: boolean;
+  /**
+   * trade_execution only. Plain market orders make a failing step_0 not
+   * applicable inside pot-cli, before the mandate-conflict cap.
+   */
+  tradeExecutionStep0?: boolean;
 }
 
 export interface CascadeOutput {
@@ -86,6 +92,12 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     mode: input.evalMode,
     maxTokens: 4096,
     ...(input.nanoStepContract ? { nanoStepContract: true } : {}),
+    ...(input.tradeExecutionStep0
+      ? {
+          adjustStepsBeforeVerdict: (steps, item) =>
+            adjustTradeExecutionSteps(steps, String(item.answer ?? '')),
+        }
+      : {}),
   };
 
   // Partial knowledge for budget exhaustion: only BLOCK is preservable.
