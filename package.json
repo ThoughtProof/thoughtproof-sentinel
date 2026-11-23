@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/apply-pot-cli-patches.mjs",
+    "rescore:cb4a": "node scripts/cb4a-offline-rescore.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
