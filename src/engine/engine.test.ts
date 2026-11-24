@@ -122,7 +122,7 @@ describe('Sentinel Engine', () => {
       expect(res.verdict).toBe('ALLOW');
       expect(res.mode).toBe('plan_revision');
       expect(res.tier).toBe('standard'); // default
-      expect(res.meta.models_used).toEqual(['serv-nano', 'serv-swift']); // standard now runs the swift cascade
+      expect(res.meta.models_used).toEqual(['serv-pro', 'serv-swift']); // standard runs the pro->swift cascade
      expect(mockRunCascade).toHaveBeenCalledOnce();
     });
 
@@ -151,7 +151,7 @@ describe('Sentinel Engine', () => {
       const res = await verify(req);
 
      expect(res.verdict).toBe('BLOCK');
-      expect(res.meta.models_used).toEqual(['serv-nano']); // early exit, no pro
+      expect(res.meta.models_used).toEqual(['serv-pro']); // early exit, primary only
    });
 
     it('should return UNCERTAIN for HOLD verdict', async () => {
@@ -323,7 +323,7 @@ describe('Sentinel Engine', () => {
       expect(mockRunCascade).not.toHaveBeenCalled();
     });
 
-    it('standard uses runCascade (Nano→Pro)', async () => {
+    it('standard uses runCascade (Pro→Swift)', async () => {
       mockRunCascade.mockResolvedValueOnce({
         verdict: 'ALLOW',
         reason: 'agreement_allow',
