@@ -1,4 +1,9 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "cursor/trade-contract-offline-20261124": false
+    }
+  },
   "rewrites": [
     { "source": "/openapi.json", "destination": "/api/openapi" },
     { "source": "/docs", "destination": "/api/docs" },
