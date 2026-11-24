@@ -7,7 +7,7 @@ import { buildAdapterRequest } from './messages.ts';
 import { MODEL_CONFIG, type CascadeFailure } from './model-config.ts';
 import { uniqueQuoteSpan } from './spans.ts';
 
-export { buildAdapterMessages, buildAdapterRequest } from './messages.ts';
+export { buildAdapterMessages, buildAdapterRequest, XAI_CHAT_COMPLETIONS_URL } from './messages.ts';
 export type { AdapterChatRequest, AdapterMessage, AdapterStage } from './messages.ts';
 
 /** Local adapter id. It is not read from the model payload. */
@@ -342,7 +342,7 @@ function blockVerdict(): EvaluationResult {
 }
 
 /**
- * serv-swift is block-only. A contract BLOCK or an explicit BLOCK verdict stays
+ * The secondary model is block-only. A contract BLOCK or an explicit BLOCK verdict stays
  * BLOCK. ALLOW, CONDITIONAL_ALLOW, HOLD, UNCERTAIN, and every other outcome
  * become UNCERTAIN. A failed exchange is UNCERTAIN.
  */

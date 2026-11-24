@@ -1,37 +1,85 @@
+import { VERDICT_SCHEMA_ID } from './verdict-schema.ts';
+
 /**
- * Pinned model configuration for the offline trade-contract adapter.
- * Nothing in this experiment reads credentials or calls this endpoint.
- * OpenServ accepts `max_completion_tokens` (not `max_tokens`) and honours `seed`.
- * Seed 42 is pot-cli's DEFAULT_EVAL_SEED. Temperature 0 matches that evaluator.
- * max_completion_tokens 4096 and timeoutMs 45000 match the Sentinel standard cascade.
- * This candidate does not retry a model. A failed primary may fall through once
- * to serv-swift. A schema-valid primary decision does not fall through.
- * On that fall-through, serv-swift is block-only: BLOCK stays BLOCK, and
- * ALLOW, CONDITIONAL_ALLOW, HOLD, UNCERTAIN, or any other non-BLOCK outcome
- * becomes UNCERTAIN. If serv-swift also fails, the result is UNCERTAIN.
+ * Pinned xAI chat-completions configuration. This module never calls the API
+ * and never reads an API key.
  *
- * `buildAdapterRequest` copies every `body` leaf below into the chat-completions
- * JSON. `runner` leaves are not body fields: the runner or this adapter applies
- * them (endpoint URL, timeout, retries, and the block-only cascade policy).
+ * Docs retrieved 2026-11-24:
+ * - Models and prices: https://docs.x.ai/docs/models
+ * - Chat completions request fields, including seed and max_completion_tokens:
+ *   https://docs.x.ai/developers/rest-api-reference/inference/chat-completions
+ * - Structured outputs (`response_format.type` `json_schema`, `strict`):
+ *   https://docs.x.ai/docs/guides/structured-outputs
+ *
+ * Primary is grok-4.7, the model that page names for chat. Secondary is
+ * grok-4.3, a distinct text model on the same page. Prices are the global
+ * endpoint rates. The long-context row is the public worst case once the
+ * prompt reaches 200k tokens. The US regional endpoint is not used; it bills
+ * 1.1x and is not this URL.
+ *
+ * `seed` is sent because that reference documents it. Determinism is best
+ * effort and not guaranteed. `max_tokens` is deprecated there and is not sent;
+ * `max_completion_tokens` is the documented field.
+ *
+ * A schema-valid primary decision does not fall through. On fall-through the
+ * secondary is block-only: BLOCK stays BLOCK; ALLOW, CONDITIONAL_ALLOW, HOLD,
+ * and any other non-BLOCK outcome become UNCERTAIN. If the secondary also
+ * fails, the result is UNCERTAIN.
+ *
+ * Body leaves are copied into the chat-completions JSON. Runner leaves are
+ * not: endpoint, docs, prices, timeout, retries, and the cascade policy.
  */
+export const XAI_CHAT_COMPLETIONS_URL = 'https://api.x.ai/v1/chat/completions';
+
+const priceSource = {
+  currency: 'USD',
+  per: '1M_tokens',
+  docUrl: 'https://docs.x.ai/docs/models',
+  retrievedOn: '2026-11-24',
+  longContextFromPromptTokens: 200_000,
+} as const;
+
 export const MODEL_CONFIG = {
-  provider: 'openserv',
+  provider: 'xai',
   transport: 'openai-compatible',
-  baseUrl: 'https://inference-api.openserv.ai/v1',
+  baseUrl: 'https://api.x.ai/v1',
   chatPath: '/chat/completions',
-  responseFormat: 'json_object',
+  docs: {
+    models: 'https://docs.x.ai/docs/models',
+    chatCompletions: 'https://docs.x.ai/developers/rest-api-reference/inference/chat-completions',
+    structuredOutputs: 'https://docs.x.ai/docs/guides/structured-outputs',
+    retrievedOn: '2026-11-24',
+  },
+  responseFormat: {
+    type: 'json_schema',
+    name: 'trade_contract_adapter_v1',
+    strict: true,
+    schemaId: VERDICT_SCHEMA_ID,
+  },
   primary: {
-    model: 'serv-nano',
+    model: 'grok-4.7',
     temperature: 0,
     seed: 42,
     max_completion_tokens: 4096,
+    pricing: {
+      ...priceSource,
+      contextTokens: 500_000,
+      shortContext: { input: 2, cachedInput: 0.5, output: 6 },
+      longContext: { input: 4, cachedInput: 1, output: 12 },
+    },
   },
   cascade: {
     secondary: {
-      model: 'serv-swift',
+      model: 'grok-4.3',
       temperature: 0,
       seed: 42,
       max_completion_tokens: 4096,
+      pricing: {
+        ...priceSource,
+        contextTokens: 1_000_000,
+        shortContext: { input: 1.25, cachedInput: 0.2, output: 2.5 },
+        longContext: { input: 2.5, cachedInput: 0.4, output: 5 },
+      },
     },
     when: [
       'timeout',
@@ -42,7 +90,7 @@ export const MODEL_CONFIG = {
       'schema_violation',
       'missing_checks',
     ],
-    /** Swift may publish only BLOCK. Every other outcome, including failure, is UNCERTAIN. */
+    /** Secondary may publish only BLOCK. Every other outcome, including failure, is UNCERTAIN. */
     secondaryPolicy: 'block_only',
     onSecondaryBlock: 'BLOCK',
     onSecondaryNonBlock: 'UNCERTAIN',
@@ -58,34 +106,36 @@ export type CascadeFailure = (typeof MODEL_CONFIG.cascade.when)[number];
 type BodyField = { role: 'body'; wire: string; stage?: 'primary' | 'secondary' };
 type RunnerField = { role: 'runner'; reason: string };
 
-/**
- * Complete partition of every leaf in MODEL_CONFIG.
- * A new config leaf must be classified here or the audit test fails.
- * `responseFormat` is sent as OpenAI-compatible `response_format: { type }`.
- */
-export const CONFIG_FIELD_ROLE = {
-  provider: { role: 'runner', reason: 'Provider name. The runner selects the client. Not a JSON body field.' },
-  transport: { role: 'runner', reason: 'Wire protocol. Not a JSON body field.' },
-  baseUrl: { role: 'runner', reason: 'Endpoint URL. Not a JSON body field.' },
-  chatPath: { role: 'runner', reason: 'Endpoint path. Not a JSON body field.' },
-  responseFormat: { role: 'body', wire: 'response_format' },
-  'primary.model': { role: 'body', wire: 'model', stage: 'primary' },
-  'primary.temperature': { role: 'body', wire: 'temperature', stage: 'primary' },
-  'primary.seed': { role: 'body', wire: 'seed', stage: 'primary' },
-  'primary.max_completion_tokens': { role: 'body', wire: 'max_completion_tokens', stage: 'primary' },
-  'cascade.secondary.model': { role: 'body', wire: 'model', stage: 'secondary' },
-  'cascade.secondary.temperature': { role: 'body', wire: 'temperature', stage: 'secondary' },
-  'cascade.secondary.seed': { role: 'body', wire: 'seed', stage: 'secondary' },
-  'cascade.secondary.max_completion_tokens': { role: 'body', wire: 'max_completion_tokens', stage: 'secondary' },
-  'cascade.when': { role: 'runner', reason: 'When the adapter may call swift. Not a JSON body field.' },
-  'cascade.secondaryPolicy': { role: 'runner', reason: 'Block-only publication rule. Not a JSON body field.' },
-  'cascade.onSecondaryBlock': { role: 'runner', reason: 'Adapter keeps a swift BLOCK. Not a JSON body field.' },
-  'cascade.onSecondaryNonBlock': { role: 'runner', reason: 'Adapter withholds every non-BLOCK swift outcome. Not a JSON body field.' },
-  'cascade.onSecondaryFailure': { role: 'runner', reason: 'Adapter result when swift fails. Not a JSON body field.' },
-  'cascade.confirmBlocks': { role: 'runner', reason: 'No extra confirm call. Not a JSON body field.' },
-  'cascade.retriesPerModel': { role: 'runner', reason: 'Runner retry count. Not a JSON body field.' },
-  'cascade.timeoutMs': { role: 'runner', reason: 'Runner timeout. Not a JSON body field.' },
-} as const satisfies Record<string, BodyField | RunnerField>;
+const RUNNER_REASON = 'Not a chat-completions JSON field. The runner or this adapter applies it.';
+
+/** Every MODEL_CONFIG leaf is either copied into the request body or explicitly left out. */
+export function classifyConfigPath(path: string): BodyField | RunnerField {
+  if (path === 'responseFormat.type' || path === 'responseFormat.name' || path === 'responseFormat.strict') {
+    return { role: 'body', wire: 'response_format' };
+  }
+  const stageField = /^(primary|cascade\.secondary)\.(model|temperature|seed|max_completion_tokens)$/.exec(path);
+  if (stageField) {
+    return {
+      role: 'body',
+      wire: stageField[2],
+      stage: stageField[1] === 'primary' ? 'primary' : 'secondary',
+    };
+  }
+  if (
+    path === 'provider' || path === 'transport' || path === 'baseUrl' || path === 'chatPath'
+    || path === 'responseFormat.schemaId'
+    || path.startsWith('docs.')
+    || path.startsWith('primary.pricing.')
+    || path.startsWith('cascade.secondary.pricing.')
+    || path === 'cascade.when' || path === 'cascade.secondaryPolicy'
+    || path === 'cascade.onSecondaryBlock' || path === 'cascade.onSecondaryNonBlock'
+    || path === 'cascade.onSecondaryFailure' || path === 'cascade.confirmBlocks'
+    || path === 'cascade.retriesPerModel' || path === 'cascade.timeoutMs'
+  ) {
+    return { role: 'runner', reason: RUNNER_REASON };
+  }
+  throw new Error(`UNCLASSIFIED_CONFIG:${path}`);
+}
 
 export function configLeafPaths(value: unknown = MODEL_CONFIG, prefix = ''): string[] {
   if (Array.isArray(value)) return prefix ? [prefix] : [];

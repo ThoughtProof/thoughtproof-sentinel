@@ -5,7 +5,9 @@ import {
   ADAPTER_ID, buildAdapterMessages, buildAdapterRequest, decideCascade, decideExchange, type AdapterExchange,
 } from './adapter.ts';
 import type { Document } from './contract.ts';
-import { CONFIG_FIELD_ROLE, MODEL_CONFIG, configLeafPaths } from './model-config.ts';
+import { classifyConfigPath, configLeafPaths, MODEL_CONFIG } from './model-config.ts';
+import { XAI_CHAT_COMPLETIONS_URL } from './messages.ts';
+import { VERDICT_SCHEMA } from './verdict-schema.ts';
 import { PROMPT_TEMPLATE, PROMPT_TEMPLATE_ID } from './prompt.ts';
 
 const options = { trustedAdapterIds: [ADAPTER_ID] };
@@ -80,15 +82,16 @@ describe('offline semantic adapter', () => {
   it('pins the OpenServ cascade and does not call it', () => {
     const fetchMock = vi.fn(() => { throw new Error('network'); });
     vi.stubGlobal('fetch', fetchMock);
+    expect(XAI_CHAT_COMPLETIONS_URL).toBe('https://api.x.ai/v1/chat/completions');
     expect(MODEL_CONFIG).toMatchObject({
-      provider: 'openserv',
+      provider: 'xai',
       transport: 'openai-compatible',
-      baseUrl: 'https://inference-api.openserv.ai/v1',
+      baseUrl: 'https://api.x.ai/v1',
       chatPath: '/chat/completions',
-      responseFormat: 'json_object',
-      primary: { model: 'serv-nano', temperature: 0, seed: 42, max_completion_tokens: 4096 },
+      responseFormat: { type: 'json_schema', strict: true },
+      primary: { model: 'grok-4.7', temperature: 0, seed: 42, max_completion_tokens: 4096 },
       cascade: {
-        secondary: { model: 'serv-swift', temperature: 0, seed: 42, max_completion_tokens: 4096 },
+        secondary: { model: 'grok-4.3', temperature: 0, seed: 42, max_completion_tokens: 4096 },
         when: ['timeout', 'transport_error', 'http_error', 'empty', 'parse_error', 'schema_violation', 'missing_checks'],
         secondaryPolicy: 'block_only',
         onSecondaryBlock: 'BLOCK',
@@ -426,41 +429,63 @@ describe('frozen chat messages', () => {
     const documents = filled().documents;
     const messages = buildAdapterMessages(documents);
     expect(messages.map(message => message.role)).toEqual(['system', 'user']);
+    const format = {
+      type: 'json_schema' as const,
+      json_schema: {
+        name: 'trade_contract_adapter_v1',
+        strict: true as const,
+        schema: VERDICT_SCHEMA,
+      },
+    };
     const shared = {
-      temperature: MODEL_CONFIG.primary.temperature,
-      seed: MODEL_CONFIG.primary.seed,
-      max_completion_tokens: MODEL_CONFIG.primary.max_completion_tokens,
-      response_format: { type: MODEL_CONFIG.responseFormat },
+      temperature: 0,
+      seed: 42,
+      max_completion_tokens: 4096,
+      response_format: format,
       messages,
     };
-    expect(buildAdapterRequest(documents, 'primary')).toEqual({ model: 'serv-nano', ...shared });
-    expect(buildAdapterRequest(documents, 'secondary')).toEqual({
-      ...shared,
-      model: 'serv-swift',
-      temperature: MODEL_CONFIG.cascade.secondary.temperature,
-      seed: MODEL_CONFIG.cascade.secondary.seed,
-      max_completion_tokens: MODEL_CONFIG.cascade.secondary.max_completion_tokens,
-    });
+    expect(buildAdapterRequest(documents, 'primary')).toEqual({ model: 'grok-4.7', ...shared });
+    expect(buildAdapterRequest(documents, 'secondary')).toEqual({ ...shared, model: 'grok-4.3' });
+    for (const request of [buildAdapterRequest(documents, 'primary'), buildAdapterRequest(documents, 'secondary')]) {
+      expect(request.messages.map(message => message.role)).toEqual(['system', 'user']);
+      expect(request.messages[0].content).toBe(PROMPT_TEMPLATE);
+      expect(JSON.parse(request.messages[1].content)).toEqual(documents);
+      expect(request.response_format.json_schema.schema).toBe(VERDICT_SCHEMA);
+      expect(request.response_format.json_schema.schema.additionalProperties).toBe(false);
+    }
   });
 
   it('fails if a body config field is missing from the request', () => {
     const documents = filled().documents;
-    const leaves = configLeafPaths(MODEL_CONFIG).sort();
-    expect(Object.keys(CONFIG_FIELD_ROLE).sort()).toEqual(leaves);
     for (const stage of ['primary', 'secondary'] as const) {
       const request = buildAdapterRequest(documents, stage);
       const serialized = JSON.stringify(request);
-      for (const [path, spec] of Object.entries(CONFIG_FIELD_ROLE)) {
-        if (spec.role === 'body') {
-          if (!('stage' in spec) || spec.stage === stage) expect(request).toHaveProperty(spec.wire);
-        } else {
-          expect(request).not.toHaveProperty(path.split('.').pop()!);
-          expect(serialized).not.toContain(MODEL_CONFIG.baseUrl);
-          expect(serialized).not.toContain('block_only');
+      for (const path of configLeafPaths()) {
+        const spec = classifyConfigPath(path);
+        if (spec.role === 'body' && (spec.stage === undefined || spec.stage === stage)) {
+          expect(request).toHaveProperty(spec.wire);
         }
       }
-      expect(request.response_format).toEqual({ type: 'json_object' });
+      expect(serialized).not.toContain('openserv');
+      expect(serialized).not.toContain('serv-nano');
+      expect(serialized).not.toContain('serv-swift');
+      expect(serialized).not.toContain('api.x.ai');
+      expect(serialized).not.toContain('block_only');
+      expect(Object.keys(request)).not.toContain('max_tokens');
+      expect(request).not.toHaveProperty('timeoutMs');
+      expect(request).not.toHaveProperty('retriesPerModel');
+      expect(request).not.toHaveProperty('secondaryPolicy');
     }
+  });
+
+  it('treats a model reply that uses its own fields as a schema failure', () => {
+    const documents = filled().documents;
+    const ownFields = { ok: true as const, content: JSON.stringify({ reasoning: 'looks fine', score: 1, quote: null }) };
+    const block = structuredClone(filled().model);
+    block.semanticChecks[2].status = 'contradicted';
+    expect(decideCascade(documents, ownFields, { ok: true, content: JSON.stringify(block) }, options).decision).toBe('BLOCK');
+    expect(decideCascade(documents, ownFields, { ok: true, content: JSON.stringify(filled().model) }, options).decision).toBe('UNCERTAIN');
+    expect(decideCascade(documents, ownFields, { ok: false, reason: 'http_error' }, options).decision).toBe('UNCERTAIN');
   });
 
   it.each([

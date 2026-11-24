@@ -1,6 +1,9 @@
 import type { Document } from './contract.ts';
-import { CONFIG_FIELD_ROLE, MODEL_CONFIG } from './model-config.ts';
+import { classifyConfigPath, configLeafPaths, MODEL_CONFIG, XAI_CHAT_COMPLETIONS_URL } from './model-config.ts';
 import { PROMPT_TEMPLATE } from './prompt.ts';
+import { VERDICT_SCHEMA, VERDICT_SCHEMA_ID } from './verdict-schema.ts';
+
+export { XAI_CHAT_COMPLETIONS_URL };
 
 /** Chat message the runner sends unchanged. The first role is always system. */
 export interface AdapterMessage {
@@ -9,16 +12,22 @@ export interface AdapterMessage {
 }
 
 /**
- * OpenServ chat-completions body. `messages` come only from buildAdapterMessages.
- * The runner posts this object as-is and does not merge it into one user message.
+ * xAI chat-completions body. The runner POSTs this object unchanged.
+ * `messages` come only from buildAdapterMessages.
  */
 export interface AdapterChatRequest {
   model: string;
   temperature: number;
   seed: number;
   max_completion_tokens: number;
-  /** OpenAI-compatible form of MODEL_CONFIG.responseFormat. */
-  response_format: { type: typeof MODEL_CONFIG.responseFormat };
+  response_format: {
+    type: 'json_schema';
+    json_schema: {
+      name: string;
+      strict: true;
+      schema: typeof VERDICT_SCHEMA;
+    };
+  };
   messages: AdapterMessage[];
 }
 
@@ -60,24 +69,39 @@ function configValue(path: string): unknown {
   return current;
 }
 
+function responseFormatBody(): AdapterChatRequest['response_format'] {
+  if (MODEL_CONFIG.responseFormat.schemaId !== VERDICT_SCHEMA_ID) throw new Error('SCHEMA_ID_MISMATCH');
+  if (XAI_CHAT_COMPLETIONS_URL !== `${MODEL_CONFIG.baseUrl}${MODEL_CONFIG.chatPath}`) {
+    throw new Error('ENDPOINT_MISMATCH');
+  }
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: MODEL_CONFIG.responseFormat.name,
+      strict: true,
+      schema: VERDICT_SCHEMA,
+    },
+  };
+}
+
 /**
- * Primary nano or block-only secondary swift.
- * Every body-classified config leaf is copied here. Runner-only leaves
- * (endpoint, timeout, retries, cascade policy) are not.
- * Both stages call buildAdapterMessages.
+ * Primary grok-4.7 or block-only secondary grok-4.3.
+ * Every body-classified config leaf is copied. Runner leaves (endpoint,
+ * prices, timeout, retries, cascade policy) are not. Both stages call
+ * buildAdapterMessages. No OpenServ field is included.
  */
 export function buildAdapterRequest(documents: readonly Document[], stage: AdapterStage): AdapterChatRequest {
   if (stage !== 'primary' && stage !== 'secondary') throw new Error('INVALID_STAGE');
   const body: Record<string, unknown> = { messages: buildAdapterMessages(documents) };
-  for (const [path, spec] of Object.entries(CONFIG_FIELD_ROLE)) {
-    if (spec.role !== 'body') continue;
-    if ('stage' in spec && spec.stage !== stage) continue;
-    const value = configValue(path);
-    if (spec.wire === 'response_format') body.response_format = { type: value };
-    else body[spec.wire] = value;
+  for (const path of configLeafPaths()) {
+    const spec = classifyConfigPath(path);
+    if (spec.role !== 'body' || (spec.stage !== undefined && spec.stage !== stage)) continue;
+    if (spec.wire === 'response_format') body.response_format = responseFormatBody();
+    else body[spec.wire] = configValue(path);
   }
-  for (const spec of Object.values(CONFIG_FIELD_ROLE)) {
-    if (spec.role !== 'body' || ('stage' in spec && spec.stage !== stage)) continue;
+  for (const path of configLeafPaths()) {
+    const spec = classifyConfigPath(path);
+    if (spec.role !== 'body' || (spec.stage !== undefined && spec.stage !== stage)) continue;
     if (!Object.hasOwn(body, spec.wire)) throw new Error('MISSING_BODY_FIELD');
   }
   return body as unknown as AdapterChatRequest;
