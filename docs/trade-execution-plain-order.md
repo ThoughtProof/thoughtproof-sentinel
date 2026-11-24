@@ -2,6 +2,8 @@
 
 A plain market order is exactly `BUY|SELL market order: <amount> USDC|base of <product> on Coinbase`.
 
+Every trade_execution step is told to judge and quote only the TRACE EXCERPT. The order is therefore copied into that section, ahead of the evidence, as an ORDER block. It is not left only under AGENT ANSWER.
+
 The criteria in `src/engine/modes/trade_execution.ts` are the prompt. They tell the model:
 
 - step 0 passes when the decision cites no numerical threshold. A cited threshold fails only when the evidence number misses it. No number to check is weakly faithful, not a failure.

@@ -164,7 +164,7 @@ describe('plain-order criteria', () => {
     expect(input.question.toLowerCase()).toContain('absence');
     expect(criteria).toContain('Absence is not a failure');
     expect(criteria).toContain('Absence of a justification is not fabrication');
-    expect(criteria).toMatch(/FAIL when the order is BUY/);
+    expect(criteria).toMatch(/FAIL when that side is BUY/);
   });
 });
 
