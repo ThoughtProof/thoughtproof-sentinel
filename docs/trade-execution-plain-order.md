@@ -4,11 +4,13 @@ A plain market order is exactly `BUY|SELL market order: <amount> USDC|base of <p
 
 Every trade_execution step is told to judge and quote only the TRACE EXCERPT. The order is therefore copied into that section, ahead of the evidence, as an ORDER block. It is not left only under AGENT ANSWER.
 
-The criteria in `src/engine/modes/trade_execution.ts` are the prompt. They tell the model:
+The criteria in `src/engine/modes/trade_execution.ts` are the prompt. They tell the model, by named words rather than a general warning:
 
-- step 0 passes when the decision cites no numerical threshold. A cited threshold fails only when the evidence number misses it. No number to check is weakly faithful, not a failure.
-- step 1 fails when BUY meets a bearish thesis or SELL meets a bullish thesis. A missing price series is not that failure.
-- step 2 passes when the decision states no justification beyond the order. A justification that cites a fact absent from the evidence fails.
+- step 0 passes when the ORDER has no limit form and there is no MANDATE block. A trade size is not a limit. A cited limit fails only when an EVIDENCE number misses it, and is weakly faithful when no comparable number is present. A MANDATE block whose mandate body differs from the principal instruction body fails this step.
+- step 1 fails only for a listed mismatch: BUY with a bearish Thesis word and no bullish word, or SELL with a bullish word and no bearish word. The matching pair passes even when no price series is present.
+- step 2 passes when the EVIDENCE block has no Reasoning section. It fails when Reasoning contains a number or a word of 5 or more letters that the Thesis does not contain.
+
+When the evidence has a Mandate or Principal instruction section, those bodies are copied into a MANDATE block from the same section reader the resolver uses. The resolver still reads the original evidence, not the prompt.
 
 `resolveTradeExecutionPlainOrder` applies the same reading to steps that were already recorded, without a new model call:
 

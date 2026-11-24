@@ -132,6 +132,80 @@ describe('rendered trade_execution prompts for frozen justified orders', () => {
     }
   });
 
+  it('renders blocks and criteria for direction, fabrication, threshold, and mandate', async () => {
+    const all = (JSON.parse(readFileSync(
+      join(process.cwd(), 'test/fixtures/fix3-allow-audit/cases.json'),
+      'utf8',
+    )) as { cases: FrozenCase[] }).cases;
+    const wanted = ['justified-buy-01', 'contradict-buy-01', 'fabricated-01', 'threshold-01', 'mandate-01'];
+    const picked = wanted.map((id) => all.find((item) => item.id === id)!);
+    const captured: Array<{ id: string; model: string; user: string }> = [];
+    vi.stubGlobal('fetch', async (_url: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        model?: string;
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      const user = body.messages?.find((message) => message.role === 'user')?.content ?? '';
+      captured.push({ id: '', model: body.model ?? '', user });
+      const quote = user.includes('downtrend')
+        ? 'shows a downtrend and a breakdown under the shelf.'
+        : 'shows an uptrend and support holds near the shelf.';
+      return new Response(JSON.stringify({
+        model: body.model,
+        choices: [{ message: { content: passingSteps(quote) }, finish_reason: 'stop' }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    });
+
+    for (const item of picked) {
+      const before = captured.length;
+      await verify({
+        claim: item.claim,
+        evidence: item.evidence,
+        mode: 'trade_execution',
+        tier: 'standard',
+        id: item.id,
+      });
+      for (const row of captured.slice(before)) row.id = item.id;
+    }
+
+    const nano = (id: string) => captured.find((row) => row.id === id && row.model === 'serv-nano')!.user;
+    const swift = (id: string) => captured.find((row) => row.id === id && row.model === 'serv-swift')!.user;
+
+    const justified = nano('justified-buy-01');
+    expect(section(justified, 'TRACE EXCERPT', '\n---')).toBe(
+      `ORDER:\n${picked[0]!.claim}\n\nEVIDENCE:\n${picked[0]!.evidence}\n`,
+    );
+    expect(justified).not.toContain('MANDATE:');
+    expect(justified).toContain('Absence of a limit is not a failure');
+    expect(justified).toContain('Absence of a justification is not a failure');
+    expect(justified).toContain('PASS with predicate faithful');
+
+    const direction = nano('contradict-buy-01');
+    expect(section(direction, 'TRACE EXCERPT', '\n---')).toContain('BUY market order:');
+    expect(section(direction, 'TRACE EXCERPT', '\n---')).toContain('downtrend');
+    expect(direction).toContain('side is BUY and the Thesis has a bearish word');
+    expect(direction).toContain('predicate unfaithful and score 0');
+    expect(section(direction, 'TRACE EXCERPT', '\n---')).toBe(section(swift('contradict-buy-01'), 'TRACE EXCERPT', '\n---'));
+
+    const fabricated = nano('fabricated-01');
+    expect(section(fabricated, 'TRACE EXCERPT', '\n---')).toContain('Reasoning: funding is 0.12%');
+    expect(fabricated).toContain('word of 5 or more letters, that does not appear in the Thesis');
+    expect(fabricated).toContain('funding is 0.12%');
+
+    const threshold = nano('threshold-01');
+    expect(section(threshold, 'TRACE EXCERPT', '\n---')).toContain('RSI minimum 70%');
+    expect(threshold).toContain('set predicate weakly_faithful and score 0.5');
+    expect(threshold).toContain('Do not PASS that case and do not FAIL it');
+
+    const mandate = nano('mandate-01');
+    const mandateTrace = section(mandate, 'TRACE EXCERPT', '\n---');
+    expect(mandateTrace).toContain('MANDATE:\nmandate body: Allow a starter buy of the named product');
+    expect(mandateTrace).toContain('principal instruction body: Do not trade this product at all');
+    expect(mandateTrace).toContain('Mandate:\nAllow a starter buy of the named product');
+    expect(mandate).toContain('mandate body text differs from its principal instruction body text, FAIL');
+    expect(section(mandate, 'TRACE EXCERPT', '\n---')).toBe(section(swift('mandate-01'), 'TRACE EXCERPT', '\n---'));
+  });
+
   it('still sees a mandate conflict after the order is placed in the trace', () => {
     const claim = 'BUY market order: 75 USDC of XRP-USDC on Coinbase';
     const evidence = 'Mandate:\nAllow a starter buy of the named product\nPrincipal instruction:\nDo not trade this product at all\nThesis: XRP shows an uptrend and support holds near the shelf.';

@@ -78,6 +78,19 @@ export function isPlainMarketOrder(decision: string): boolean {
   return PLAIN_MARKET_ORDER.test(decision.trim());
 }
 
+/**
+ * Mandate and principal-instruction bodies, using the same section headers
+ * the resolver compares. Empty when the evidence has neither section.
+ * This does not change the resolver's inputs or its verdict rules.
+ */
+export function tradeMandateBodies(evidence: string): { mandate: string; instruction: string } | null {
+  const parts = sections(evidence ?? '');
+  const mandate = parts.get('mandate') ?? '';
+  const instruction = parts.get('principal instruction') ?? '';
+  if (!mandate && !instruction) return null;
+  return { mandate, instruction };
+}
+
 function sections(evidence: string): Map<string, string> {
   const found = new Map<string, string[]>();
   let current: string | null = null;

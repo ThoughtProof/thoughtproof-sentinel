@@ -161,10 +161,12 @@ describe('plain-order criteria', () => {
       mode: 'trade_execution',
     }).evalInput;
     const criteria = input.gold_plan_steps.map((step) => step.acceptance_criterion ?? '').join('\n');
-    expect(input.question.toLowerCase()).toContain('absence');
-    expect(criteria).toContain('Absence is not a failure');
-    expect(criteria).toContain('Absence of a justification is not fabrication');
-    expect(criteria).toMatch(/FAIL when that side is BUY/);
+    expect(criteria.toLowerCase()).toContain('absence of a limit is not a failure');
+    expect(criteria).toContain('Absence of a limit is not a failure');
+    expect(criteria).toContain('Absence of a justification is not a failure');
+    expect(criteria).toContain('side is BUY and the Thesis has a bearish word');
+    expect(criteria).toContain('word of 5 or more letters');
+    expect(criteria).toContain('mandate body text differs');
   });
 });
 
