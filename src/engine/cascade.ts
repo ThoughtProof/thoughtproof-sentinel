@@ -22,7 +22,7 @@ import {
 import { MALFORMED_NANO_STEP_MARKER } from '../../vendor/pot-cli-0.8.13/nano-step-contract.js';
 
 import { runCascade, type CascadeConfig } from 'pot-cli/cascade';
-import type { SentinelTier } from '../types.js';
+import type { CascadeTraceStep, SentinelTier } from '../types.js';
 import { TIER_CONFIGS } from '../tiers.js';
 import {
   EngineBudgetExhaustedError,
@@ -67,6 +67,33 @@ export interface CascadeOutput {
    * and failed leaves the primary's steps, so this stays serv-nano.
    */
   stepModel?: string;
+  /**
+   * trade_execution only. Deep copy of each model's steps, taken when the
+   * cascade returns and before the receipt or the plain-order resolver
+   * rewrites them. Absent for every other mode.
+   */
+  modelTrace?: {
+    cascadeReason: string | null;
+    primaryVerdict: string | null;
+    secondaryVerdict: string | null;
+    stepsSource: string;
+    primarySteps: CascadeTraceStep[];
+    secondarySteps: CascadeTraceStep[] | null;
+  };
+}
+
+/** Copy step fields into a frozen list. Later edits of the source do not land here. */
+export function snapshotCascadeSteps(
+  steps: Array<{ step_id?: string; predicate?: string; score?: number; reasoning?: string; quote?: string | null }> | undefined,
+): CascadeTraceStep[] {
+  const copied = (steps ?? []).map((step) => Object.freeze({
+    step_id: String(step.step_id ?? ''),
+    predicate: String(step.predicate ?? ''),
+    score: typeof step.score === 'number' && Number.isFinite(step.score) ? step.score : 0,
+    reasoning: typeof step.reasoning === 'string' ? step.reasoning : '',
+    quote: step.quote == null || String(step.quote).trim() === '' ? null : String(step.quote),
+  }));
+  return Object.freeze(copied);
 }
 
 /**
@@ -138,6 +165,18 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
         budget_ok: true,
         malformedStepFallback: false,
         stepModel: stages[0],
+        ...(input.nanoStepContract
+          ? {
+              modelTrace: {
+                cascadeReason: null,
+                primaryVerdict: result.verdict,
+                secondaryVerdict: null,
+                stepsSource: stages[0],
+                primarySteps: snapshotCascadeSteps(result.step_evaluations),
+                secondarySteps: null,
+              },
+            }
+          : {}),
       };
     }
 
@@ -155,6 +194,13 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
     if (!baseItem) {
       throw new Error(`[sentinel-cascade] no item result for ${input.evalInput.id}`);
     }
+
+    // Snapshot before the receipt adopts one model's steps and before any
+    // later resolver rewrite. primary is nano even when baseItem is swift.
+    const tracedPrimarySteps = snapshotCascadeSteps(cr.primary?.step_evaluations);
+    const tracedSecondarySteps = cr.secondary
+      ? snapshotCascadeSteps(cr.secondary.step_evaluations)
+      : null;
 
     // Cascade final verdict may be BLOCK even if intermediate steps differed.
     if (cr.verdict === 'BLOCK') {
@@ -185,6 +231,18 @@ export async function runSentinelCascade(input: CascadeInput): Promise<CascadeOu
       cascadeErrors,
       malformedStepFallback: cascadeErrors.some((e) => e.includes(MALFORMED_NANO_STEP_MARKER)),
       stepModel,
+      ...(input.nanoStepContract
+        ? {
+            modelTrace: {
+              cascadeReason: cr.reason,
+              primaryVerdict: cr.primary?.verdict ?? null,
+              secondaryVerdict: cr.secondary?.verdict ?? null,
+              stepsSource: stepModel,
+              primarySteps: tracedPrimarySteps,
+              secondarySteps: tracedSecondarySteps,
+            },
+          }
+        : {}),
     };
   } catch (err) {
     if (err instanceof EngineBudgetExhaustedError) {

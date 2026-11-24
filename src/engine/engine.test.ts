@@ -230,9 +230,14 @@ describe('Sentinel Engine', () => {
         const callArgs = mockEvaluateItem.mock.calls[0];
         const evalInput = callArgs[0];
 
-        // Each mode should pass claim as answer and evidence as trace_steps
+        // Claim stays the agent answer. trade_execution also copies the order
+        // into the trace, because every step is told to judge only that section.
         expect(evalInput.answer).toBe(`claim for ${mode}`);
-        expect(evalInput.trace_steps).toBe(`evidence for ${mode}`);
+        expect(evalInput.trace_steps).toBe(
+          mode === 'trade_execution'
+            ? `ORDER:\nclaim for ${mode}\n\nEVIDENCE:\nevidence for ${mode}`
+            : `evidence for ${mode}`,
+        );
         // Each mode should have at least one gold_plan_step with critical criticality
         expect(evalInput.gold_plan_steps.length).toBeGreaterThan(0);
         expect(evalInput.gold_plan_steps[0].criticality).toBe('critical');

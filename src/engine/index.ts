@@ -16,11 +16,12 @@ import type {
   SentinelVerifyResponse,
   SentinelTier,
   SentinelStepObjection,
+  TradeExecutionCascadeTrace,
 } from '../types.js';
 
 import { TIER_CONFIGS } from '../tiers.js';
 import { getModeHandler } from './modes/index.js';
-import { runSentinelCascade } from './cascade.js';
+import { runSentinelCascade, snapshotCascadeSteps, type CascadeOutput } from './cascade.js';
 import {
   mapVerdict,
   canPromoteStep2Only,
@@ -28,6 +29,7 @@ import {
   decisionBasisForPromotionReason,
 } from './verdict.js';
 import { gateEnforcedVerdict, runAuthorizationGate, type GateMode } from './authorization-gate.js';
+import { resolveTradeExecutionPlainOrder } from './trade-execution-plain-order.js';
 import {
   classifyActionAuthKind,
   OBJECTIVE_MISMATCH_BLOCK_REASON,
@@ -531,7 +533,21 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   //    Non-finite / missing scores coerce to 0 (fail-closed). `steps.length > 0`
   //    does not protect against undefined/NaN scores — those produced
   //    avgScore=NaN → JSON null on live receipts (issue #39).
-  const steps = cascadeOutput.result.step_evaluations;
+  //    trade_execution then re-reads plain orders: a missing threshold or a
+  //    missing justification is not a failure, and a proven contradiction
+  //    stays BLOCK. Quality counters stay on the model's original steps.
+  const modelSteps = cascadeOutput.result.step_evaluations;
+  let steps = modelSteps;
+  let plainOrderReason: string | null = null;
+  let plainOrderDecision: ReturnType<typeof resolveTradeExecutionPlainOrder> | null = null;
+  if (req.mode === 'trade_execution') {
+    plainOrderDecision = resolveTradeExecutionPlainOrder(req.claim, req.evidence ?? '', modelSteps);
+    if (plainOrderDecision.applied) {
+      verdict = plainOrderDecision.publicVerdict;
+      steps = plainOrderDecision.steps;
+      plainOrderReason = plainOrderDecision.reasoning;
+    }
+  }
   let avgScore = steps.length > 0
     ? steps.reduce((sum, s) => sum + finiteScore(s.score), 0) / steps.length
     : 0;
@@ -565,15 +581,19 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   // neutralized, no system hint mixed in). Other modes: trace_steps === claim evidence.
   const evidence = modeOutput.evalInput.trace_steps ?? req.evidence ?? '';
   const qualityFlags: { templatedReasoning: boolean; nullQuote: boolean }[] = [];
+  for (const original of modelSteps) {
+    const prose = (original.reasoning ?? '').trim();
+    const originalQuote = original.quote;
+    qualityFlags.push({
+      templatedReasoning: prose.length === 0,
+      nullQuote: originalQuote == null || String(originalQuote).trim() === '',
+    });
+  }
   const rawObjections = normalizeCascadeSteps(steps, evidence).map((s, i) => {
     const criterion = criterionByStepId.get(s.step_id) ?? '';
     const prose = s.reasoning.trim();
     const fallbackCriterion = omitInformationalCriterionBody ? '' : criterion;
     const originalQuote = steps[i]?.quote;
-    qualityFlags.push({
-      templatedReasoning: prose.length === 0,
-      nullQuote: originalQuote == null || String(originalQuote).trim() === '',
-    });
     return {
       step_id: s.step_id,
       criterion,
@@ -628,7 +648,9 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
   const durationMs = Date.now() - startMs;
   // Flag off never sets timelineFloorApplied, so this branch is the previous text.
   // When the floor downgrades ALLOW, the cascade's ALLOW wording must not ship.
-  const publicReasoning = timelineFloorApplied
+  const publicReasoning = plainOrderReason
+    ? plainOrderReason
+    : timelineFloorApplied
     ? postExecutionFloorReasoning(timelineFloorBasis)
     : unclassifiedAbstention
       ? UNCLASSIFIED_ABSTENTION_REASON
@@ -663,6 +685,42 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
         : {}),
       ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(req.agent_context ? { agent_context: req.agent_context } : {}),
+      ...cascadeTrace(cascadeOutput.modelTrace, plainOrderDecision),
+    },
+  };
+}
+
+/**
+ * Attach the frozen model snapshot plus the plain-order reading.
+ * Returns nothing for other modes. Does not read env or the request prompt.
+ */
+function cascadeTrace(
+  trace: CascadeOutput['modelTrace'],
+  decision: ReturnType<typeof resolveTradeExecutionPlainOrder> | null,
+): { cascade_trace: TradeExecutionCascadeTrace } | Record<string, never> {
+  if (!trace || !decision) return {};
+  const assessment = decision.assessment;
+  return {
+    cascade_trace: {
+      cascade_reason: trace.cascadeReason,
+      primary_verdict: trace.primaryVerdict,
+      secondary_verdict: trace.secondaryVerdict,
+      steps_source: trace.stepsSource,
+      primary_steps: trace.primarySteps,
+      ...(trace.secondarySteps ? { secondary_steps: trace.secondarySteps } : {}),
+      resolver: {
+        applied: decision.applied,
+        reason: decision.reason,
+        rewritten_steps: snapshotCascadeSteps(decision.steps),
+        assessment: {
+          plain: assessment.plain,
+          thresholdCited: assessment.thresholdCited,
+          thresholdContradicted: assessment.thresholdContradicted,
+          direction: assessment.direction,
+          fabrication: assessment.fabrication,
+          mandateConflict: assessment.mandateConflict,
+        },
+      },
     },
   };
 }
