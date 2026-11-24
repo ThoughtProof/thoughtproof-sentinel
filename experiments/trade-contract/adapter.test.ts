@@ -87,6 +87,9 @@ describe('offline semantic adapter', () => {
       cascade: {
         secondary: { model: 'serv-swift', temperature: 0, seed: 42, max_completion_tokens: 4096 },
         when: ['timeout', 'transport_error', 'http_error', 'empty', 'parse_error', 'schema_violation', 'missing_checks'],
+        secondaryPolicy: 'block_only',
+        onSecondaryBlock: 'BLOCK',
+        onSecondaryNonBlock: 'UNCERTAIN',
         onSecondaryFailure: 'UNCERTAIN',
         confirmBlocks: false,
         retriesPerModel: 0,
@@ -286,7 +289,7 @@ describe('offline semantic adapter', () => {
     const allowExchange = { ok: true as const, content: JSON.stringify(allow) };
     const blockExchange = { ok: true as const, content: JSON.stringify(block) };
     expect(decideCascade(documents, allowExchange, blockExchange, options).decision).toBe('ALLOW');
-    expect(decideCascade(documents, { ok: false, reason: 'timeout' }, allowExchange, options).decision).toBe('ALLOW');
+    expect(decideCascade(documents, { ok: false, reason: 'timeout' }, allowExchange, options).decision).toBe('UNCERTAIN');
     expect(decideCascade(documents, { ok: false, reason: 'timeout' }, { ok: false, reason: 'timeout' }, options).decision).toBe('UNCERTAIN');
     expect(decideCascade(documents, { ok: true, content: 'ALLOW' }, blockExchange, options).decision).toBe('BLOCK');
     expect(decideCascade(documents, blockExchange, allowExchange, options).decision).toBe('BLOCK');
@@ -315,5 +318,75 @@ describe('offline semantic adapter', () => {
       git: { deploymentEnabled: Record<string, boolean> };
     };
     expect(vercel.git.deploymentEnabled['cursor/trade-contract-offline-20261124']).toBe(false);
+  });
+});
+
+const SWIFT_OUTCOMES = [
+  ['BLOCK', 'BLOCK'],
+  ['ALLOW', 'UNCERTAIN'],
+  ['CONDITIONAL_ALLOW', 'UNCERTAIN'],
+  ['HOLD', 'UNCERTAIN'],
+] as const;
+
+function primaryExchange(reason: (typeof MODEL_CONFIG.cascade.when)[number]): AdapterExchange {
+  if (reason === 'parse_error') return { ok: true, content: '{' };
+  if (reason === 'schema_violation') {
+    return { ok: true, content: JSON.stringify({ ...filled().model, decision: 'ALLOW' }) };
+  }
+  if (reason === 'missing_checks') {
+    const model = structuredClone(filled().model);
+    model.detection = model.detection.filter(row => row.checkId !== 'mandate_compliance');
+    return { ok: true, content: JSON.stringify(model) };
+  }
+  return { ok: false, reason };
+}
+
+function swiftExchange(outcome: (typeof SWIFT_OUTCOMES)[number][0]): AdapterExchange {
+  if (outcome === 'BLOCK') {
+    const model = structuredClone(filled().model);
+    model.semanticChecks[2].status = 'contradicted';
+    return { ok: true, content: JSON.stringify(model) };
+  }
+  if (outcome === 'ALLOW') return { ok: true, content: JSON.stringify(filled().model) };
+  return { ok: true, content: JSON.stringify({ verdict: outcome }) };
+}
+
+describe('secondary model is block-only', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it.each(MODEL_CONFIG.cascade.when.flatMap(reason =>
+    SWIFT_OUTCOMES.map(([outcome, decision]) => [reason, outcome, decision] as const)))(
+    'primary %s then swift %s publishes %s and never ALLOW',
+    (reason, outcome, decision) => {
+      const fetchMock = vi.fn(() => { throw new Error('network'); });
+      vi.stubGlobal('fetch', fetchMock);
+      const result = decideCascade(filled().documents, primaryExchange(reason), swiftExchange(outcome), options);
+      expect(result.decision).toBe(decision);
+      expect(result.decision).not.toBe('ALLOW');
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(MODEL_CONFIG.cascade.when)('primary %s and a failed swift stay UNCERTAIN', reason => {
+    const result = decideCascade(
+      filled().documents, primaryExchange(reason), { ok: false, reason: 'timeout' }, options,
+    );
+    expect(result.decision).toBe('UNCERTAIN');
+  });
+
+  it.each(['ALLOW', 'CONDITIONAL_ALLOW', 'HOLD', 'UNCERTAIN'] as const)(
+    'a bare swift %s label is not a release', label => {
+      const result = decideCascade(
+        filled().documents, { ok: false, reason: 'http_error' }, { ok: true, content: label }, options,
+      );
+      expect(result.decision).toBe('UNCERTAIN');
+    },
+  );
+
+  it('a bare swift BLOCK label stays BLOCK', () => {
+    const result = decideCascade(
+      filled().documents, { ok: false, reason: 'transport_error' }, { ok: true, content: 'BLOCK' }, options,
+    );
+    expect(result.decision).toBe('BLOCK');
   });
 });

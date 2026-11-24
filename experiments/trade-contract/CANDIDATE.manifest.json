@@ -38,17 +38,20 @@
         "schema_violation",
         "missing_checks"
       ],
+      "secondaryPolicy": "block_only",
+      "onSecondaryBlock": "BLOCK",
+      "onSecondaryNonBlock": "UNCERTAIN",
       "onSecondaryFailure": "UNCERTAIN",
       "confirmBlocks": false,
       "retriesPerModel": 0,
       "timeoutMs": 45000
     }
   },
-  "modelConfigurationSha256": "c1c0f158360567fac50276dfb7171b38d0a4d9c0d5a3fc79152d71d29ebb4e3c",
+  "modelConfigurationSha256": "ac546e1c56ba4d58479c128a90ff6b0d8f8180e51bbddc33da9c46eeed830d38",
   "sourceFiles": [
     {
       "path": "experiments/trade-contract/adapter.ts",
-      "sha256": "b98e9b13077c1c4ab4c9b4f53a404af211997e61deef1ae8a10f59afaa30b26d"
+      "sha256": "e8fd80eaa9f3d35f7288ba79282d9b6fd1be72b7cbba4f75b7881cdc49a0e562"
     },
     {
       "path": "experiments/trade-contract/contract.ts",
@@ -68,7 +71,7 @@
     },
     {
       "path": "experiments/trade-contract/model-config.ts",
-      "sha256": "19127154bd2d782aece1d14701db8153c5f2b9d2cf04dda5a30ab10d2947c277"
+      "sha256": "5f1ef4857bf17aa6d8c827b574c0f90e25c7be8467a89c57e0b03c728b4e863f"
     },
     {
       "path": "experiments/trade-contract/offline.ts",
@@ -87,6 +90,7 @@
     "measured": false,
     "falseAllowTarget": 0,
     "correctAllowMinimum": 0.8,
+    "secondaryRelease": "block_only",
     "absenceRisk": "A structured complete detection that no mandate exists can still produce ALLOW. That false absence remains a subject of the later acceptance test and is not solved by this freeze."
   }
 }

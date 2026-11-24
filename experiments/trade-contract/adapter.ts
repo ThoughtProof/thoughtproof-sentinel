@@ -308,8 +308,59 @@ function inspect(documents: readonly Document[], exchange: AdapterExchange, opti
   return { failure: null, result: built.downgradeAllow ? downgrade(result) : result };
 }
 
+const SWIFT_VERDICTS = ['ALLOW', 'BLOCK', 'CONDITIONAL_ALLOW', 'HOLD', 'UNCERTAIN'] as const;
+type SwiftVerdict = (typeof SWIFT_VERDICTS)[number];
+
+function explicitVerdict(content: string): SwiftVerdict | null {
+  const trimmed = content.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  const body = (fenced ? fenced[1] : trimmed).trim();
+  if ((SWIFT_VERDICTS as readonly string[]).includes(body)) return body as SwiftVerdict;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!isPlain(parsed)) return null;
+    const verdict = parsed.verdict ?? parsed.decision;
+    if (typeof verdict === 'string' && (SWIFT_VERDICTS as readonly string[]).includes(verdict)) {
+      return verdict as SwiftVerdict;
+    }
+  } catch {
+    // Not JSON. A non-BLOCK label was already handled above.
+  }
+  return null;
+}
+
+function blockVerdict(): EvaluationResult {
+  return {
+    version: CONTRACT_VERSION,
+    decision: 'BLOCK',
+    checks: CHECK_IDS.map(checkId => ({ checkId, status: 'contradicted' })),
+  };
+}
+
 /**
- * Offline cascade. A schema-valid decision is final, including UNCERTAIN.
+ * serv-swift is block-only. A contract BLOCK or an explicit BLOCK verdict stays
+ * BLOCK. ALLOW, CONDITIONAL_ALLOW, HOLD, UNCERTAIN, and every other outcome
+ * become UNCERTAIN. A failed exchange is UNCERTAIN.
+ */
+function publishSecondary(
+  exchange: AdapterExchange,
+  inspected: { failure: CascadeFailure | null; result: EvaluationResult },
+  options: EvaluationOptions,
+): EvaluationResult {
+  if (MODEL_CONFIG.cascade.secondaryPolicy !== 'block_only') return uncertain(options);
+  if (exchange.ok && !inspected.failure && inspected.result.decision === 'BLOCK'
+    && MODEL_CONFIG.cascade.onSecondaryBlock === 'BLOCK') {
+    return inspected.result;
+  }
+  if (exchange.ok && explicitVerdict(exchange.content) === 'BLOCK'
+    && MODEL_CONFIG.cascade.onSecondaryBlock === 'BLOCK') {
+    return blockVerdict();
+  }
+  return uncertain(options);
+}
+
+/**
+ * Offline cascade. A schema-valid primary decision is final, including UNCERTAIN.
  * Only the pinned failure reasons consult the secondary exchange, once.
  * This function does not call a provider.
  */
@@ -324,7 +375,7 @@ export function decideCascade(
   const reasons: readonly string[] = MODEL_CONFIG.cascade.when;
   if (!reasons.includes(first.failure) || secondary === null) return uncertain(options);
   const second = inspect(documents, secondary, options);
-  return second.failure ? uncertain(options) : second.result;
+  return publishSecondary(secondary, second, options);
 }
 
 export function decideExchange(

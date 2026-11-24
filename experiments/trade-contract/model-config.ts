@@ -5,7 +5,10 @@
  * Seed 42 is pot-cli's DEFAULT_EVAL_SEED. Temperature 0 matches that evaluator.
  * max_completion_tokens 4096 and timeoutMs 45000 match the Sentinel standard cascade.
  * This candidate does not retry a model. A failed primary may fall through once
- * to serv-swift. A schema-valid ALLOW, BLOCK, or UNCERTAIN does not fall through.
+ * to serv-swift. A schema-valid primary decision does not fall through.
+ * On that fall-through, serv-swift is block-only: BLOCK stays BLOCK, and
+ * ALLOW, CONDITIONAL_ALLOW, HOLD, UNCERTAIN, or any other non-BLOCK outcome
+ * becomes UNCERTAIN. If serv-swift also fails, the result is UNCERTAIN.
  */
 export const MODEL_CONFIG = {
   provider: 'openserv',
@@ -35,6 +38,10 @@ export const MODEL_CONFIG = {
       'schema_violation',
       'missing_checks',
     ],
+    /** Swift may publish only BLOCK. Every other outcome, including failure, is UNCERTAIN. */
+    secondaryPolicy: 'block_only',
+    onSecondaryBlock: 'BLOCK',
+    onSecondaryNonBlock: 'UNCERTAIN',
     onSecondaryFailure: 'UNCERTAIN',
     confirmBlocks: false,
     retriesPerModel: 0,
