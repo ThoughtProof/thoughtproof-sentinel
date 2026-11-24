@@ -21,6 +21,16 @@ import { VERDICT_SCHEMA_ID } from './verdict-schema.ts';
  * effort and not guaranteed. `max_tokens` is deprecated there and is not sent;
  * `max_completion_tokens` is the documented field.
  *
+ * `reasoning_effort` is a chat-completions body field. grok-4.7 accepts
+ * low/medium/high/xhigh and defaults to high, so it is pinned to low, the
+ * lowest value that page lists (reasoning cannot be turned off). grok-4.3
+ * also accepts none, so it is pinned to none. See
+ * https://docs.x.ai/developers/models/grok-4.7 and
+ * https://docs.x.ai/developers/models/grok-4.3.
+ * The per-call timeout is 900s, the minimum the best-practices guide tells
+ * clients to allow: https://docs.x.ai/developers/model-capabilities/text/best-practices
+ * Retrieved 2026-11-24. `max_completion_tokens` does not cap reasoning tokens.
+ *
  * A schema-valid primary decision does not fall through. On fall-through the
  * secondary is block-only: BLOCK stays BLOCK; ALLOW, CONDITIONAL_ALLOW, HOLD,
  * and any other non-BLOCK outcome become UNCERTAIN. If the secondary also
@@ -30,6 +40,9 @@ import { VERDICT_SCHEMA_ID } from './verdict-schema.ts';
  * not: endpoint, docs, prices, timeout, retries, and the cascade policy.
  */
 export const XAI_CHAT_COMPLETIONS_URL = 'https://api.x.ai/v1/chat/completions';
+
+/** Runner client timeout. Not a JSON body field. Best-practices minimum is 900s. */
+export const XAI_REQUEST_TIMEOUT_MS = 900_000;
 
 const priceSource = {
   currency: 'USD',
@@ -61,6 +74,7 @@ export const MODEL_CONFIG = {
     temperature: 0,
     seed: 42,
     max_completion_tokens: 4096,
+    reasoning_effort: 'low',
     pricing: {
       ...priceSource,
       contextTokens: 500_000,
@@ -74,6 +88,7 @@ export const MODEL_CONFIG = {
       temperature: 0,
       seed: 42,
       max_completion_tokens: 4096,
+      reasoning_effort: 'none',
       pricing: {
         ...priceSource,
         contextTokens: 1_000_000,
@@ -97,7 +112,7 @@ export const MODEL_CONFIG = {
     onSecondaryFailure: 'UNCERTAIN',
     confirmBlocks: false,
     retriesPerModel: 0,
-    timeoutMs: 45000,
+    timeoutMs: XAI_REQUEST_TIMEOUT_MS,
   },
 } as const;
 
@@ -113,7 +128,7 @@ export function classifyConfigPath(path: string): BodyField | RunnerField {
   if (path === 'responseFormat.type' || path === 'responseFormat.name' || path === 'responseFormat.strict') {
     return { role: 'body', wire: 'response_format' };
   }
-  const stageField = /^(primary|cascade\.secondary)\.(model|temperature|seed|max_completion_tokens)$/.exec(path);
+  const stageField = /^(primary|cascade\.secondary)\.(model|temperature|seed|max_completion_tokens|reasoning_effort)$/.exec(path);
   if (stageField) {
     return {
       role: 'body',

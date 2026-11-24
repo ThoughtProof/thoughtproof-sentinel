@@ -32,6 +32,7 @@
       "temperature": 0,
       "seed": 42,
       "max_completion_tokens": 4096,
+      "reasoning_effort": "low",
       "pricing": {
         "currency": "USD",
         "per": "1M_tokens",
@@ -57,6 +58,7 @@
         "temperature": 0,
         "seed": 42,
         "max_completion_tokens": 4096,
+        "reasoning_effort": "none",
         "pricing": {
           "currency": "USD",
           "per": "1M_tokens",
@@ -91,14 +93,14 @@
       "onSecondaryFailure": "UNCERTAIN",
       "confirmBlocks": false,
       "retriesPerModel": 0,
-      "timeoutMs": 45000
+      "timeoutMs": 900000
     }
   },
-  "modelConfigurationSha256": "b03ccc628db8bede8068166f322933d8e18432a254511aef32750536d38f3f06",
+  "modelConfigurationSha256": "721768d15939a86cd1ea996c9691d658717d56246e9247e86e8e967ce7bebe66",
   "sourceFiles": [
     {
       "path": "experiments/trade-contract/adapter.ts",
-      "sha256": "900c793162836cfa206723015ed9253d895a8f2d6fa46ffd15b589fc9d3f8dcf"
+      "sha256": "df27ec576c0e59067be80e570a347cf20d3ff2f4d1d516d17ac41826f0939fc7"
     },
     {
       "path": "experiments/trade-contract/contract.ts",
@@ -118,11 +120,11 @@
     },
     {
       "path": "experiments/trade-contract/messages.ts",
-      "sha256": "b2fc23be5e2cd67904ef0cab427d657bcfd2b99ae16f2a4b8a961922dd05737b"
+      "sha256": "d472b464826454aa95e679277b033aa8c7deed3e90e58a321de96932e71c4225"
     },
     {
       "path": "experiments/trade-contract/model-config.ts",
-      "sha256": "adb48f8a65cea1f91c1d0d7279ec2001668bc799a2d645a5aad6ce23fa36e694"
+      "sha256": "78414f4817336601e2505e3428bf16d67bab462e9c361bc461b43c30945af99b"
     },
     {
       "path": "experiments/trade-contract/offline.ts",
@@ -162,9 +164,15 @@
       "temperature",
       "seed",
       "max_completion_tokens",
+      "reasoning_effort",
       "response_format",
       "messages"
     ],
+    "reasoningEffort": {
+      "grok-4.7": "low",
+      "grok-4.3": "none"
+    },
+    "timeoutMs": 900000,
     "seedSent": true,
     "notInBody": [
       "provider",

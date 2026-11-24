@@ -8,6 +8,7 @@ import { MODEL_CONFIG, type CascadeFailure } from './model-config.ts';
 import { uniqueQuoteSpan } from './spans.ts';
 
 export { buildAdapterMessages, buildAdapterRequest, XAI_CHAT_COMPLETIONS_URL } from './messages.ts';
+export { XAI_REQUEST_TIMEOUT_MS } from './model-config.ts';
 export type { AdapterChatRequest, AdapterMessage, AdapterStage } from './messages.ts';
 
 /** Local adapter id. It is not read from the model payload. */

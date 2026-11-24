@@ -20,6 +20,7 @@ export interface AdapterChatRequest {
   temperature: number;
   seed: number;
   max_completion_tokens: number;
+  reasoning_effort: 'low' | 'none';
   response_format: {
     type: 'json_schema';
     json_schema: {

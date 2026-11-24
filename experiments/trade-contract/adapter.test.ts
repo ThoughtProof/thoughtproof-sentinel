@@ -5,7 +5,7 @@ import {
   ADAPTER_ID, buildAdapterMessages, buildAdapterRequest, decideCascade, decideExchange, type AdapterExchange,
 } from './adapter.ts';
 import type { Document } from './contract.ts';
-import { classifyConfigPath, configLeafPaths, MODEL_CONFIG } from './model-config.ts';
+import { classifyConfigPath, configLeafPaths, MODEL_CONFIG, XAI_REQUEST_TIMEOUT_MS } from './model-config.ts';
 import { XAI_CHAT_COMPLETIONS_URL } from './messages.ts';
 import { VERDICT_SCHEMA } from './verdict-schema.ts';
 import { PROMPT_TEMPLATE, PROMPT_TEMPLATE_ID } from './prompt.ts';
@@ -89,9 +89,9 @@ describe('offline semantic adapter', () => {
       baseUrl: 'https://api.x.ai/v1',
       chatPath: '/chat/completions',
       responseFormat: { type: 'json_schema', strict: true },
-      primary: { model: 'grok-4.7', temperature: 0, seed: 42, max_completion_tokens: 4096 },
+      primary: { model: 'grok-4.7', temperature: 0, seed: 42, max_completion_tokens: 4096, reasoning_effort: 'low' },
       cascade: {
-        secondary: { model: 'grok-4.3', temperature: 0, seed: 42, max_completion_tokens: 4096 },
+        secondary: { model: 'grok-4.3', temperature: 0, seed: 42, max_completion_tokens: 4096, reasoning_effort: 'none' },
         when: ['timeout', 'transport_error', 'http_error', 'empty', 'parse_error', 'schema_violation', 'missing_checks'],
         secondaryPolicy: 'block_only',
         onSecondaryBlock: 'BLOCK',
@@ -99,9 +99,12 @@ describe('offline semantic adapter', () => {
         onSecondaryFailure: 'UNCERTAIN',
         confirmBlocks: false,
         retriesPerModel: 0,
-        timeoutMs: 45000,
+        timeoutMs: 900_000,
       },
     });
+    expect(XAI_REQUEST_TIMEOUT_MS).toBe(900_000);
+    expect(MODEL_CONFIG.cascade.timeoutMs).toBe(XAI_REQUEST_TIMEOUT_MS);
+    expect(MODEL_CONFIG.cascade.retriesPerModel).toBe(0);
     expect(run(filled().model).decision).toBe('ALLOW');
     expect(fetchMock).not.toHaveBeenCalled();
     const source = ['adapter.ts', 'messages.ts', 'model-config.ts', 'prompt.ts', 'evaluate.ts'].map(file =>
@@ -444,8 +447,12 @@ describe('frozen chat messages', () => {
       response_format: format,
       messages,
     };
-    expect(buildAdapterRequest(documents, 'primary')).toEqual({ model: 'grok-4.7', ...shared });
-    expect(buildAdapterRequest(documents, 'secondary')).toEqual({ ...shared, model: 'grok-4.3' });
+    expect(buildAdapterRequest(documents, 'primary')).toEqual({
+      model: 'grok-4.7', reasoning_effort: 'low', ...shared,
+    });
+    expect(buildAdapterRequest(documents, 'secondary')).toEqual({
+      ...shared, model: 'grok-4.3', reasoning_effort: 'none',
+    });
     for (const request of [buildAdapterRequest(documents, 'primary'), buildAdapterRequest(documents, 'secondary')]) {
       expect(request.messages.map(message => message.role)).toEqual(['system', 'user']);
       expect(request.messages[0].content).toBe(PROMPT_TEMPLATE);
