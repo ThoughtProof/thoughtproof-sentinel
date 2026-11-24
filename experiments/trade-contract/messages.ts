@@ -1,5 +1,5 @@
 import type { Document } from './contract.ts';
-import { MODEL_CONFIG } from './model-config.ts';
+import { CONFIG_FIELD_ROLE, MODEL_CONFIG } from './model-config.ts';
 import { PROMPT_TEMPLATE } from './prompt.ts';
 
 /** Chat message the runner sends unchanged. The first role is always system. */
@@ -17,6 +17,8 @@ export interface AdapterChatRequest {
   temperature: number;
   seed: number;
   max_completion_tokens: number;
+  /** OpenAI-compatible form of MODEL_CONFIG.responseFormat. */
+  response_format: { type: typeof MODEL_CONFIG.responseFormat };
   messages: AdapterMessage[];
 }
 
@@ -49,15 +51,34 @@ export function buildAdapterMessages(documents: readonly Document[]): AdapterMes
   ];
 }
 
-/** Primary nano or block-only secondary swift. Both call buildAdapterMessages. */
+function configValue(path: string): unknown {
+  let current: unknown = MODEL_CONFIG;
+  for (const key of path.split('.')) {
+    if (current === null || typeof current !== 'object') throw new Error('MISSING_CONFIG');
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+/**
+ * Primary nano or block-only secondary swift.
+ * Every body-classified config leaf is copied here. Runner-only leaves
+ * (endpoint, timeout, retries, cascade policy) are not.
+ * Both stages call buildAdapterMessages.
+ */
 export function buildAdapterRequest(documents: readonly Document[], stage: AdapterStage): AdapterChatRequest {
   if (stage !== 'primary' && stage !== 'secondary') throw new Error('INVALID_STAGE');
-  const params = stage === 'primary' ? MODEL_CONFIG.primary : MODEL_CONFIG.cascade.secondary;
-  return {
-    model: params.model,
-    temperature: params.temperature,
-    seed: params.seed,
-    max_completion_tokens: params.max_completion_tokens,
-    messages: buildAdapterMessages(documents),
-  };
+  const body: Record<string, unknown> = { messages: buildAdapterMessages(documents) };
+  for (const [path, spec] of Object.entries(CONFIG_FIELD_ROLE)) {
+    if (spec.role !== 'body') continue;
+    if ('stage' in spec && spec.stage !== stage) continue;
+    const value = configValue(path);
+    if (spec.wire === 'response_format') body.response_format = { type: value };
+    else body[spec.wire] = value;
+  }
+  for (const spec of Object.values(CONFIG_FIELD_ROLE)) {
+    if (spec.role !== 'body' || ('stage' in spec && spec.stage !== stage)) continue;
+    if (!Object.hasOwn(body, spec.wire)) throw new Error('MISSING_BODY_FIELD');
+  }
+  return body as unknown as AdapterChatRequest;
 }

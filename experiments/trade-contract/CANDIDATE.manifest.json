@@ -51,7 +51,7 @@
   "sourceFiles": [
     {
       "path": "experiments/trade-contract/adapter.ts",
-      "sha256": "89c3e8c7bbd16849c99edd5777f96b1fbe1003721532ed588396129dade3ad2d"
+      "sha256": "9f4859bca47c1df2d9f6c5321aa436156b55971b8b9e65623f8c792c416f0435"
     },
     {
       "path": "experiments/trade-contract/contract.ts",
@@ -71,11 +71,11 @@
     },
     {
       "path": "experiments/trade-contract/messages.ts",
-      "sha256": "2dc1767435744d7f67a4374121c6626d10729552bb87be32e02577a0fa1928e9"
+      "sha256": "066eba06f300f77d6bf2ed482600210abd2d61c287f9380195a97d36e24e5b3b"
     },
     {
       "path": "experiments/trade-contract/model-config.ts",
-      "sha256": "5f1ef4857bf17aa6d8c827b574c0f90e25c7be8467a89c57e0b03c728b4e863f"
+      "sha256": "cf8bbc23a42cf184038b7fbefac1ae54cf5fd11854a05a6ada4397b90fd08b00"
     },
     {
       "path": "experiments/trade-contract/offline.ts",
@@ -96,7 +96,7 @@
     "correctAllowMinimum": 0.8,
     "secondaryRelease": "block_only",
     "absenceRisk": "A structured complete detection that no mandate exists can still produce ALLOW. That false absence remains a subject of the later acceptance test and is not solved by this freeze.",
-    "invalidAttempt": "e98fee17e3b730c566993d32178729a292e3f871 was invalid: OpenServ HTTP 400 because the prompt was sent as one user message. No results from that attempt count."
+    "invalidAttempt": "e98fee17e3b730c566993d32178729a292e3f871 was invalid: OpenServ HTTP 400 because the prompt was sent as one user message. No results from that attempt count. 740f2cce782deaac5ddd3ddbe7e9344f961c9668 did not send response_format."
   },
   "messages": {
     "module": "experiments/trade-contract/messages.ts",
@@ -104,6 +104,28 @@
     "functions": [
       "buildAdapterMessages(documents: readonly Document[]): AdapterMessage[]",
       "buildAdapterRequest(documents: readonly Document[], stage: 'primary' | 'secondary'): AdapterChatRequest"
+    ],
+    "requestBodyKeys": [
+      "model",
+      "temperature",
+      "seed",
+      "max_completion_tokens",
+      "response_format",
+      "messages"
+    ],
+    "notInBody": [
+      "provider",
+      "transport",
+      "baseUrl",
+      "chatPath",
+      "cascade.when",
+      "cascade.secondaryPolicy",
+      "cascade.onSecondaryBlock",
+      "cascade.onSecondaryNonBlock",
+      "cascade.onSecondaryFailure",
+      "cascade.confirmBlocks",
+      "cascade.retriesPerModel",
+      "cascade.timeoutMs"
     ]
   }
 }

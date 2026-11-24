@@ -9,6 +9,10 @@
  * On that fall-through, serv-swift is block-only: BLOCK stays BLOCK, and
  * ALLOW, CONDITIONAL_ALLOW, HOLD, UNCERTAIN, or any other non-BLOCK outcome
  * becomes UNCERTAIN. If serv-swift also fails, the result is UNCERTAIN.
+ *
+ * `buildAdapterRequest` copies every `body` leaf below into the chat-completions
+ * JSON. `runner` leaves are not body fields: the runner or this adapter applies
+ * them (endpoint URL, timeout, retries, and the block-only cascade policy).
  */
 export const MODEL_CONFIG = {
   provider: 'openserv',
@@ -50,6 +54,47 @@ export const MODEL_CONFIG = {
 } as const;
 
 export type CascadeFailure = (typeof MODEL_CONFIG.cascade.when)[number];
+
+type BodyField = { role: 'body'; wire: string; stage?: 'primary' | 'secondary' };
+type RunnerField = { role: 'runner'; reason: string };
+
+/**
+ * Complete partition of every leaf in MODEL_CONFIG.
+ * A new config leaf must be classified here or the audit test fails.
+ * `responseFormat` is sent as OpenAI-compatible `response_format: { type }`.
+ */
+export const CONFIG_FIELD_ROLE = {
+  provider: { role: 'runner', reason: 'Provider name. The runner selects the client. Not a JSON body field.' },
+  transport: { role: 'runner', reason: 'Wire protocol. Not a JSON body field.' },
+  baseUrl: { role: 'runner', reason: 'Endpoint URL. Not a JSON body field.' },
+  chatPath: { role: 'runner', reason: 'Endpoint path. Not a JSON body field.' },
+  responseFormat: { role: 'body', wire: 'response_format' },
+  'primary.model': { role: 'body', wire: 'model', stage: 'primary' },
+  'primary.temperature': { role: 'body', wire: 'temperature', stage: 'primary' },
+  'primary.seed': { role: 'body', wire: 'seed', stage: 'primary' },
+  'primary.max_completion_tokens': { role: 'body', wire: 'max_completion_tokens', stage: 'primary' },
+  'cascade.secondary.model': { role: 'body', wire: 'model', stage: 'secondary' },
+  'cascade.secondary.temperature': { role: 'body', wire: 'temperature', stage: 'secondary' },
+  'cascade.secondary.seed': { role: 'body', wire: 'seed', stage: 'secondary' },
+  'cascade.secondary.max_completion_tokens': { role: 'body', wire: 'max_completion_tokens', stage: 'secondary' },
+  'cascade.when': { role: 'runner', reason: 'When the adapter may call swift. Not a JSON body field.' },
+  'cascade.secondaryPolicy': { role: 'runner', reason: 'Block-only publication rule. Not a JSON body field.' },
+  'cascade.onSecondaryBlock': { role: 'runner', reason: 'Adapter keeps a swift BLOCK. Not a JSON body field.' },
+  'cascade.onSecondaryNonBlock': { role: 'runner', reason: 'Adapter withholds every non-BLOCK swift outcome. Not a JSON body field.' },
+  'cascade.onSecondaryFailure': { role: 'runner', reason: 'Adapter result when swift fails. Not a JSON body field.' },
+  'cascade.confirmBlocks': { role: 'runner', reason: 'No extra confirm call. Not a JSON body field.' },
+  'cascade.retriesPerModel': { role: 'runner', reason: 'Runner retry count. Not a JSON body field.' },
+  'cascade.timeoutMs': { role: 'runner', reason: 'Runner timeout. Not a JSON body field.' },
+} as const satisfies Record<string, BodyField | RunnerField>;
+
+export function configLeafPaths(value: unknown = MODEL_CONFIG, prefix = ''): string[] {
+  if (Array.isArray(value)) return prefix ? [prefix] : [];
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, child]) =>
+      configLeafPaths(child, prefix ? `${prefix}.${key}` : key));
+  }
+  return prefix ? [prefix] : [];
+}
 
 function sortValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortValue);

@@ -384,6 +384,11 @@ export function decideCascade(
   if (!first.failure) return first.result;
   const reasons: readonly string[] = MODEL_CONFIG.cascade.when;
   if (!reasons.includes(first.failure) || secondary === null) return uncertain(options);
+  try {
+    buildAdapterRequest(documents, 'secondary');
+  } catch {
+    return uncertain(options);
+  }
   const second = inspect(documents, secondary, options);
   return publishSecondary(secondary, second, options);
 }

@@ -5,7 +5,7 @@ import {
   ADAPTER_ID, buildAdapterMessages, buildAdapterRequest, decideCascade, decideExchange, type AdapterExchange,
 } from './adapter.ts';
 import type { Document } from './contract.ts';
-import { MODEL_CONFIG } from './model-config.ts';
+import { CONFIG_FIELD_ROLE, MODEL_CONFIG, configLeafPaths } from './model-config.ts';
 import { PROMPT_TEMPLATE, PROMPT_TEMPLATE_ID } from './prompt.ts';
 
 const options = { trustedAdapterIds: [ADAPTER_ID] };
@@ -416,25 +416,51 @@ describe('frozen chat messages', () => {
 
   it('is byte-identical for the same documents', () => {
     const documents = filled().documents;
-    expect(JSON.stringify(buildAdapterMessages(documents))).toBe(JSON.stringify(buildAdapterMessages(structuredClone(documents))));
-    expect(JSON.stringify(buildAdapterRequest(documents, 'primary'))).toBe(JSON.stringify(buildAdapterRequest(documents, 'primary')));
+    const again = structuredClone(documents);
+    expect(JSON.stringify(buildAdapterMessages(documents))).toBe(JSON.stringify(buildAdapterMessages(again)));
+    expect(JSON.stringify(buildAdapterRequest(documents, 'primary'))).toBe(JSON.stringify(buildAdapterRequest(again, 'primary')));
+    expect(JSON.stringify(buildAdapterRequest(documents, 'secondary'))).toBe(JSON.stringify(buildAdapterRequest(again, 'secondary')));
   });
 
-  it('uses the same messages for nano and swift', () => {
+  it('sends the exact nano and swift bodies, including response_format', () => {
     const documents = filled().documents;
     const messages = buildAdapterMessages(documents);
-    const nano = buildAdapterRequest(documents, 'primary');
-    const swift = buildAdapterRequest(documents, 'secondary');
-    expect(nano.messages).toEqual(messages);
-    expect(swift.messages).toEqual(messages);
-    expect(nano).toMatchObject({
-      model: 'serv-nano', temperature: 0, seed: 42, max_completion_tokens: 4096,
+    expect(messages.map(message => message.role)).toEqual(['system', 'user']);
+    const shared = {
+      temperature: MODEL_CONFIG.primary.temperature,
+      seed: MODEL_CONFIG.primary.seed,
+      max_completion_tokens: MODEL_CONFIG.primary.max_completion_tokens,
+      response_format: { type: MODEL_CONFIG.responseFormat },
+      messages,
+    };
+    expect(buildAdapterRequest(documents, 'primary')).toEqual({ model: 'serv-nano', ...shared });
+    expect(buildAdapterRequest(documents, 'secondary')).toEqual({
+      ...shared,
+      model: 'serv-swift',
+      temperature: MODEL_CONFIG.cascade.secondary.temperature,
+      seed: MODEL_CONFIG.cascade.secondary.seed,
+      max_completion_tokens: MODEL_CONFIG.cascade.secondary.max_completion_tokens,
     });
-    expect(swift).toMatchObject({
-      model: 'serv-swift', temperature: 0, seed: 42, max_completion_tokens: 4096,
-    });
-    expect(Object.keys(nano).sort()).toEqual(['max_completion_tokens', 'messages', 'model', 'seed', 'temperature']);
-    expect(Object.keys(swift).sort()).toEqual(Object.keys(nano).sort());
+  });
+
+  it('fails if a body config field is missing from the request', () => {
+    const documents = filled().documents;
+    const leaves = configLeafPaths(MODEL_CONFIG).sort();
+    expect(Object.keys(CONFIG_FIELD_ROLE).sort()).toEqual(leaves);
+    for (const stage of ['primary', 'secondary'] as const) {
+      const request = buildAdapterRequest(documents, stage);
+      const serialized = JSON.stringify(request);
+      for (const [path, spec] of Object.entries(CONFIG_FIELD_ROLE)) {
+        if (spec.role === 'body') {
+          if (!('stage' in spec) || spec.stage === stage) expect(request).toHaveProperty(spec.wire);
+        } else {
+          expect(request).not.toHaveProperty(path.split('.').pop()!);
+          expect(serialized).not.toContain(MODEL_CONFIG.baseUrl);
+          expect(serialized).not.toContain('block_only');
+        }
+      }
+      expect(request.response_format).toEqual({ type: 'json_object' });
+    }
   });
 
   it.each([
