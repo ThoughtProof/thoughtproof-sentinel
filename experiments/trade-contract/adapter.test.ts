@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ADAPTER_ID, decideCascade, decideExchange, type AdapterExchange } from './adapter.ts';
+import {
+  ADAPTER_ID, buildAdapterMessages, buildAdapterRequest, decideCascade, decideExchange, type AdapterExchange,
+} from './adapter.ts';
 import type { Document } from './contract.ts';
 import { MODEL_CONFIG } from './model-config.ts';
-import { PROMPT_TEMPLATE, renderPrompt } from './prompt.ts';
+import { PROMPT_TEMPLATE, PROMPT_TEMPLATE_ID } from './prompt.ts';
 
 const options = { trustedAdapterIds: [ADAPTER_ID] };
 const q = (documentId: string, quote: string) => ({ documentId, quote });
@@ -98,7 +101,7 @@ describe('offline semantic adapter', () => {
     });
     expect(run(filled().model).decision).toBe('ALLOW');
     expect(fetchMock).not.toHaveBeenCalled();
-    const source = ['adapter.ts', 'model-config.ts', 'prompt.ts', 'evaluate.ts'].map(file =>
+    const source = ['adapter.ts', 'messages.ts', 'model-config.ts', 'prompt.ts', 'evaluate.ts'].map(file =>
       readFileSync(new URL(`./${file}`, import.meta.url), 'utf8')).join('\n');
     expect(source).not.toContain('process.env');
     expect(source).not.toContain('SERV_API_KEY');
@@ -311,9 +314,10 @@ describe('offline semantic adapter', () => {
     expect(PROMPT_TEMPLATE).toContain('unter 70.');
     expect(PROMPT_TEMPLATE).toContain('below 70.');
     expect(PROMPT_TEMPLATE).toContain('Do not emit character offsets');
-    const rendered = renderPrompt(filled().documents);
-    expect(rendered).toContain('Reduce Quill exposure');
-    expect(rendered).not.toContain('{{DOCUMENTS}}');
+    expect(PROMPT_TEMPLATE).toContain('These instructions are the system message.');
+    expect(PROMPT_TEMPLATE).toContain('The user message is a JSON array of the documents and ends with that array.');
+    expect(PROMPT_TEMPLATE).not.toContain('{{DOCUMENTS}}');
+    expect(PROMPT_TEMPLATE_ID).toBe('trade-contract-adapter/v2');
     const vercel = JSON.parse(readFileSync(new URL('../../vercel.json', import.meta.url), 'utf8')) as {
       git: { deploymentEnabled: Record<string, boolean> };
     };
@@ -388,5 +392,64 @@ describe('secondary model is block-only', () => {
       filled().documents, { ok: false, reason: 'transport_error' }, { ok: true, content: 'BLOCK' }, options,
     );
     expect(result.decision).toBe('BLOCK');
+  });
+});
+
+describe('frozen chat messages', () => {
+  const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
+
+  it('sends system then user, and the system text is the frozen prompt', () => {
+    const documents = filled().documents;
+    const messages = buildAdapterMessages(documents);
+    expect(messages.map(message => message.role)).toEqual(['system', 'user']);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].content.length).toBeGreaterThan(0);
+    expect(messages[0].content).toBe(PROMPT_TEMPLATE);
+    expect(sha256(messages[0].content)).toBe(sha256(PROMPT_TEMPLATE));
+    expect(messages[0].content).not.toContain('Reduce Quill exposure');
+    const user = messages[1].content;
+    expect(JSON.parse(user.slice(user.lastIndexOf('[')))).toEqual(documents);
+    expect(JSON.parse(user)).toEqual(documents.map(document => ({
+      id: document.id, role: document.role, text: document.text,
+    })));
+  });
+
+  it('is byte-identical for the same documents', () => {
+    const documents = filled().documents;
+    expect(JSON.stringify(buildAdapterMessages(documents))).toBe(JSON.stringify(buildAdapterMessages(structuredClone(documents))));
+    expect(JSON.stringify(buildAdapterRequest(documents, 'primary'))).toBe(JSON.stringify(buildAdapterRequest(documents, 'primary')));
+  });
+
+  it('uses the same messages for nano and swift', () => {
+    const documents = filled().documents;
+    const messages = buildAdapterMessages(documents);
+    const nano = buildAdapterRequest(documents, 'primary');
+    const swift = buildAdapterRequest(documents, 'secondary');
+    expect(nano.messages).toEqual(messages);
+    expect(swift.messages).toEqual(messages);
+    expect(nano).toMatchObject({
+      model: 'serv-nano', temperature: 0, seed: 42, max_completion_tokens: 4096,
+    });
+    expect(swift).toMatchObject({
+      model: 'serv-swift', temperature: 0, seed: 42, max_completion_tokens: 4096,
+    });
+    expect(Object.keys(nano).sort()).toEqual(['max_completion_tokens', 'messages', 'model', 'seed', 'temperature']);
+    expect(Object.keys(swift).sort()).toEqual(Object.keys(nano).sort());
+  });
+
+  it.each([
+    null,
+    undefined,
+    [],
+    [{ id: 'only', role: 'source', text: 'no proposal' }],
+    [{ id: '', role: 'proposal', text: 'x' }],
+    [{ id: 'order', role: 'note', text: 'x' }],
+    [{ id: 'order', role: 'proposal' }],
+  ])('does not release on bad documents %j', documents => {
+    const allow = { ok: true as const, content: JSON.stringify(filled().model) };
+    expect(decideCascade(documents as never, allow, allow, options).decision).toBe('UNCERTAIN');
+    expect(() => buildAdapterMessages(documents as never)).toThrow('INVALID_DOCUMENTS');
+    expect(() => buildAdapterRequest(documents as never, 'primary')).toThrow('INVALID_DOCUMENTS');
+    expect(() => buildAdapterRequest(documents as never, 'secondary')).toThrow('INVALID_DOCUMENTS');
   });
 });

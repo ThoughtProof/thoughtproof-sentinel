@@ -3,8 +3,12 @@ import type {
   Document, Evidence, EvaluationOptions, EvaluationResult, TradeContractInput,
 } from './contract.ts';
 import { documentDigest, evaluateTradeContract } from './evaluate.ts';
+import { buildAdapterRequest } from './messages.ts';
 import { MODEL_CONFIG, type CascadeFailure } from './model-config.ts';
 import { uniqueQuoteSpan } from './spans.ts';
+
+export { buildAdapterMessages, buildAdapterRequest } from './messages.ts';
+export type { AdapterChatRequest, AdapterMessage, AdapterStage } from './messages.ts';
 
 /** Local adapter id. It is not read from the model payload. */
 export const ADAPTER_ID = 'trade-contract-adapter/v1';
@@ -370,6 +374,12 @@ export function decideCascade(
   secondary: AdapterExchange | null,
   options: EvaluationOptions,
 ): EvaluationResult {
+  try {
+    // The same request the runner would send. Invalid documents cannot release.
+    buildAdapterRequest(documents, 'primary');
+  } catch {
+    return uncertain(options);
+  }
   const first = inspect(documents, primary, options);
   if (!first.failure) return first.result;
   const reasons: readonly string[] = MODEL_CONFIG.cascade.when;

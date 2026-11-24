@@ -6,8 +6,8 @@
   "adapterOutputVersion": "trade-contract-adapter/v1",
   "promptTemplates": [
     {
-      "id": "trade-contract-adapter/v1",
-      "sha256": "734d3d769eea384f1b2a909ea6525349463cab5daed923ea800b7c78a039a481"
+      "id": "trade-contract-adapter/v2",
+      "sha256": "331ad5bdc0efcd58c4cf348c114f801c199382f0134c675218aa9f6e70fa5aa8"
     }
   ],
   "modelConfiguration": {
@@ -51,7 +51,7 @@
   "sourceFiles": [
     {
       "path": "experiments/trade-contract/adapter.ts",
-      "sha256": "e8fd80eaa9f3d35f7288ba79282d9b6fd1be72b7cbba4f75b7881cdc49a0e562"
+      "sha256": "89c3e8c7bbd16849c99edd5777f96b1fbe1003721532ed588396129dade3ad2d"
     },
     {
       "path": "experiments/trade-contract/contract.ts",
@@ -70,6 +70,10 @@
       "sha256": "11bb51a1f3a3cad2d61a9a1e4bb6fd82660b366a249b2f3fc3cae2f8057dc5c4"
     },
     {
+      "path": "experiments/trade-contract/messages.ts",
+      "sha256": "2dc1767435744d7f67a4374121c6626d10729552bb87be32e02577a0fa1928e9"
+    },
+    {
       "path": "experiments/trade-contract/model-config.ts",
       "sha256": "5f1ef4857bf17aa6d8c827b574c0f90e25c7be8467a89c57e0b03c728b4e863f"
     },
@@ -79,7 +83,7 @@
     },
     {
       "path": "experiments/trade-contract/prompt.ts",
-      "sha256": "5ad5a8a05a2a8d456c5b66a35901e2503b9fac1ce4d7d5cb45b3396fa0d8e73d"
+      "sha256": "7ab619fa2f7c2013dec1dbdd0caefcfccd54b801d07a07b7b272e493e9d9d0a5"
     },
     {
       "path": "experiments/trade-contract/spans.ts",
@@ -91,6 +95,15 @@
     "falseAllowTarget": 0,
     "correctAllowMinimum": 0.8,
     "secondaryRelease": "block_only",
-    "absenceRisk": "A structured complete detection that no mandate exists can still produce ALLOW. That false absence remains a subject of the later acceptance test and is not solved by this freeze."
+    "absenceRisk": "A structured complete detection that no mandate exists can still produce ALLOW. That false absence remains a subject of the later acceptance test and is not solved by this freeze.",
+    "invalidAttempt": "e98fee17e3b730c566993d32178729a292e3f871 was invalid: OpenServ HTTP 400 because the prompt was sent as one user message. No results from that attempt count."
+  },
+  "messages": {
+    "module": "experiments/trade-contract/messages.ts",
+    "exportedFrom": "experiments/trade-contract/adapter.ts",
+    "functions": [
+      "buildAdapterMessages(documents: readonly Document[]): AdapterMessage[]",
+      "buildAdapterRequest(documents: readonly Document[], stage: 'primary' | 'secondary'): AdapterChatRequest"
+    ]
   }
 }
