@@ -1,4 +1,8 @@
-/** Experimental adapter contract. No extraction or semantic model is implemented. */
+/**
+ * Experimental trade-decision contract.
+ * The evaluator does not call a model. A separate offline adapter may parse
+ * structured model output into this shape; positions are still checked here.
+ */
 export const CONTRACT_VERSION = 'trade-contract/v1' as const;
 export const CHECK_IDS = [
   'decision_basis',
@@ -35,9 +39,15 @@ export interface Binding {
 export interface Quantity {
   id: string;
   binding: Binding;
+  /** Canonical ASCII decimal. Locale punctuation stays in the evidence quote. */
   value: string;
   valueEvidence: Evidence;
   bindingEvidence: Evidence[];
+  /**
+   * Required when `binding.unit` is `percent`: the exact "percent of what" phrase.
+   * Null for every other unit. A missing or competing reference is not verifiable.
+   */
+  referenceEvidence: Evidence | null;
 }
 export interface Limit {
   id: string;
@@ -46,6 +56,8 @@ export interface Limit {
   value: string;
   valueEvidence: Evidence;
   bindingEvidence: Evidence[];
+  /** Same rule as Quantity.referenceEvidence. */
+  referenceEvidence: Evidence | null;
   /** Null means no unambiguous matching quantity was extracted. */
   quantityId: string | null;
 }

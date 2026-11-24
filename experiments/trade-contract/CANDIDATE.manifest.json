@@ -1,0 +1,92 @@
+{
+  "manifestVersion": 1,
+  "frozen": true,
+  "description": "Frozen offline trade-contract candidate. SHA-256 over UTF-8 bytes. This manifest is not part of sourceFiles. No accuracy is claimed.",
+  "contractVersion": "trade-contract/v1",
+  "adapterOutputVersion": "trade-contract-adapter/v1",
+  "promptTemplates": [
+    {
+      "id": "trade-contract-adapter/v1",
+      "sha256": "734d3d769eea384f1b2a909ea6525349463cab5daed923ea800b7c78a039a481"
+    }
+  ],
+  "modelConfiguration": {
+    "provider": "openserv",
+    "transport": "openai-compatible",
+    "baseUrl": "https://inference-api.openserv.ai/v1",
+    "chatPath": "/chat/completions",
+    "responseFormat": "json_object",
+    "primary": {
+      "model": "serv-nano",
+      "temperature": 0,
+      "seed": 42,
+      "max_completion_tokens": 4096
+    },
+    "cascade": {
+      "secondary": {
+        "model": "serv-swift",
+        "temperature": 0,
+        "seed": 42,
+        "max_completion_tokens": 4096
+      },
+      "when": [
+        "timeout",
+        "transport_error",
+        "http_error",
+        "empty",
+        "parse_error",
+        "schema_violation",
+        "missing_checks"
+      ],
+      "onSecondaryFailure": "UNCERTAIN",
+      "confirmBlocks": false,
+      "retriesPerModel": 0,
+      "timeoutMs": 45000
+    }
+  },
+  "modelConfigurationSha256": "c1c0f158360567fac50276dfb7171b38d0a4d9c0d5a3fc79152d71d29ebb4e3c",
+  "sourceFiles": [
+    {
+      "path": "experiments/trade-contract/adapter.ts",
+      "sha256": "b98e9b13077c1c4ab4c9b4f53a404af211997e61deef1ae8a10f59afaa30b26d"
+    },
+    {
+      "path": "experiments/trade-contract/contract.ts",
+      "sha256": "5f8c7d8235b8edf95fe81258b3d09869391a839e0612ff7d7e93ea9bd0ed153c"
+    },
+    {
+      "path": "experiments/trade-contract/decimal.ts",
+      "sha256": "fd6cba7a997d5608493676a559b95b2f3999c0ca864bc488d4d7d308e7f911a6"
+    },
+    {
+      "path": "experiments/trade-contract/development-fixture.ts",
+      "sha256": "4cfbed2f2585325e32a5b8a6d1e1acd47b55bcaec10e035744623ddbff43c87c"
+    },
+    {
+      "path": "experiments/trade-contract/evaluate.ts",
+      "sha256": "11bb51a1f3a3cad2d61a9a1e4bb6fd82660b366a249b2f3fc3cae2f8057dc5c4"
+    },
+    {
+      "path": "experiments/trade-contract/model-config.ts",
+      "sha256": "19127154bd2d782aece1d14701db8153c5f2b9d2cf04dda5a30ab10d2947c277"
+    },
+    {
+      "path": "experiments/trade-contract/offline.ts",
+      "sha256": "d9c2d48ff5c8936a157293a574f7b5d01f265a35ef23cbd141a469e12856e2f5"
+    },
+    {
+      "path": "experiments/trade-contract/prompt.ts",
+      "sha256": "5ad5a8a05a2a8d456c5b66a35901e2503b9fac1ce4d7d5cb45b3396fa0d8e73d"
+    },
+    {
+      "path": "experiments/trade-contract/spans.ts",
+      "sha256": "9a57127e16c2244090b3110e68fb8ef838722b96674c1a54cc71b3f99871c7f2"
+    }
+  ],
+  "acceptance": {
+    "measured": false,
+    "falseAllowTarget": 0,
+    "correctAllowMinimum": 0.8,
+    "absenceRisk": "A structured complete detection that no mandate exists can still produce ALLOW. That false absence remains a subject of the later acceptance test and is not solved by this freeze."
+  }
+}

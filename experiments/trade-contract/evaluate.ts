@@ -4,7 +4,8 @@ import type {
   Binding, CheckId, Claim, Evidence, EvaluationOptions,
   EvaluationResult, Quantity, SemanticCheck, Status, TradeContractInput,
 } from './contract.ts';
-import { checkExactCalculation, compareDecimal } from './decimal.ts';
+import { checkExactCalculation, compareDecimal, readNumericToken } from './decimal.ts';
+import { sentenceFinalPeriod, uniqueQuoteSpan } from './spans.ts';
 
 type Issue = { code: string; path: string };
 type Guard = (value: unknown, path: string, issues: Issue[]) => boolean;
@@ -61,10 +62,14 @@ const fields = {
     claimEvidence: evidence, supportingEvidence: array(evidence),
     calculation: nullable(object({ operation: strings(['add', 'subtract']), leftId: id, rightId: id, resultId: id })),
   })),
-  quantities: array(object({ id, binding, value: id, valueEvidence: evidence, bindingEvidence: array(evidence) })),
+  quantities: array(object({
+    id, binding, value: id, valueEvidence: evidence, bindingEvidence: array(evidence),
+    referenceEvidence: nullable(evidence),
+  })),
   limits: array(object({
     id, binding, operator: strings(['<', '<=', '>', '>=', '==']), value: id,
-    valueEvidence: evidence, bindingEvidence: array(evidence), quantityId: nullable(id),
+    valueEvidence: evidence, bindingEvidence: array(evidence),
+    referenceEvidence: nullable(evidence), quantityId: nullable(id),
   })),
 } satisfies Record<keyof TradeContractInput, Guard>;
 
@@ -171,27 +176,68 @@ export function evaluateTradeContract(
 
     const validEvidence = (ref: Evidence): boolean => {
       const document = documents.get(ref.documentId);
-      return !!document && ref.quote.trim().length > 0 && ref.end > ref.start && ref.end <= document.text.length
-        && document.text.slice(ref.start, ref.end) === ref.quote;
+      if (!document || ref.quote.trim().length === 0) return false;
+      // Positions come from an exact unique match, not from a claimed slice alone.
+      const span = uniqueQuoteSpan(document.text, ref.quote);
+      return !!span && ref.start === span.start && ref.end === span.end;
     };
     const evidenceList = (refs: Evidence[]) => refs.length > 0 && refs.every(validEvidence);
     const proposalEvidence = (ref: Evidence) => validEvidence(ref) && documents.get(ref.documentId)!.role === 'proposal';
     const sourceEvidence = (ref: Evidence) => validEvidence(ref) && documents.get(ref.documentId)!.role === 'source';
-    const numericEvidence = (value: string, ref: Evidence): boolean => {
-      if (!validEvidence(ref) || compareDecimal(value, ref.quote) !== 0) return false;
-      const original = documents.get(ref.documentId)!.text;
-      // Reject fragments of numbers, exponent/locale forms and identifiers.
-      const before = original.slice(0, ref.start), after = original.slice(ref.end);
+    const headingOnly = (quote: string) => /^(?:strategy|strategie|mandate|mandat|limits?|grenzen|obergrenze|maximum|minimum)\s*:?\s*$/i.test(quote.trim());
+    const numericBoundary = (original: string, start: number, end: number): boolean => {
+      const before = original.slice(0, start);
+      const after = original.slice(end);
       const adjacent = /[\p{L}\p{N}\p{M}\p{Pc}.,+\-\u2212\u2010-\u2015\uFE63\uFF0D\u00a0\u202f']/u;
-      return !adjacent.test([...before].at(-1) ?? '') && !adjacent.test([...after][0] ?? '')
-        && !/[\p{N}+\-\u2212\u2010-\u2015\uFE63\uFF0D][ \t\u00a0\u202f]+$/u.test(before)
-        && !/^[ \t\u00a0\u202f]+\p{N}/u.test(after);
+      const beforeChar = [...before].at(-1) ?? '';
+      if (adjacent.test(beforeChar)) return false;
+      if (/[\p{N}+\-\u2212\u2010-\u2015\uFE63\uFF0D][ \t\u00a0\u202f]+$/u.test(before)) return false;
+      const afterChar = [...after][0] ?? '';
+      // A sentence-ending period is not part of the number. A period before
+      // another digit still glues, so `70` does not match inside `70.5`.
+      if (!(afterChar === '.' && sentenceFinalPeriod(after)) && adjacent.test(afterChar)) return false;
+      return !/^[ \t\u00a0\u202f]+\p{N}/u.test(after);
+    };
+    const percentMarked = (original: string, end: number, binding: Evidence[]): boolean => {
+      const after = original.slice(end, end + 32);
+      return /^[ \t\u00a0\u202f]?%/.test(original.slice(end))
+        || /^[ \t\u00a0\u202f]*(?:percent|prozent)\b/i.test(after)
+        || binding.some(item => /%|\bpercent\b|\bprozent\b/i.test(item.quote));
+    };
+    const tokenAgrees = (value: string, ref: Evidence, unit: string, binding: Evidence[]): boolean => {
+      if (!validEvidence(ref)) return false;
+      const original = documents.get(ref.documentId)!.text;
+      if (!numericBoundary(original, ref.start, ref.end)) return false;
+      const reading = readNumericToken(ref.quote);
+      if (reading.status !== 'exact' || compareDecimal(value, reading.canonical) !== 0) return false;
+      const suffixed = reading.percent || /^[ \t\u00a0\u202f]?%/.test(original.slice(ref.end));
+      if (unit === 'percent') return suffixed || percentMarked(original, ref.end, binding);
+      return !suffixed;
+    };
+    const substantiveReference = (quote: string): boolean => {
+      const compact = quote.trim().replace(/\s+/g, ' ');
+      if (/^(?:%|percent|per cent|prozent|pct)$/i.test(compact)) return false;
+      const residue = compact
+        .replace(/%|\bpercent\b|\bper cent\b|\bprozent\b|\bpct\b/ig, '')
+        .replace(/[0-9.,+\-\s]/g, '');
+      return [...residue].length >= 3 && /\p{L}/u.test(residue);
+    };
+    const competingReference = (quote: string) =>
+      /\b(?:of|von|des|der|vom)\b[\s\S]{0,80}\b(?:or|oder)\b[\s\S]{0,40}\b(?:of|von|des|der|vom)\b/i.test(quote);
+    const referenceBound = (unit: string, reference: Evidence | null, binding: Evidence[], value: Evidence): boolean => {
+      if (unit !== 'percent') return reference === null;
+      if (!reference || !validEvidence(reference) || sameEvidence(reference, value)) return false;
+      if (!substantiveReference(reference.quote) || !containsValue(reference, binding)) return false;
+      return !binding.some(item => competingReference(item.quote));
     };
     const containsValue = (value: Evidence, refs: Evidence[]) => refs.some(ref => ref.documentId === value.documentId
       && ref.start <= value.start && ref.end >= value.end);
     const validQuantity = (quantity: Quantity) =>
-      numericEvidence(quantity.value, quantity.valueEvidence) && evidenceList(quantity.bindingEvidence)
-      && containsValue(quantity.valueEvidence, quantity.bindingEvidence);
+      tokenAgrees(quantity.value, quantity.valueEvidence, quantity.binding.unit, quantity.bindingEvidence)
+      && evidenceList(quantity.bindingEvidence)
+      && quantity.bindingEvidence.every(item => !headingOnly(item.quote))
+      && containsValue(quantity.valueEvidence, quantity.bindingEvidence)
+      && referenceBound(quantity.binding.unit, quantity.referenceEvidence, quantity.bindingEvidence, quantity.valueEvidence);
     const quantities = new Map(input.quantities.map(quantity => [quantity.id, quantity]));
 
     const applicability = (checkId: CheckId, count: number): Status | null => {
@@ -232,6 +278,7 @@ export function evaluateTradeContract(
       if (!evidenceList(check.evidence) || !check.evidence.some(proposalEvidence)
         || (check.status === 'fulfilled' && !check.evidence.some(sourceEvidence))
         || requirements.some(requirement => !evidenceList(requirement.evidence)
+          || requirement.evidence.some(ref => headingOnly(ref.quote))
           || !requirement.evidence.every(sourceEvidence)
           || !requirement.evidence.some(ref => check.evidence.some(cited => sameEvidence(ref, cited))))) {
         issue('INVALID_SEMANTIC_EVIDENCE', `$.semanticChecks[${index}]`);
@@ -276,13 +323,33 @@ export function evaluateTradeContract(
       return correct === null ? 'not_verifiable' : correct ? 'fulfilled' : 'contradicted';
     };
 
+    const hasBoundComparison = (quote: string) => /\d/.test(quote) && (
+      /<=|>=|<|>|==/.test(quote)
+      || /\b(?:unter|ueber|über|below|under|above|over|at most|at least|hoechstens|höchstens|mindestens|maximal|maximum|minimum|obergrenze)\b/i.test(quote)
+    );
+    const embeddedLimitsCovered = (): boolean => {
+      const clauses = input.requirements.flatMap(requirement => requirement.evidence.filter(evidence =>
+        validEvidence(evidence) && hasBoundComparison(evidence.quote)));
+      return clauses.every(clause => input.limits.some(limit =>
+        limit.valueEvidence.documentId === clause.documentId
+        && clause.start <= limit.valueEvidence.start && limit.valueEvidence.end <= clause.end));
+    };
     const numeric = (): Status => {
       const applicable = applicability('numeric_limits', input.limits.length || (groupValid.limits ? 0 : 1));
+      const covered = embeddedLimitsCovered();
+      // A section heading cannot hide a comparison that was quoted as a requirement.
+      if (applicable === 'not_applicable') {
+        if (!covered) { issue('UNBOUND_EMBEDDED_LIMIT', '$.limits'); return 'not_verifiable'; }
+        return 'not_applicable';
+      }
       if (applicable !== null) return applicable;
+      if (!covered) issue('UNBOUND_EMBEDDED_LIMIT', '$.limits');
       return aggregate(input.limits.map((limit, index): Status => {
         const quantity = limit.quantityId === null ? undefined : quantities.get(limit.quantityId);
-        if (!quantity || !validQuantity(quantity) || !numericEvidence(limit.value, limit.valueEvidence)
-          || !evidenceList(limit.bindingEvidence) || !containsValue(limit.valueEvidence, limit.bindingEvidence)
+        if (!quantity || !validQuantity(quantity) || !tokenAgrees(limit.value, limit.valueEvidence, limit.binding.unit, limit.bindingEvidence)
+          || !evidenceList(limit.bindingEvidence) || limit.bindingEvidence.some(item => headingOnly(item.quote))
+          || !containsValue(limit.valueEvidence, limit.bindingEvidence)
+          || !referenceBound(limit.binding.unit, limit.referenceEvidence, limit.bindingEvidence, limit.valueEvidence)
           || !sameBinding(quantity.binding, limit.binding)
           || overlaps(quantity.valueEvidence, limit.valueEvidence)) {
           issue('UNBOUND_NUMERIC_COMPARISON', `$.limits[${index}]`);
@@ -295,7 +362,7 @@ export function evaluateTradeContract(
             : limit.operator === '>' ? comparison > 0
               : limit.operator === '>=' ? comparison >= 0 : comparison === 0;
         return fulfilled ? 'fulfilled' : 'contradicted';
-      }).concat(groupValid.limits && groupValid.quantities ? [] : ['not_verifiable']));
+      }).concat(groupValid.limits && groupValid.quantities && covered ? [] : ['not_verifiable']));
     };
 
     const results = new Map<CheckId, Status>();

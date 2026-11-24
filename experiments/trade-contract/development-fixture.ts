@@ -29,6 +29,8 @@ export function developmentFixture(): TradeContractInput {
   const order = quote('order', 'Verkaufe 10 der vorhandenen 40 Helio-Aktien mit einer Limitorder.');
   const risk = quote('order', 'Geplantes Risiko: 0.20 % des Kontoeigenkapitals zum Entscheidungszeitpunkt.');
   const bound = quote('context', 'Maximum intended risk: <= 0.30 % of decision-time account equity.');
+  const orderReference = quote('order', 'des Kontoeigenkapitals zum Entscheidungszeitpunkt');
+  const limitReference = quote('context', 'of decision-time account equity');
   const binding = {
     subjectId: 'proposed-order', measureId: 'intended-risk', unit: 'percent', referenceId: 'decision-time-account-equity',
   };
@@ -56,10 +58,13 @@ export function developmentFixture(): TradeContractInput {
       { checkId: 'mandate_compliance', status: 'fulfilled', evidence: [order, mandate], requirementIds: ['no-short'] },
     ],
     claims: [],
-    quantities: [{ id: 'order-risk', binding: { ...binding }, value: '0.20', valueEvidence: quote('order', '0.20'), bindingEvidence: [risk] }],
+    quantities: [{
+      id: 'order-risk', binding: { ...binding }, value: '0.20', valueEvidence: quote('order', '0.20'),
+      bindingEvidence: [risk], referenceEvidence: orderReference,
+    }],
     limits: [{
       id: 'risk-cap', binding: { ...binding }, operator: '<=', value: '0.30', valueEvidence: quote('context', '0.30'),
-      bindingEvidence: [bound], quantityId: 'order-risk',
+      bindingEvidence: [bound], referenceEvidence: limitReference, quantityId: 'order-risk',
     }],
   };
 }
