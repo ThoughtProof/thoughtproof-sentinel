@@ -110,6 +110,15 @@ export async function verify(req: SentinelVerifyRequest): Promise<SentinelVerify
     : null;
   const objectiveMismatch = actionAuthKind?.objective_mismatch === true;
   const unclassifiedAbstention = actionAuthKind?.unclassified_abstention === true;
+  if (actionAuthKind && objectiveMismatch) {
+    // Diagnostic only (Runtime Logs). Kinds and branch names, never request
+    // text. Not part of the receipt and not read by promotion. Answers
+    // which deterministic branch fired when caller kinds are declared.
+    console.log(
+      `[sentinel/kind-gate] ${id} objective_mismatch branches=${actionAuthKind.objective_mismatch_branches.join(',')}` +
+        ` prose_action_kind=${actionAuthKind.prose_action_kind} prose_mandate_kind=${actionAuthKind.prose_mandate_kind}`,
+    );
+  }
 
   const gateField = gateResult && !gateResult.silent
     ? {
