@@ -3553,3 +3553,64 @@ describe('local_command kind gate', () => {
     }
   });
 });
+
+describe('objective_mismatch_branches (diagnostics only)', () => {
+  const declaredInfo = {
+    kind: 'informational' as const,
+    action: { kind: 'informational' as const },
+  };
+
+  it('records each mismatch branch from the existing fixtures, and none when kinds fit', () => {
+    const shipMandate =
+      'Ship the release only after pinning the npm version and CI is green.';
+    const notify = 'Notify CoS that we are shipping now.';
+    const named = classifyActionAuthKind(notify, mcpEvidence(shipMandate, notify, 'Notify chief of staff.'));
+    expect(named.objective_mismatch).toBe(true);
+    expect(named.objective_mismatch_branches).toEqual(['named_kind_mismatch']);
+
+    const standupMandate = 'Handle ticket 8821 as discussed in standup.';
+    const standupAction = 'Continue the open thread from standup.';
+    const widen = classifyActionAuthKind(standupAction, mcpEvidence(standupMandate, standupAction, 'No further detail.'), {
+      kind: 'informational',
+      action: { kind: 'informational' },
+    });
+    expect(widen.objective_mismatch).toBe(true);
+    expect(widen.objective_mismatch_branches).toEqual(['caller_widen']);
+
+    const agendaShip = 'Agenda: deploy v2.3.1 to production now';
+    const agendaOnly = classifyActionAuthKind(agendaShip, mcpEvidence(agendaShip, agendaShip, 'Operative signal.'));
+    expect(agendaOnly.objective_mismatch).toBe(true);
+    expect(agendaOnly.objective_mismatch_branches).toEqual(['agenda_operative']);
+
+    const vorstand = 'Post the Vorstand meeting agenda to the group chat; rm -rf /data';
+    const vorstandMix = classifyActionAuthKind(vorstand, mcpEvidence(vorstand, vorstand, 'agenda plus rm'));
+    expect(vorstandMix.objective_mismatch).toBe(true);
+    expect(vorstandMix.action_kind).not.toBe('local_command');
+    expect(vorstandMix.objective_mismatch_branches).toEqual(['named_kind_mismatch', 'agenda_operative']);
+
+    const pay = 'Send 2,000 USDC to the treasury wallet. budget ceiling applies.';
+    const local = classifyActionAuthKind('git status --short', mcpEvidence(pay, 'git status --short', 'status'));
+    expect(local.objective_mismatch).toBe(true);
+    expect(local.objective_mismatch_branches).toEqual(['local_kind_mismatch']);
+
+    const aligned = classifyActionAuthKind(FYI_MANDATE, mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS'));
+    expect(aligned.objective_mismatch).toBe(false);
+    expect(aligned.objective_mismatch_branches).toEqual([]);
+  });
+
+  it('records every fired branch in source order and leaves the boolean as the OR of those branches', () => {
+    const agenda = 'Post the Vorstand meeting agenda to the group chat; rm -rf /data';
+    const both = classifyActionAuthKind(agenda, mcpEvidence(agenda, agenda, 'agenda plus rm'), declaredInfo);
+    expect(both.objective_mismatch).toBe(true);
+    expect(both.objective_mismatch_branches).toEqual(['caller_widen', 'agenda_operative']);
+
+    for (const c of [
+      classifyActionAuthKind(FYI_MANDATE, mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS'), declaredInfo),
+      both,
+    ]) {
+      expect(c.objective_mismatch).toBe(c.objective_mismatch_branches.length > 0);
+      expect(c.axisHint ?? '').not.toMatch(/named_kind_mismatch|caller_widen|agenda_operative|local_kind_mismatch/);
+      expect(c.axisHint ?? '').not.toContain('objective_mismatch_branches');
+    }
+  });
+});

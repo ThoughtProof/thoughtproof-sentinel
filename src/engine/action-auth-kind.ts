@@ -187,6 +187,12 @@ export interface ActionAuthSections {
   source: 'mcp' | 'suite' | 'unstructured';
 }
 
+export type ObjectiveMismatchBranch =
+  | 'named_kind_mismatch'
+  | 'caller_widen'
+  | 'agenda_operative'
+  | 'local_kind_mismatch';
+
 export interface ActionAuthClassification {
   action_kind: ActionKind;
   mandate_kind: ActionKind;
@@ -208,6 +214,11 @@ export interface ActionAuthClassification {
    */
   requested_fyi_compatible: boolean;
   objective_mismatch: boolean;
+  /**
+   * Which deterministic branch(es) set `objective_mismatch`. Diagnostic
+   * only; never read by the verdict path. Empty when there is no mismatch.
+   */
+  objective_mismatch_branches: ObjectiveMismatchBranch[];
   /** Both kinds unknown — abstention, not a named mandate conflict. */
   unclassified_abstention: boolean;
   identifiers_are_not_spend_amounts: boolean;
@@ -2323,6 +2334,11 @@ export function classifyActionAuthKind(
 
   const objective_mismatch =
     namedKindMismatch || callerWidenBlocked || agendaOperativeConflict || localKindMismatch;
+  const objective_mismatch_branches: ObjectiveMismatchBranch[] = [];
+  if (namedKindMismatch) objective_mismatch_branches.push('named_kind_mismatch');
+  if (callerWidenBlocked) objective_mismatch_branches.push('caller_widen');
+  if (agendaOperativeConflict) objective_mismatch_branches.push('agenda_operative');
+  if (localKindMismatch) objective_mismatch_branches.push('local_kind_mismatch');
 
   const identifiers_are_not_spend_amounts =
     !value_transfer &&
@@ -2431,6 +2447,7 @@ export function classifyActionAuthKind(
     named_recipient_in_mandate,
     requested_fyi_compatible,
     objective_mismatch,
+    objective_mismatch_branches,
     unclassified_abstention,
     identifiers_are_not_spend_amounts,
     bounded_permission_compatible,

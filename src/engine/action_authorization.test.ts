@@ -30,6 +30,11 @@ vi.mock('pot-cli/verdict', () => ({
 
 import { verify } from './index.js';
 import { runCascade } from 'pot-cli/cascade';
+import {
+  buildCanonicalSentinelVerdict,
+  hashCanonicalSentinelVerdict,
+  serializeCanonicalSentinelVerdict,
+} from '../canonical-verdict.js';
 import { actionAuthorization } from './modes/action_authorization.js';
 import {
   CALLER_STRUCTURAL_FACT_REDACTION,
@@ -2688,5 +2693,103 @@ describe('agenda/meeting informational requests', () => {
     expect(res.verdict).toBe('BLOCK');
     expect(res.verdict).not.toBe('ALLOW');
     expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+  });
+});
+
+describe('kind-gate diagnostic log', () => {
+  const KIND_ENUM =
+    'informational|value_transfer|permission|deploy_ship|local_command|unknown';
+  const BRANCH_ENUM =
+    'named_kind_mismatch|caller_widen|agenda_operative|local_kind_mismatch';
+  const LINE_RE = new RegExp(
+    `^\\[sentinel/kind-gate\\] sent_[0-9a-f]{16} objective_mismatch branches=(?:${BRANCH_ENUM})(?:,(?:${BRANCH_ENUM}))* prose_action_kind=(?:${KIND_ENUM}) prose_mandate_kind=(?:${KIND_ENUM})$`,
+  );
+
+  function kindGateLines(): string[] {
+    return vi
+      .mocked(console.log)
+      .mock.calls.map((call) => call[0])
+      .filter((line): line is string => typeof line === 'string' && line.startsWith('[sentinel/kind-gate]'));
+  }
+
+  it('logs only the id, branch names and kind enums, and the BLOCK is unchanged', async () => {
+    const distinctive = 'ZEBRAQUOTE-9f3a-not-a-kind';
+    const mandate =
+      `Ship the release only after pinning the npm version and CI is green. ${distinctive}`;
+    const action = `Notify CoS that we are shipping now. ${distinctive}`;
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('ALLOW', 'agreement_allow', [
+          { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'No spend scope to exceed.' },
+          { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'CoS is a named teammate.' },
+          { step_id: 'step_2', predicate: 'faithful', score: 0.85, quote: action, reasoning: 'Notify about shipping serves the ship mandate.' },
+          { step_id: 'step_3', predicate: 'faithful', score: 0.9, quote: action, reasoning: 'Notify is minimally scoped.' },
+        ]) as never,
+      );
+      const res = await verify({
+        id: 'sent_a1b2c3d4e5f60718',
+        claim: action,
+        evidence: mcpEvidence(mandate, action, `Notify chief of staff. ${distinctive}`),
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+
+      expect(res.verdict).toBe('BLOCK');
+      expect(res.meta.promotion?.reason).toBe('objective_mismatch_fail_closed');
+      expect(res.meta.promotion?.action_kind).toBe('informational');
+      expect(res.meta.promotion?.mandate_kind).toBe('deploy_ship');
+
+      const lines = kindGateLines();
+      expect(lines).toEqual([
+        '[sentinel/kind-gate] sent_a1b2c3d4e5f60718 objective_mismatch branches=named_kind_mismatch prose_action_kind=informational prose_mandate_kind=deploy_ship',
+      ]);
+      expect(lines[0]).toMatch(LINE_RE);
+      expect(lines[0]).not.toContain(distinctive);
+      expect(lines[0]).not.toContain('Notify CoS');
+      expect(lines[0]).not.toContain('pinning the npm');
+      expect(lines[0]).not.toMatch(/['"`]|0x|USDC|\$/);
+
+      const question = (mockRunCascade.mock.calls[0][0] as { question: string }).question;
+      expect(question).not.toContain('objective_mismatch_branches');
+      expect(question).not.toContain('named_kind_mismatch');
+      const responseBytes = JSON.stringify(res);
+      expect(responseBytes).not.toContain('objective_mismatch_branches');
+      expect(responseBytes).not.toContain('named_kind_mismatch');
+      const canonical = serializeCanonicalSentinelVerdict(buildCanonicalSentinelVerdict(res));
+      expect(canonical).not.toContain('objective_mismatch_branches');
+      expect(canonical).not.toContain('named_kind_mismatch');
+      expect(canonical).not.toContain(distinctive);
+      expect(hashCanonicalSentinelVerdict(buildCanonicalSentinelVerdict(res))).toMatch(/^0x[0-9a-f]{64}$/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('does not log when there is no objective mismatch, and the ALLOW is unchanged', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      mockRunCascade.mockResolvedValueOnce(
+        cascade('ALLOW', 'agreement_allow', [
+          { step_id: 'step_0', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'No spend scope to exceed.' },
+          { step_id: 'step_1', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'CoS is the mandate recipient.' },
+          { step_id: 'step_2', predicate: 'faithful', score: 0.9, quote: FYI_MANDATE, reasoning: 'Action is the instructed FYI.' },
+          { step_id: 'step_3', predicate: 'faithful', score: 0.85, quote: FYI_MANDATE, reasoning: 'Notify is minimally scoped.' },
+        ]) as never,
+      );
+      const res = await verify({
+        id: 'sent_b1b2c3d4e5f60718',
+        claim: 'The proposed FYI to CoS is authorized by the mandate.',
+        evidence: mcpEvidence(FYI_MANDATE, FYI_MANDATE, 'FYI to CoS that the host is running on git main.'),
+        mode: 'action_authorization',
+        tier: 'standard',
+      });
+      expect(res.verdict).toBe('ALLOW');
+      expect(res.meta.promotion?.reason).not.toBe('objective_mismatch_fail_closed');
+      expect(kindGateLines()).toEqual([]);
+      expect(JSON.stringify(res)).not.toContain('objective_mismatch_branches');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
