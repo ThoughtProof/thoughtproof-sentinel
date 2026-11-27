@@ -92,10 +92,9 @@ export function orderCaseById(caseId: string): OrderCase {
 }
 
 /**
- * Offline list only. Schema smoke does not call this.
- * `comparison-smoke.ts` `schemaSmokeDocuments` uses `casesFor('dev')`,
- * the closed payment cases. `comparison-offline.ts` has no flag for these
- * six orders, and no paid path is wired to them.
+ * The six trade orders. Schema smoke does not call this.
+ * `comparison-smoke.ts` `schemaSmokeDocuments` uses `casesFor('dev')`.
+ * The trade-order command is `--trade-order-dev` in `comparison-offline.ts`.
  */
 export function tradeOrderCases(): readonly OrderCase[] {
   return ORDER_CASES;

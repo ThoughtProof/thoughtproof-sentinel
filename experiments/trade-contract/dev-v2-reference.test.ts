@@ -114,7 +114,7 @@ describe('dev-v2 trade orders', () => {
   it('leaves schema smoke on the closed payment cases', () => {
     expect(schemaSmokePlan().caseIds).toEqual(['dev-01', 'dev-02', 'dev-03', 'dev-04', 'dev-05', 'dev-06']);
     expect(tradeOrderCases().map(item => item.caseId)).toEqual(ORDER_CASES.map(item => item.caseId));
-    expect(source('./comparison-offline.ts')).not.toContain('dev-v2');
+    expect(source('./comparison-smoke.ts')).not.toContain('tradeOrderCases');
     expect(source('./comparison-smoke.ts')).not.toContain('ord-0');
   });
 

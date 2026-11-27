@@ -6,9 +6,11 @@ import { deterministicPrecheckPasses } from './comparison-precheck.ts';
 import { scoreComparison, type ArmRun } from './comparison-evaluate.ts';
 import { runRecordedArm, type RecordedExchange } from './comparison-run.ts';
 import { paidPilotRefusalReason, runPaidPilot } from './comparison-paid.ts';
-import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
+import { execFileSync } from 'node:child_process';
+import { pilotPlan, schemaSmokePlan, tradeOrderPlan } from './comparison-plan.ts';
 import { COMPARISON_BASELINE, type ComparisonArm } from './comparison-prompt.ts';
 import { SCHEMA_SMOKE_PAID, SCHEMA_SMOKE_SOFT_CAP_NOTE, runSchemaSmoke } from './comparison-smoke.ts';
+import { runTradeOrderDev, tradeOrderSelectorConflict } from './comparison-trade-order.ts';
 
 export function precheckSummary(): { pilot: number; dev: number; failed: string[] } {
   return {
@@ -42,58 +44,105 @@ function scoreRecorded(file: RecordedFile): ReturnType<typeof scoreComparison> {
   return scoreComparison(rows, labels);
 }
 
-async function main(): Promise<void> {
-  const args = process.argv.slice(2);
-  if (args.includes('--schema-smoke') && args.includes('--paid')) {
-    if (!process.env.XAI_API_KEY) {
-      process.stderr.write('XAI_API_KEY is not set. No request was sent.\n');
-      process.exitCode = 3;
-      return;
+export function testedHead(): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+}
+
+export interface DispatchResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Offline command router. Tests pass a mock fetch and a fake env.
+ * A real key is never read from disk; the env argument is the only source.
+ */
+export async function dispatchComparison(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  fetchImpl: typeof fetch,
+): Promise<DispatchResult> {
+  let exitCode = 0;
+  let stdout = '';
+  let stderr = '';
+  if (tradeOrderSelectorConflict(args)) {
+    stderr = 'Contradictory selectors. No request was sent.\n';
+    return { exitCode: 3, stdout, stderr };
+  }
+  if (args.includes('--trade-order-dev') && !args.includes('--paid')) {
+    stdout = `${JSON.stringify(tradeOrderPlan(testedHead()))}\n`;
+    return { exitCode, stdout, stderr };
+  }
+  if (args.includes('--trade-order-dev') && args.includes('--paid')) {
+    if (!env.XAI_API_KEY) {
+      stderr = 'XAI_API_KEY is not set. No request was sent.\n';
+      return { exitCode: 3, stdout, stderr };
     }
-    process.stderr.write(`${SCHEMA_SMOKE_SOFT_CAP_NOTE}\n`);
+    stderr = `${SCHEMA_SMOKE_SOFT_CAP_NOTE}\n`;
     const saveAt = args.indexOf('--save-raw');
     const saveRawDir = saveAt >= 0 ? args[saveAt + 1] : undefined;
     if (saveAt >= 0 && !saveRawDir) throw new Error('SAVE_RAW_DIR');
-    const report = await runSchemaSmoke(process.env, fetch, {
+    const report = await runTradeOrderDev(env, fetchImpl, { head: testedHead(), saveRawDir });
+    stdout = `${JSON.stringify(report)}\n`;
+    return { exitCode, stdout, stderr };
+  }
+  if (args.includes('--schema-smoke') && args.includes('--paid')) {
+    if (!env.XAI_API_KEY) {
+      stderr = 'XAI_API_KEY is not set. No request was sent.\n';
+      return { exitCode: 3, stdout, stderr };
+    }
+    stderr = `${SCHEMA_SMOKE_SOFT_CAP_NOTE}\n`;
+    const saveAt = args.indexOf('--save-raw');
+    const saveRawDir = saveAt >= 0 ? args[saveAt + 1] : undefined;
+    if (saveAt >= 0 && !saveRawDir) throw new Error('SAVE_RAW_DIR');
+    const report = await runSchemaSmoke(env, fetchImpl, {
       softCapUsd: SCHEMA_SMOKE_PAID.budgetUsd,
       timeoutMs: SCHEMA_SMOKE_PAID.timeoutMs,
       maxCalls: SCHEMA_SMOKE_PAID.maxCalls,
       keyOnly: true,
       saveRawDir,
     });
-    process.stdout.write(`${JSON.stringify(report)}\n`);
-    return;
+    stdout = `${JSON.stringify(report)}\n`;
+    return { exitCode, stdout, stderr };
   }
   if (args.includes('--schema-smoke')) {
-    process.stdout.write(`${JSON.stringify(schemaSmokePlan())}\n`);
-    return;
+    stdout = `${JSON.stringify(schemaSmokePlan())}\n`;
+    return { exitCode, stdout, stderr };
   }
   if (args.includes('--paid')) {
-    const reason = paidPilotRefusalReason(process.env);
+    const reason = paidPilotRefusalReason(env);
     if (reason) {
-      process.stderr.write(`Paid pilot refused (${reason}). No request was sent.\n`);
-      process.exitCode = 3;
-      return;
+      stderr = `Paid pilot refused (${reason}). No request was sent.\n`;
+      return { exitCode: 3, stdout, stderr };
     }
-    const runs = await runPaidPilot(process.env);
-    process.stdout.write(`${JSON.stringify({ baseline: COMPARISON_BASELINE, ...scoreComparison(runs, labelsFor('pilot')) })}\n`);
-    return;
+    const runs = await runPaidPilot(env, fetchImpl);
+    stdout = `${JSON.stringify({ baseline: COMPARISON_BASELINE, ...scoreComparison(runs, labelsFor('pilot')) })}\n`;
+    return { exitCode, stdout, stderr };
   }
   if (args.includes('--plan')) {
-    process.stdout.write(`${JSON.stringify({ pilot: pilotPlan(), schemaSmoke: schemaSmokePlan() })}\n`);
-    return;
+    stdout = `${JSON.stringify({ pilot: pilotPlan(), schemaSmoke: schemaSmokePlan() })}\n`;
+    return { exitCode, stdout, stderr };
   }
   const recordedFlag = args.indexOf('--recorded');
   if (recordedFlag >= 0) {
     const filePath = args[recordedFlag + 1];
     if (!filePath) throw new Error('RECORDED_PATH');
     const file = JSON.parse(readFileSync(filePath, 'utf8')) as RecordedFile;
-    process.stdout.write(`${JSON.stringify(scoreRecorded(file))}\n`);
-    return;
+    stdout = `${JSON.stringify(scoreRecorded(file))}\n`;
+    return { exitCode, stdout, stderr };
   }
   const summary = precheckSummary();
-  process.stdout.write(`${JSON.stringify(summary)}\n`);
-  if (summary.failed.length > 0) process.exitCode = 3;
+  stdout = `${JSON.stringify(summary)}\n`;
+  if (summary.failed.length > 0) exitCode = 3;
+  return { exitCode, stdout, stderr };
+}
+
+async function main(): Promise<void> {
+  const result = await dispatchComparison(process.argv.slice(2), process.env, fetch);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.stdout) process.stdout.write(result.stdout);
+  process.exitCode = result.exitCode;
 }
 
 const invoked = process.argv[1] !== undefined

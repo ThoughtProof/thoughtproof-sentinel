@@ -4,8 +4,16 @@ Six sealed Helio orders. Pair mapping and expected verdicts live in `labels.ts`,
 
 ## Later model run
 
-There is no entry point that sends `ord-01` through `ord-06`.
+`--trade-order-dev` selects only `tradeOrderCases()` (`ord-01` through `ord-06`). `--schema-smoke` still uses `casesFor('dev')`, the closed payment cases. `--paid` without `--trade-order-dev` stays the pilot. Combining `--trade-order-dev` with `--schema-smoke` or `--pilot` aborts before a send.
 
-`comparison-smoke.ts` `schemaSmokeDocuments` returns `casesFor('dev')`. That list is the closed payment cases `dev-01` through `dev-06`. `comparison-offline.ts` `--schema-smoke` and `--paid` call that path or the pilot. Neither flag loads this directory.
+The plan command does not need a key:
 
-`tradeOrderCases()` in `cases.ts` is an offline list of these six cases. It is not connected to a paid command.
+```sh
+node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --trade-order-dev
+```
+
+The paid command reads `XAI_API_KEY` from the environment. The 1 USD cap is soft.
+
+```sh
+node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --trade-order-dev --paid
+```
