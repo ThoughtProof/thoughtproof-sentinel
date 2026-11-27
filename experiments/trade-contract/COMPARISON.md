@@ -48,6 +48,12 @@ The only environment variable it reads for the credential is `XAI_API_KEY`. It i
 
 The unpaid pilot command remains `--paid` without `--schema-smoke`. It is not run here. Set `GROUNDED_CRITIC_ALLOW_PAID` to the digit 1, `GROUNDED_CRITIC_COST_CAP_USD`, optional `GROUNDED_CRITIC_BUDGET_MS` (default 45000), and `XAI_API_KEY`. Its pre-send reservation is the same visible-token estimate and is also not an upper bound on reasoning.
 
+## Dev reachability
+
+A hand-built ideal answer for each development case, with verbatim locating quotes, was run through `parseOutput`, `decideCascade` (including `finish` and the downgrade floor), and the shared grounding follow-up. Both arms see that same JSON. dev-01, dev-03, and dev-06 reach public ALLOW. dev-02 and dev-05 reach BLOCK. dev-04 reaches UNCERTAIN because the receipt document is absent and the honest mandate status is `not_verifiable` (`evaluate.ts` `semantic`, the `not_verifiable` return), which `finish` publishes as UNCERTAIN. The case texts do not need a change for a justified ALLOW to be possible. Pilot cases stay at sha256 `1b871537bda376df9eb3f0b40d0c1f20a1565a693a9c88828965965550fb4a6c`.
+
+The paid smoke's parsed answers were `frozen_gate:UNCERTAIN` with no raw JSON saved, so the exact check inside those answers is unknown. A parsed answer becomes UNCERTAIN when a check is `not_verifiable` (`evaluate.ts` `finish`) or when `downgradeAllow` rewrites an ALLOW (`adapter.ts` `build` and `downgrade`). `--save-raw <dir>` writes only `caseId`, `arm`, `content`, and `usage` for a later run.
+
 ## What a B win would mean
 
 A B win on the later paid pilot would mean: on these 6 frozen pilot cases, with the same host, model, tools (none), and evidence, the extra instruction produced more justified public ALLOWs than arm A, and the false-ALLOW counts say whether unjustified cases were released. It would not mean the production critic was beaten, that #140's 0/36 result was fixed, that a bad quote can be dropped into ALLOW, or that the result generalizes past this extractor and this pilot.

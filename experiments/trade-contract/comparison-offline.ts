@@ -51,11 +51,15 @@ async function main(): Promise<void> {
       return;
     }
     process.stderr.write(`${SCHEMA_SMOKE_SOFT_CAP_NOTE}\n`);
+    const saveAt = args.indexOf('--save-raw');
+    const saveRawDir = saveAt >= 0 ? args[saveAt + 1] : undefined;
+    if (saveAt >= 0 && !saveRawDir) throw new Error('SAVE_RAW_DIR');
     const report = await runSchemaSmoke(process.env, fetch, {
       softCapUsd: SCHEMA_SMOKE_PAID.budgetUsd,
       timeoutMs: SCHEMA_SMOKE_PAID.timeoutMs,
       maxCalls: SCHEMA_SMOKE_PAID.maxCalls,
       keyOnly: true,
+      saveRawDir,
     });
     process.stdout.write(`${JSON.stringify(report)}\n`);
     return;

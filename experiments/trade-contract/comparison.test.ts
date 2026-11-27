@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { buildAdapterMessages } from './messages.ts';
 import { caseById, casesFor, COMPARISON_CASES } from './comparison-cases.ts';
@@ -15,6 +17,8 @@ import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
 import { buildArmRequest, replayLegacyDrop, runRecordedArm } from './comparison-run.ts';
 import { bookCallCost, nextCallExceedsSoftCap, runSchemaSmoke, SCHEMA_SMOKE_PAID, SCHEMA_SMOKE_SOFT_CAP_NOTE } from './comparison-smoke.ts';
 import { armCaseRow, dev06AllowBlocker } from './comparison-report.ts';
+import { idealDevReachability } from './comparison-ideal.ts';
+import { saveRawResponse } from './comparison-raw.ts';
 import { PROMPT_TEMPLATE } from './prompt.ts';
 
 function source(name: string): string {
@@ -783,5 +787,40 @@ describe('schema smoke and spend reservation', () => {
     expect(calls).toBe(1);
     expect(runs[0].technicalCode).not.toBe('cost_cap');
     expect(runs.slice(1).every(row => row.technicalCode === 'cost_cap')).toBe(true);
+  });
+});
+
+describe('ideal dev answers through the frozen gate', () => {
+  it('reaches every sealed dev label, including justified ALLOW', () => {
+    const rows = idealDevReachability();
+    const missed = rows.filter(row => !row.reachedExpected);
+    expect(missed).toEqual([]);
+    for (const caseId of ['dev-01', 'dev-03', 'dev-06']) {
+      const arms = rows.filter(row => row.caseId === caseId);
+      expect(arms).toHaveLength(2);
+      expect(arms.every(row => row.publicVerdict === 'ALLOW' && row.frozenGateVerdict === 'ALLOW')).toBe(true);
+    }
+  });
+});
+
+describe('raw response capture', () => {
+  it('writes model content and usage and does not write headers or a key', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-raw-'));
+    const secret = 'dqlk_test_key_must_not_be_written';
+    const file = saveRawResponse(dir, {
+      caseId: 'dev-06',
+      arm: 'B',
+      content: 'model text only',
+      usage: { cost_in_usd_ticks: 37_756_000, prompt_tokens: 10, completion_tokens: 4 },
+    });
+    const text = readFileSync(file, 'utf8');
+    const saved = JSON.parse(text) as Record<string, unknown>;
+    expect(Object.keys(saved).sort()).toEqual(['arm', 'caseId', 'content', 'usage']);
+    expect(saved.content).toBe('model text only');
+    expect(saved.usage).toEqual({ cost_in_usd_ticks: 37_756_000, prompt_tokens: 10, completion_tokens: 4 });
+    expect(text).not.toContain(secret);
+    expect(text).not.toContain('Bearer');
+    expect(text).not.toContain('authorization');
+    expect(text).not.toContain('XAI_API_KEY');
   });
 });

@@ -12,7 +12,7 @@ export interface MechanicalSpec {
   sourceQuote: string;
   mandateQuote: string;
   extra?: { id: string; documentId: string; quote: string };
-  mandateStatus: 'fulfilled' | 'contradicted';
+  mandateStatus: 'fulfilled' | 'contradicted' | 'not_verifiable';
   complete?: boolean;
   grounding: GroundingRow[] | null;
 }

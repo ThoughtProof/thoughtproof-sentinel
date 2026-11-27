@@ -29,6 +29,7 @@ export type PaidSendResult = {
   content: string;
   /** Null when the provider omits usage. That is not zero. */
   usageUsd: number | null;
+  usage: { cost_in_usd_ticks: number | null; prompt_tokens: number | null; completion_tokens: number | null } | null;
 } | {
   ok: false;
   reason: 'timeout' | 'transport_error' | 'http_error' | 'empty';
@@ -80,10 +81,17 @@ export async function sendPaidExchange(input: {
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || content.trim() === '') return { ok: false, reason: 'empty' };
     const ticks = payload.usage?.cost_in_usd_ticks;
+    const promptTokens = (payload.usage as { prompt_tokens?: number } | undefined)?.prompt_tokens;
+    const completionTokens = (payload.usage as { completion_tokens?: number } | undefined)?.completion_tokens;
     return {
       ok: true,
       content,
       usageUsd: typeof ticks === 'number' ? usdFromXaiTicks(ticks) : null,
+      usage: {
+        cost_in_usd_ticks: typeof ticks === 'number' ? ticks : null,
+        prompt_tokens: typeof promptTokens === 'number' ? promptTokens : null,
+        completion_tokens: typeof completionTokens === 'number' ? completionTokens : null,
+      },
     };
   } catch (error) {
     const name = error instanceof Error ? error.name : '';

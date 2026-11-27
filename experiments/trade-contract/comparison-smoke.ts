@@ -6,6 +6,7 @@ import { schemaSmokePlan } from './comparison-plan.ts';
 import type { ComparisonArm } from './comparison-prompt.ts';
 import { buildArmRequest } from './comparison-run.ts';
 import { armCaseRow, dev06AllowBlocker, type ArmCaseRow } from './comparison-report.ts';
+import { saveRawResponse } from './comparison-raw.ts';
 
 const ARMS: readonly ComparisonArm[] = ['A', 'B'];
 
@@ -70,6 +71,8 @@ export interface SchemaSmokeOptions {
   maxCalls?: number;
   /** Read the key only. Do not require the other paid-env flags. */
   keyOnly?: boolean;
+  /** When set, write model content and usage only. Headers and the key are not written. */
+  saveRawDir?: string;
 }
 
 /**
@@ -145,10 +148,21 @@ export async function runSchemaSmoke(
         const booked = bookCallCost(null, estimate);
         cumulativeUsd += booked;
         if (ticket) ledger.keep(ticket);
+        if (options.saveRawDir) {
+          saveRawResponse(options.saveRawDir, { caseId: item.caseId, arm, content: null, usage: null });
+        }
         const row = armCaseRow({ caseId: item.caseId, arm, providerStatus: sent.reason });
         report.rows.push(row);
         report.providerOrSchemaErrors += 1;
         continue;
+      }
+      if (options.saveRawDir) {
+        saveRawResponse(options.saveRawDir, {
+          caseId: item.caseId,
+          arm,
+          content: sent.content,
+          usage: sent.usage,
+        });
       }
       const booked = bookCallCost(sent.usageUsd, estimate);
       cumulativeUsd += booked;
