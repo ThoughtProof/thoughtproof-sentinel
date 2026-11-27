@@ -55,8 +55,12 @@ export async function sendPaidExchange(input: {
   body: unknown;
   timeoutMs: number;
   fetchImpl?: typeof fetch;
+  /** When set, the only credential read is env.XAI_API_KEY. It is not written to logs. */
+  keyOnly?: boolean;
 }): Promise<PaidSendResult> {
-  if (paidPilotRefusalReason(input.env) !== null) return { ok: false, reason: 'transport_error' };
+  if (input.keyOnly) {
+    if (!input.env.XAI_API_KEY) return { ok: false, reason: 'transport_error' };
+  } else if (paidPilotRefusalReason(input.env) !== null) return { ok: false, reason: 'transport_error' };
   const fetchImpl = input.fetchImpl ?? fetch;
   try {
     const response = await fetchImpl(XAI_CHAT_COMPLETIONS_URL, {

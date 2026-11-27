@@ -18,23 +18,25 @@ export const SCHEMA_SMOKE_PAID = {
 } as const;
 
 /**
- * grok-4.7 bills reasoning tokens outside `max_completion_tokens`, and
- * reasoning cannot be turned off. Lowering the visible cap does not bound
- * the bill. https://docs.x.ai/developers/model-capabilities/text/best-practices
- * and the chat-completions reference: the cap applies only to visible output.
+ * A single grok-4.7 call can cost more than its visible-token estimate.
+ * The cap is soft: further calls stop, but the call already sent is not undone.
  */
-export function schemaSmokeUsdIsPreSendUpperBound(): false {
-  return false;
+export const SCHEMA_SMOKE_SOFT_CAP_NOTE =
+  'A single call may exceed the 1.00 USD cap. max_completion_tokens does not bound grok-4.7 reasoning tokens. '
+  + 'Further calls are not sent once cumulative actual cost plus the next pre-send estimate would exceed 1.00 USD.';
+
+/** True when this call must not be sent. Equality with the cap is still allowed. */
+export function nextCallExceedsSoftCap(cumulativeUsd: number, nextEstimateUsd: number, capUsd: number = SCHEMA_SMOKE_PAID.budgetUsd): boolean {
+  return cumulativeUsd + nextEstimateUsd > capUsd;
 }
 
-export function schemaSmokePaidRefusal(): string {
-  return 'Schema smoke was not sent. 1 USD is not guaranteed before send: '
-    + 'max_completion_tokens does not bound grok-4.7 reasoning tokens '
-    + '(https://docs.x.ai/developers/model-capabilities/text/best-practices; '
-    + 'chat completions: the cap applies only to visible output). '
-    + `reasoning_effort low still reasons, and there is no published token ceiling. `
-    + `${SCHEMA_SMOKE_PAID.maxCalls} calls times a visible-token estimate is not a worst case. `
-    + 'No request was sent.';
+/**
+ * Missing ticks book the full pre-send estimate. A measured cost, including zero, is used as reported.
+ * https://docs.x.ai/developers/cost-tracking — ticks / 1e10.
+ */
+export function bookCallCost(usageUsd: number | null, preSendEstimateUsd: number): number {
+  if (usageUsd === null) return preSendEstimateUsd;
+  return usageUsd;
 }
 
 export interface SchemaSmokeReport {
@@ -49,6 +51,9 @@ export interface SchemaSmokeReport {
   caseIds: string[];
   rows: ArmCaseRow[];
   dev06: { bothUncertain: boolean; firstAllowBlocker: string | null };
+  calls_sent: number;
+  cumulativeCostUsd: number;
+  softCapNote: string | null;
 }
 
 /**
@@ -58,17 +63,35 @@ export function schemaSmokeDocuments(): { caseId: string; documents: readonly Do
   return casesFor('dev').map(item => ({ caseId: item.caseId, documents: item.documents }));
 }
 
+export interface SchemaSmokeOptions {
+  /** Soft cap. Before each call, cumulative actual plus the next estimate must not exceed this. */
+  softCapUsd?: number;
+  timeoutMs?: number;
+  maxCalls?: number;
+  /** Read the key only. Do not require the other paid-env flags. */
+  keyOnly?: boolean;
+}
+
 /**
  * Schema pre-run. Sends only the dev selection. A mock fetch must be passed
- * in tests. Pilot documents are never passed to fetch.
+ * in tests. Pilot documents are never passed to fetch. There is no retry loop.
  */
-export async function runSchemaSmoke(env: PaidEnv, fetchImpl: typeof fetch): Promise<SchemaSmokeReport> {
-  const reason = paidPilotRefusalReason(env);
-  if (reason) throw new Error(`PAID_PILOT_REFUSED: ${reason}`);
+export async function runSchemaSmoke(
+  env: PaidEnv,
+  fetchImpl: typeof fetch,
+  options: SchemaSmokeOptions = {},
+): Promise<SchemaSmokeReport> {
+  if (options.keyOnly) {
+    if (!env.XAI_API_KEY) throw new Error('PAID_PILOT_REFUSED: XAI_API_KEY is not set');
+  } else {
+    const reason = paidPilotRefusalReason(env);
+    if (reason) throw new Error(`PAID_PILOT_REFUSED: ${reason}`);
+  }
   const plan = schemaSmokePlan();
-  const cap = Number(env.GROUNDED_CRITIC_COST_CAP_USD);
-  const budgetMs = env.GROUNDED_CRITIC_BUDGET_MS ? Number(env.GROUNDED_CRITIC_BUDGET_MS) : PER_CASE_BUDGET_MS;
+  const cap = options.softCapUsd ?? Number(env.GROUNDED_CRITIC_COST_CAP_USD);
+  const budgetMs = options.timeoutMs ?? (env.GROUNDED_CRITIC_BUDGET_MS ? Number(env.GROUNDED_CRITIC_BUDGET_MS) : PER_CASE_BUDGET_MS);
   const ledger = createSpendLedger(cap);
+  const softCap = options.softCapUsd !== undefined;
   const report: SchemaSmokeReport = {
     baseline: plan.baseline,
     maxCalls: plan.maxCalls,
@@ -81,39 +104,58 @@ export async function runSchemaSmoke(env: PaidEnv, fetchImpl: typeof fetch): Pro
     caseIds: plan.caseIds,
     rows: [],
     dev06: { bothUncertain: false, firstAllowBlocker: null },
+    calls_sent: 0,
+    cumulativeCostUsd: 0,
+    softCapNote: softCap ? SCHEMA_SMOKE_SOFT_CAP_NOTE : null,
   };
-  const maxCalls = Math.min(plan.maxCalls, SCHEMA_SMOKE_PAID.maxCalls);
+  const maxCalls = Math.min(plan.maxCalls, options.maxCalls ?? SCHEMA_SMOKE_PAID.maxCalls);
+  let cumulativeUsd = 0;
+  let stopForCap = false;
   for (const item of schemaSmokeDocuments()) {
-    if (report.calls >= maxCalls) break;
+    if (report.calls >= maxCalls || stopForCap) break;
     if (item.caseId.startsWith('pilot-')) throw new Error('SMOKE_TOUCHED_PILOT');
     for (const arm of ARMS) {
-      if (report.calls >= maxCalls) break;
+      if (report.calls >= maxCalls || stopForCap) break;
       const body = buildArmRequest(item.documents, arm);
-      const ticket = ledger.tryReserve(maxCallCostUsd(JSON.stringify(body), body.max_completion_tokens));
-      if (!ticket) {
+      const estimate = maxCallCostUsd(JSON.stringify(body), body.max_completion_tokens);
+      if (softCap && nextCallExceedsSoftCap(cumulativeUsd, estimate, cap)) {
+        stopForCap = true;
+        report.rows.push(armCaseRow({ caseId: item.caseId, arm, providerStatus: 'not_sent' }));
+        continue;
+      }
+      const ticket = softCap ? null : ledger.tryReserve(estimate);
+      if (!softCap && !ticket) {
         report.rows.push(armCaseRow({ caseId: item.caseId, arm, providerStatus: 'not_sent' }));
         continue;
       }
       report.calls += 1;
       let sent: Awaited<ReturnType<typeof sendPaidExchange>>;
       try {
-        sent = await sendPaidExchange({ env, body, timeoutMs: budgetMs, fetchImpl });
+        sent = await sendPaidExchange({ env, body, timeoutMs: budgetMs, fetchImpl, keyOnly: options.keyOnly === true });
       } catch {
-        ledger.keep(ticket);
+        const booked = bookCallCost(null, estimate);
+        cumulativeUsd += booked;
+        if (ticket) ledger.keep(ticket);
         const row = armCaseRow({ caseId: item.caseId, arm, providerStatus: 'transport_error' });
         report.rows.push(row);
         report.providerOrSchemaErrors += 1;
         continue;
       }
       if (!sent.ok) {
-        ledger.keep(ticket);
+        const booked = bookCallCost(null, estimate);
+        cumulativeUsd += booked;
+        if (ticket) ledger.keep(ticket);
         const row = armCaseRow({ caseId: item.caseId, arm, providerStatus: sent.reason });
         report.rows.push(row);
         report.providerOrSchemaErrors += 1;
         continue;
       }
-      if (sent.usageUsd === null) ledger.keep(ticket);
-      else ledger.reconcile(ticket, sent.usageUsd);
+      const booked = bookCallCost(sent.usageUsd, estimate);
+      cumulativeUsd += booked;
+      if (ticket) {
+        if (sent.usageUsd === null) ledger.keep(ticket);
+        else ledger.reconcile(ticket, sent.usageUsd);
+      }
       const row = armCaseRow({
         caseId: item.caseId,
         arm,
@@ -128,5 +170,7 @@ export async function runSchemaSmoke(env: PaidEnv, fetchImpl: typeof fetch): Pro
     }
   }
   report.dev06 = dev06AllowBlocker(report.rows);
+  report.calls_sent = report.calls;
+  report.cumulativeCostUsd = cumulativeUsd;
   return report;
 }

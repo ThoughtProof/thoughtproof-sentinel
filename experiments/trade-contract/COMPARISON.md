@@ -38,15 +38,13 @@ node --experimental-strip-types experiments/trade-contract/comparison-offline.ts
 node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --schema-smoke
 ```
 
-`--schema-smoke` without `--paid` prints the dev plan and does not send. The paid smoke command is prepared and refuses before any request:
+`--schema-smoke` without `--paid` prints the dev plan and does not send. The paid smoke command uses a soft 1.00 USD cap:
 
 ```sh
 node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --schema-smoke --paid
 ```
 
-Its constraints are 12 calls, 45 seconds per call, no retries, and a 1 USD total. Actual cost, when a response exists, is `usage.cost_in_usd_ticks / 10000000000`. The conversion is from https://docs.x.ai/developers/cost-tracking : 1 USD = 10^10 ticks. Missing ticks stay unknown. They are not treated as zero.
-
-1 USD is not guaranteed before send. `max_completion_tokens` does not bound grok-4.7 reasoning tokens. https://docs.x.ai/developers/model-capabilities/text/best-practices and the chat-completions reference say the cap applies only to visible output. `reasoning_effort` `low` still reasons, and reasoning cannot be turned off. There is no published reasoning-token ceiling, so lowering `max_completion_tokens` does not make 12 times a worst case fit inside 1 USD. The command exits before any request.
+The only environment variable it reads for the credential is `XAI_API_KEY`. It is not written to logs. Before each call, if cumulative actual cost plus that call's pre-send estimate would exceed 1.00 USD, that call and every later call are not sent. Actual cost is `usage.cost_in_usd_ticks / 10000000000` (https://docs.x.ai/developers/cost-tracking: 1 USD = 10^10 ticks). Missing ticks book that call's full pre-send estimate, never zero. Limits are 12 calls, 45 seconds each, and no retries. A single call may still exceed 1.00 USD, because `max_completion_tokens` does not bound grok-4.7 reasoning tokens. The report includes the per-case rows, `calls_sent`, and `cumulativeCostUsd`.
 
 The unpaid pilot command remains `--paid` without `--schema-smoke`. It is not run here. Set `GROUNDED_CRITIC_ALLOW_PAID` to the digit 1, `GROUNDED_CRITIC_COST_CAP_USD`, optional `GROUNDED_CRITIC_BUDGET_MS` (default 45000), and `XAI_API_KEY`. Its pre-send reservation is the same visible-token estimate and is also not an upper bound on reasoning.
 

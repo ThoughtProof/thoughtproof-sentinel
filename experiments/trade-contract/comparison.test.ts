@@ -13,7 +13,7 @@ import { ARM_B_APPENDIX, COMPARISON_BASELINE, SHARED_APPENDIX, armSystemPrompt }
 import { PER_CASE_BUDGET_MS, PROPOSED_PILOT_COST_CAP_USD, createSpendLedger, exceedsCostCap, maxCallCostUsd } from './comparison-budget.ts';
 import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
 import { buildArmRequest, replayLegacyDrop, runRecordedArm } from './comparison-run.ts';
-import { runSchemaSmoke, SCHEMA_SMOKE_PAID, schemaSmokePaidRefusal, schemaSmokeUsdIsPreSendUpperBound } from './comparison-smoke.ts';
+import { bookCallCost, nextCallExceedsSoftCap, runSchemaSmoke, SCHEMA_SMOKE_PAID, SCHEMA_SMOKE_SOFT_CAP_NOTE } from './comparison-smoke.ts';
 import { armCaseRow, dev06AllowBlocker } from './comparison-report.ts';
 import { PROMPT_TEMPLATE } from './prompt.ts';
 
@@ -706,16 +706,46 @@ describe('schema smoke and spend reservation', () => {
     expect(row.countsAs).toBe('substantive_uncertain');
   });
 
-  it('converts xAI cost ticks and refuses an unbounded smoke send', () => {
+  it('converts xAI cost ticks and keeps the smoke soft-cap constraints', () => {
     expect(XAI_USD_TICKS).toBe(10_000_000_000);
     expect(usdFromXaiTicks(37_756_000)).toBeCloseTo(0.0037756);
     expect(usdFromXaiTicks(1.5)).toBeNull();
     expect(SCHEMA_SMOKE_PAID).toEqual({ maxCalls: 12, timeoutMs: 45_000, retries: 0, budgetUsd: 1 });
-    expect(schemaSmokeUsdIsPreSendUpperBound()).toBe(false);
-    expect(schemaSmokePaidRefusal()).toContain('not guaranteed');
-    expect(schemaSmokePaidRefusal()).toContain('No request was sent');
-    expect(source('comparison-offline.ts')).toContain('schemaSmokePaidRefusal()');
-    expect(source('comparison-offline.ts')).not.toContain('runSchemaSmoke(process.env, fetch)');
+    expect(SCHEMA_SMOKE_SOFT_CAP_NOTE).toContain('single call may exceed');
+    expect(source('comparison-offline.ts')).toContain('SCHEMA_SMOKE_SOFT_CAP_NOTE');
+    expect(source('comparison-offline.ts')).toContain('keyOnly: true');
+  });
+
+  it('aborts before the next call when actual cost plus the next estimate exceeds 1 USD', async () => {
+    expect(bookCallCost(null, 0.6)).toBeCloseTo(0.6);
+    expect(bookCallCost(null, 0.6)).not.toBe(0);
+    expect(bookCallCost(0, 0.6)).toBe(0);
+    expect(nextCallExceedsSoftCap(0.6, 0.5, 1)).toBe(true);
+    expect(nextCallExceedsSoftCap(0.6, 0.4, 1)).toBe(false);
+    expect(nextCallExceedsSoftCap(0, 1.01, 1)).toBe(true);
+
+    const documents = caseById('dev-01').documents;
+    const request = buildArmRequest(documents, 'A');
+    const estimate = maxCallCostUsd(JSON.stringify(request), request.max_completion_tokens);
+    let calls = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      calls += 1;
+      expect(String(init?.body ?? '')).not.toContain('pilot-01');
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: '{}' } }],
+      }), { status: 200 });
+    });
+    const report = await runSchemaSmoke({ XAI_API_KEY: 'test-key' }, fetchImpl as unknown as typeof fetch, {
+      softCapUsd: estimate * 1.5,
+      timeoutMs: SCHEMA_SMOKE_PAID.timeoutMs,
+      maxCalls: SCHEMA_SMOKE_PAID.maxCalls,
+      keyOnly: true,
+    });
+    expect(calls).toBe(1);
+    expect(report.calls_sent).toBe(1);
+    expect(report.cumulativeCostUsd).toBeCloseTo(estimate);
+    expect(report.rows.some(row => row.providerStatus === 'not_sent')).toBe(true);
+    expect(report.softCapNote).toBe(SCHEMA_SMOKE_SOFT_CAP_NOTE);
   });
 
   it('reserves the conservative max before send and keeps it on timeout or unknown usage', async () => {

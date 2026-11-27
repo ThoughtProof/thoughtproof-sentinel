@@ -8,7 +8,7 @@ import { runRecordedArm, type RecordedExchange } from './comparison-run.ts';
 import { paidPilotRefusalReason, runPaidPilot } from './comparison-paid.ts';
 import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
 import { COMPARISON_BASELINE, type ComparisonArm } from './comparison-prompt.ts';
-import { schemaSmokePaidRefusal } from './comparison-smoke.ts';
+import { SCHEMA_SMOKE_PAID, SCHEMA_SMOKE_SOFT_CAP_NOTE, runSchemaSmoke } from './comparison-smoke.ts';
 
 export function precheckSummary(): { pilot: number; dev: number; failed: string[] } {
   return {
@@ -44,7 +44,23 @@ function scoreRecorded(file: RecordedFile): ReturnType<typeof scoreComparison> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  if (args.includes('--schema-smoke') && !args.includes('--paid')) {
+  if (args.includes('--schema-smoke') && args.includes('--paid')) {
+    if (!process.env.XAI_API_KEY) {
+      process.stderr.write('XAI_API_KEY is not set. No request was sent.\n');
+      process.exitCode = 3;
+      return;
+    }
+    process.stderr.write(`${SCHEMA_SMOKE_SOFT_CAP_NOTE}\n`);
+    const report = await runSchemaSmoke(process.env, fetch, {
+      softCapUsd: SCHEMA_SMOKE_PAID.budgetUsd,
+      timeoutMs: SCHEMA_SMOKE_PAID.timeoutMs,
+      maxCalls: SCHEMA_SMOKE_PAID.maxCalls,
+      keyOnly: true,
+    });
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    return;
+  }
+  if (args.includes('--schema-smoke')) {
     process.stdout.write(`${JSON.stringify(schemaSmokePlan())}\n`);
     return;
   }
@@ -52,11 +68,6 @@ async function main(): Promise<void> {
     const reason = paidPilotRefusalReason(process.env);
     if (reason) {
       process.stderr.write(`Paid pilot refused (${reason}). No request was sent.\n`);
-      process.exitCode = 3;
-      return;
-    }
-    if (args.includes('--schema-smoke')) {
-      process.stderr.write(`${schemaSmokePaidRefusal()}\n`);
       process.exitCode = 3;
       return;
     }
