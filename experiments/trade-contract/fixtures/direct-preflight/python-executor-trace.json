@@ -1,0 +1,29 @@
+[
+  {
+    "input_execute": true,
+    "input_verdict": "BLOCK",
+    "envelope_verdict": "ALLOW",
+    "envelope_execute": true,
+    "critic_called": true,
+    "raw_verdict": "BLOCK",
+    "raw_execute": true
+  },
+  {
+    "input_execute": true,
+    "input_verdict": "REVIEW",
+    "envelope_verdict": "ALLOW",
+    "envelope_execute": true,
+    "critic_called": true,
+    "raw_verdict": "REVIEW",
+    "raw_execute": true
+  },
+  {
+    "input_execute": true,
+    "input_verdict": "UNCERTAIN",
+    "envelope_verdict": "ALLOW",
+    "envelope_execute": true,
+    "critic_called": true,
+    "raw_verdict": "UNCERTAIN",
+    "raw_execute": true
+  }
+]
