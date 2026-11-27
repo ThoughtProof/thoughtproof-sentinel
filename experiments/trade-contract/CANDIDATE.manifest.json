@@ -100,7 +100,7 @@
   "sourceFiles": [
     {
       "path": "experiments/trade-contract/adapter.ts",
-      "sha256": "df27ec576c0e59067be80e570a347cf20d3ff2f4d1d516d17ac41826f0939fc7"
+      "sha256": "833d03e1db5d1b75c70712150fc6a43f2023ab22158402271cd5884467d012bf"
     },
     {
       "path": "experiments/trade-contract/contract.ts",

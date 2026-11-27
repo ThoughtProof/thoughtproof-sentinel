@@ -8,7 +8,7 @@ import { runRecordedArm, type RecordedExchange } from './comparison-run.ts';
 import { paidPilotRefusalReason, runPaidPilot } from './comparison-paid.ts';
 import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
 import { COMPARISON_BASELINE, type ComparisonArm } from './comparison-prompt.ts';
-import { runSchemaSmoke } from './comparison-smoke.ts';
+import { schemaSmokePaidRefusal } from './comparison-smoke.ts';
 
 export function precheckSummary(): { pilot: number; dev: number; failed: string[] } {
   return {
@@ -56,7 +56,8 @@ async function main(): Promise<void> {
       return;
     }
     if (args.includes('--schema-smoke')) {
-      process.stdout.write(`${JSON.stringify(await runSchemaSmoke(process.env, fetch))}\n`);
+      process.stderr.write(`${schemaSmokePaidRefusal()}\n`);
+      process.exitCode = 3;
       return;
     }
     const runs = await runPaidPilot(process.env);

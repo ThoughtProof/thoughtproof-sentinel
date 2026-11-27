@@ -22,6 +22,12 @@ The previous B filter, which dropped ungrounded objections and could turn BLOCK 
 
 6 pilot cases and their labels are frozen at `832cedf` (sha256 of the canonical pilot JSON is checked in `comparison.test.ts`). 6 development cases are disjoint. `dev-05` is a mandatory second approval that is still pending. `dev-06` is the same payment without that obligation. Quote-quality fixtures on `dev-05` (missing, inaccurate, irrelevant, correct, and open with a null quote) must not ALLOW.
 
+## Report rows
+
+Each smoke or pilot row has `caseId`, `arm`, `providerStatus`, `parserResult` (`ok` or the frozen `parseOutput` rejection), `frozenGateVerdict`, `publicVerdict`, and `firstAllowBlocker`. The blocker is the first step that is not on the path to ALLOW: provider, then `parser:<rejection>`, then `frozen_gate:<verdict>`, then `grounding_follow_up` when the frozen gate said ALLOW and the follow-up did not. A parser rejection is `validator_rejection`, not substantive UNCERTAIN, even though the frozen gate still publishes UNCERTAIN. If both dev-06 arms are public UNCERTAIN, `dev06.firstAllowBlocker` names that step for each arm.
+
+One invalid claim on an otherwise valid payload is `schema_violation` from `parseOutput` (`adapter.ts`, the claims row that fails `take` makes the group contain null, and the parser returns `schema_violation`). The export does not change that decision.
+
 ## Commands
 
 No provider call is made by the default CLI.
@@ -32,11 +38,17 @@ node --experimental-strip-types experiments/trade-contract/comparison-offline.ts
 node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --schema-smoke
 ```
 
-`--schema-smoke` without `--paid` prints the dev plan and does not send. With `--paid` it sends only dev cases. The pilot command is `--paid` without `--schema-smoke`.
+`--schema-smoke` without `--paid` prints the dev plan and does not send. The paid smoke command is prepared and refuses before any request:
 
-Set `GROUNDED_CRITIC_ALLOW_PAID` to the digit 1, `GROUNDED_CRITIC_COST_CAP_USD`, optional `GROUNDED_CRITIC_BUDGET_MS` (default 45000), and `XAI_API_KEY` before either paid command. The process reserves, before each send, estimated prompt tokens (UTF-8 bytes / 4) plus `max_completion_tokens` at the frozen price table. The reservation must fit the remaining cap. Timeout or unknown usage keeps the reservation. A measured cost reconciles it down.
+```sh
+node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --schema-smoke --paid
+```
 
-Spend can still exceed this ceiling when the provider bills reasoning tokens outside `max_completion_tokens`. That limit is the one the frozen config already states.
+Its constraints are 12 calls, 45 seconds per call, no retries, and a 1 USD total. Actual cost, when a response exists, is `usage.cost_in_usd_ticks / 10000000000`. The conversion is from https://docs.x.ai/developers/cost-tracking : 1 USD = 10^10 ticks. Missing ticks stay unknown. They are not treated as zero.
+
+1 USD is not guaranteed before send. `max_completion_tokens` does not bound grok-4.7 reasoning tokens. https://docs.x.ai/developers/model-capabilities/text/best-practices and the chat-completions reference say the cap applies only to visible output. `reasoning_effort` `low` still reasons, and reasoning cannot be turned off. There is no published reasoning-token ceiling, so lowering `max_completion_tokens` does not make 12 times a worst case fit inside 1 USD. The command exits before any request.
+
+The unpaid pilot command remains `--paid` without `--schema-smoke`. It is not run here. Set `GROUNDED_CRITIC_ALLOW_PAID` to the digit 1, `GROUNDED_CRITIC_COST_CAP_USD`, optional `GROUNDED_CRITIC_BUDGET_MS` (default 45000), and `XAI_API_KEY`. Its pre-send reservation is the same visible-token estimate and is also not an upper bound on reasoning.
 
 ## What a B win would mean
 

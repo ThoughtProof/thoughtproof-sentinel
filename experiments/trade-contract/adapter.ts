@@ -84,7 +84,8 @@ function quotes(value: unknown): Quote[] | null {
   return rows as Quote[];
 }
 
-function parseOutput(content: string): { failure: CascadeFailure } | { value: Parsed } {
+/** Exported for reports. The cascade still calls this function; its decisions are unchanged. */
+export function parseOutput(content: string): { failure: CascadeFailure } | { value: Parsed } {
   if (content.trim() === '') return { failure: 'empty' };
   let raw: unknown;
   try {

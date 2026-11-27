@@ -1,5 +1,4 @@
 import { XAI_CHAT_COMPLETIONS_URL } from './messages.ts';
-import { MODEL_CONFIG } from './model-config.ts';
 import { casesFor } from './comparison-cases.ts';
 import { PER_CASE_BUDGET_MS, createSpendLedger, maxCallCostUsd } from './comparison-budget.ts';
 import { buildArmRequest, runRecordedArm } from './comparison-run.ts';
@@ -35,9 +34,15 @@ export type PaidSendResult = {
   reason: 'timeout' | 'transport_error' | 'http_error' | 'empty';
 }
 
-function estimateUsd(promptTokens: number, completionTokens: number): number {
-  const price = MODEL_CONFIG.primary.pricing.shortContext;
-  return (promptTokens * price.input + completionTokens * price.output) / 1_000_000;
+/**
+ * https://docs.x.ai/developers/cost-tracking
+ * 1 USD = 10^10 ticks. `usage.cost_in_usd_ticks / XAI_USD_TICKS` is the billed amount.
+ */
+export const XAI_USD_TICKS = 10_000_000_000;
+
+export function usdFromXaiTicks(ticks: number): number | null {
+  if (!Number.isInteger(ticks) || ticks < 0) return null;
+  return ticks / XAI_USD_TICKS;
 }
 
 /**
@@ -66,17 +71,15 @@ export async function sendPaidExchange(input: {
     if (!response.ok) return { ok: false, reason: 'http_error' };
     const payload = await response.json() as {
       choices?: { message?: { content?: string } }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
+      usage?: { cost_in_usd_ticks?: number };
     };
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || content.trim() === '') return { ok: false, reason: 'empty' };
-    const promptTokens = payload.usage?.prompt_tokens;
-    const completionTokens = payload.usage?.completion_tokens;
-    const usageKnown = typeof promptTokens === 'number' && typeof completionTokens === 'number';
+    const ticks = payload.usage?.cost_in_usd_ticks;
     return {
       ok: true,
       content,
-      usageUsd: usageKnown ? estimateUsd(promptTokens, completionTokens) : null,
+      usageUsd: typeof ticks === 'number' ? usdFromXaiTicks(ticks) : null,
     };
   } catch (error) {
     const name = error instanceof Error ? error.name : '';

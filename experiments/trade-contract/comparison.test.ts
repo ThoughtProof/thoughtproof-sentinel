@@ -7,13 +7,14 @@ import { scoreComparison, type ArmRun } from './comparison-evaluate.ts';
 import { prepareModelContent, validGrounding } from './comparison-grounding.ts';
 import { SEALED_LABELS, labelsFor } from './comparison-labels.ts';
 import { mechanicalOutput } from './comparison-mechanical.ts';
-import { paidPilotRefusalReason, runPaidPilot, sendPaidExchange } from './comparison-paid.ts';
+import { paidPilotRefusalReason, runPaidPilot, sendPaidExchange, usdFromXaiTicks, XAI_USD_TICKS } from './comparison-paid.ts';
 import { deterministicPrecheckPasses } from './comparison-precheck.ts';
 import { ARM_B_APPENDIX, COMPARISON_BASELINE, SHARED_APPENDIX, armSystemPrompt } from './comparison-prompt.ts';
 import { PER_CASE_BUDGET_MS, PROPOSED_PILOT_COST_CAP_USD, createSpendLedger, exceedsCostCap, maxCallCostUsd } from './comparison-budget.ts';
 import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
 import { buildArmRequest, replayLegacyDrop, runRecordedArm } from './comparison-run.ts';
-import { runSchemaSmoke } from './comparison-smoke.ts';
+import { runSchemaSmoke, SCHEMA_SMOKE_PAID, schemaSmokePaidRefusal, schemaSmokeUsdIsPreSendUpperBound } from './comparison-smoke.ts';
+import { armCaseRow, dev06AllowBlocker } from './comparison-report.ts';
 import { PROMPT_TEMPLATE } from './prompt.ts';
 
 function source(name: string): string {
@@ -623,6 +624,98 @@ describe('schema smoke and spend reservation', () => {
     expect(report.substantiveUncertain).toBeGreaterThan(0);
     expect(report.providerOrSchemaErrors + report.frozenValidatorRejections + report.substantiveUncertain)
       .toBeLessThanOrEqual(report.calls);
+    expect(report.rows.length).toBeGreaterThan(0);
+    expect(report.rows[0]).toEqual(expect.objectContaining({
+      caseId: expect.any(String),
+      arm: expect.stringMatching(/^[AB]$/),
+      providerStatus: expect.any(String),
+      parserResult: expect.any(String),
+      firstAllowBlocker: expect.any(String),
+    }));
+  });
+
+  it('classifies one invalid claim as a frozen-parser schema_violation, not substantive UNCERTAIN', () => {
+    const documents = caseById('dev-06').documents;
+    const mandate = documents.find(document => document.id === 'mandate')!.text;
+    const raw = JSON.parse(mechanicalOutput({
+      documents,
+      proposalQuote: 'Pay 250 EUR to Harbor Co for invoice INV-440.',
+      sourceQuote: 'Invoice INV-440 from Harbor Co for 250 EUR.',
+      mandateQuote: mandate,
+      mandateStatus: 'fulfilled',
+      grounding: null,
+    })) as { claims: unknown[]; grounding?: unknown };
+    delete raw.grounding;
+    raw.claims = [{
+      id: 'bad-claim',
+      kind: 'bogus',
+      status: 'fulfilled',
+      claimQuote: { documentId: 'proposal', quote: 'Pay 250 EUR to Harbor Co for invoice INV-440.' },
+      supportingQuotes: [],
+      calculation: null,
+    }];
+    const row = armCaseRow({
+      caseId: 'dev-06',
+      arm: 'A',
+      providerStatus: 'ok',
+      documents,
+      content: JSON.stringify(raw),
+    });
+    expect(row.parserResult).toBe('schema_violation');
+    expect(row.countsAs).toBe('validator_rejection');
+    expect(row.countsAs).not.toBe('substantive_uncertain');
+    expect(row.frozenGateVerdict).toBe('UNCERTAIN');
+    expect(row.firstAllowBlocker).toBe('parser:schema_violation');
+    const twin = armCaseRow({
+      caseId: 'dev-06',
+      arm: 'B',
+      providerStatus: 'ok',
+      documents,
+      content: JSON.stringify(raw),
+    });
+    const note = dev06AllowBlocker([row, twin]);
+    expect(note.bothUncertain).toBe(true);
+    expect(note.firstAllowBlocker).toContain('parser:schema_violation');
+  });
+
+  it('names the grounding follow-up when that is the first step that blocks ALLOW', () => {
+    const documents = caseById('dev-06').documents;
+    const mandate = documents.find(document => document.id === 'mandate')!.text;
+    const content = mechanicalOutput({
+      documents,
+      proposalQuote: 'Pay 250 EUR to Harbor Co for invoice INV-440.',
+      sourceQuote: 'Invoice INV-440 from Harbor Co for 250 EUR.',
+      mandateQuote: mandate,
+      mandateStatus: 'fulfilled',
+      grounding: [{
+        objectionId: 'stated-mandate',
+        clauseDocumentId: 'mandate',
+        clauseQuote: mandate,
+        evidenceDocumentId: null,
+        evidenceQuote: null,
+        reading: 'open',
+      }],
+    });
+    const row = armCaseRow({
+      caseId: 'dev-06', arm: 'A', providerStatus: 'ok', documents, content,
+    });
+    expect(row.parserResult).toBe('ok');
+    expect(row.frozenGateVerdict).toBe('ALLOW');
+    expect(row.publicVerdict).toBe('UNCERTAIN');
+    expect(row.firstAllowBlocker).toBe('grounding_follow_up');
+    expect(row.countsAs).toBe('substantive_uncertain');
+  });
+
+  it('converts xAI cost ticks and refuses an unbounded smoke send', () => {
+    expect(XAI_USD_TICKS).toBe(10_000_000_000);
+    expect(usdFromXaiTicks(37_756_000)).toBeCloseTo(0.0037756);
+    expect(usdFromXaiTicks(1.5)).toBeNull();
+    expect(SCHEMA_SMOKE_PAID).toEqual({ maxCalls: 12, timeoutMs: 45_000, retries: 0, budgetUsd: 1 });
+    expect(schemaSmokeUsdIsPreSendUpperBound()).toBe(false);
+    expect(schemaSmokePaidRefusal()).toContain('not guaranteed');
+    expect(schemaSmokePaidRefusal()).toContain('No request was sent');
+    expect(source('comparison-offline.ts')).toContain('schemaSmokePaidRefusal()');
+    expect(source('comparison-offline.ts')).not.toContain('runSchemaSmoke(process.env, fetch)');
   });
 
   it('reserves the conservative max before send and keeps it on timeout or unknown usage', async () => {
