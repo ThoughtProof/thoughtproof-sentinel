@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { dispatchComparison } from './comparison-offline.ts';
 import { SCHEMA_SMOKE_SOFT_CAP_NOTE } from './comparison-smoke.ts';
 import { buildArmRequest } from './comparison-run.ts';
-import { tradeOrderCases } from './dev-v2/cases.ts';
+import { tradeOrderCases } from './dev-v3/cases.ts';
 
 function source(name: string): string {
   return readFileSync(new URL(name, import.meta.url), 'utf8');
@@ -25,6 +25,7 @@ describe('trade-order selector', () => {
     expect(result.stderr).toBe('');
     const plan = JSON.parse(result.stdout) as {
       selector: string;
+      version: string;
       head: string;
       caseIds: string[];
       arms: string[];
@@ -35,8 +36,9 @@ describe('trade-order selector', () => {
       costLimit: { usd: number; kind: string; reason: string };
     };
     expect(plan.selector).toBe('trade-order-dev');
+    expect(plan.version).toBe('dev-v3');
     expect(plan.head).toMatch(/^[0-9a-f]{40}$/);
-    expect(plan.caseIds).toEqual(['ord-01', 'ord-02', 'ord-03', 'ord-04', 'ord-05', 'ord-06']);
+    expect(plan.caseIds).toEqual(['v3-01', 'v3-02', 'v3-03', 'v3-04', 'v3-05', 'v3-06']);
     expect(plan.arms).toEqual(['A', 'B']);
     expect(plan.maxCalls).toBe(12);
     expect(plan.timeoutMs).toBe(45_000);
@@ -130,11 +132,11 @@ describe('trade-order selector', () => {
     expect(calls).toBe(12);
     const report = JSON.parse(result.stdout) as { calls_sent: number; rows: { caseId: string; arm: string; providerStatus: string }[] };
     expect(report.calls_sent).toBe(12);
-    expect(report.rows[0]).toMatchObject({ caseId: 'ord-01', arm: 'A', providerStatus: 'timeout' });
-    expect(report.rows.filter(row => row.caseId === 'ord-01' && row.arm === 'A')).toHaveLength(1);
+    expect(report.rows[0]).toMatchObject({ caseId: 'v3-01', arm: 'A', providerStatus: 'timeout' });
+    expect(report.rows.filter(row => row.caseId === 'v3-01' && row.arm === 'A')).toHaveLength(1);
     expect(source('./comparison-plan.ts')).not.toContain('dev-v2/labels');
     expect(source('./comparison-run.ts')).not.toContain('dev-v2/labels');
     expect(source('./comparison-trade-order.ts')).not.toContain("from './dev-v2/labels.ts'");
-    expect(source('./comparison-trade-order.ts')).toContain("import('./dev-v2/labels.ts')");
+    expect(source('./comparison-trade-order.ts')).toContain("import('./dev-v3/labels.ts')");
   });
 });

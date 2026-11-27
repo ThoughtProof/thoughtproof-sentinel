@@ -2,7 +2,7 @@ import { casesFor, type CaseSplit } from './comparison-cases.ts';
 import { PER_CASE_BUDGET_MS, maxCallCostUsd } from './comparison-budget.ts';
 import { buildArmRequest } from './comparison-run.ts';
 import { COMPARISON_BASELINE, type ComparisonArm } from './comparison-prompt.ts';
-import { tradeOrderCases } from './dev-v2/cases.ts';
+import { DEV_V3_VERSION, tradeOrderCases } from './dev-v3/cases.ts';
 
 const ARMS: readonly ComparisonArm[] = ['A', 'B'];
 
@@ -51,6 +51,7 @@ export interface TradeOrderCallEstimate {
 
 export interface TradeOrderPlan {
   selector: 'trade-order-dev';
+  version: typeof DEV_V3_VERSION;
   /** Git SHA of the tree under test. Not read from a model response. */
   head: string;
   caseIds: string[];
@@ -78,6 +79,7 @@ export function tradeOrderPlan(head: string): TradeOrderPlan {
   }
   return {
     selector: 'trade-order-dev',
+    version: DEV_V3_VERSION,
     head,
     caseIds: selected.map(item => item.caseId),
     arms: ARMS,

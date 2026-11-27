@@ -8,7 +8,7 @@ import { saveRawResponse } from './comparison-raw.ts';
 import { armCaseRow, type ArmCaseRow, type GateVerdict, type ParserResult, type ProviderStatus } from './comparison-report.ts';
 import { bookCallCost, nextCallExceedsSoftCap, SCHEMA_SMOKE_PAID } from './comparison-smoke.ts';
 import { buildArmRequest } from './comparison-run.ts';
-import { tradeOrderCases } from './dev-v2/cases.ts';
+import { tradeOrderCases } from './dev-v3/cases.ts';
 
 const ARMS: readonly ComparisonArm[] = ['A', 'B'];
 
@@ -56,7 +56,7 @@ function decisiveReason(documents: ReturnType<typeof tradeOrderCases>[number]['d
  * Request construction does not import this module's label file.
  */
 async function attachSealed(rows: TradeOrderRow[]): Promise<TradeOrderRow[]> {
-  const { ORDER_LABELS } = await import('./dev-v2/labels.ts');
+  const { ORDER_LABELS } = await import('./dev-v3/labels.ts');
   return rows.map(row => {
     const label = ORDER_LABELS.find(item => item.caseId === row.caseId);
     return {

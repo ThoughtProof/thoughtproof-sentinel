@@ -92,9 +92,8 @@ export function orderCaseById(caseId: string): OrderCase {
 }
 
 /**
- * The six trade orders. Schema smoke does not call this.
- * `comparison-smoke.ts` `schemaSmokeDocuments` uses `casesFor('dev')`.
- * The trade-order command is `--trade-order-dev` in `comparison-offline.ts`.
+ * dev-v2 list. `--trade-order-dev` selects dev-v3, not this function.
+ * Schema smoke uses `casesFor('dev')`.
  */
 export function tradeOrderCases(): readonly OrderCase[] {
   return ORDER_CASES;
