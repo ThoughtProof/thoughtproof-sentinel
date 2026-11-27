@@ -12,6 +12,7 @@ import { mechanicalOutput } from './comparison-mechanical.ts';
 import { paidPilotRefusalReason, runPaidPilot, sendPaidExchange, usdFromXaiTicks, XAI_USD_TICKS } from './comparison-paid.ts';
 import { deterministicPrecheckPasses } from './comparison-precheck.ts';
 import { ARM_B_APPENDIX, COMPARISON_BASELINE, SHARED_APPENDIX, armSystemPrompt } from './comparison-prompt.ts';
+import { PROMPT_TEMPLATE } from './prompt.ts';
 import { PER_CASE_BUDGET_MS, PROPOSED_PILOT_COST_CAP_USD, createSpendLedger, exceedsCostCap, maxCallCostUsd } from './comparison-budget.ts';
 import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
 import { buildArmRequest, replayLegacyDrop, runRecordedArm } from './comparison-run.ts';
@@ -19,7 +20,6 @@ import { bookCallCost, nextCallExceedsSoftCap, runSchemaSmoke, SCHEMA_SMOKE_PAID
 import { armCaseRow, dev06AllowBlocker } from './comparison-report.ts';
 import { idealDevReachability } from './comparison-ideal.ts';
 import { saveRawResponse } from './comparison-raw.ts';
-import { PROMPT_TEMPLATE } from './prompt.ts';
 
 function source(name: string): string {
   return readFileSync(new URL(`./${name}`, import.meta.url), 'utf8');
@@ -84,6 +84,36 @@ describe('comparison prompts', () => {
     expect(source('README.md')).toContain(COMPARISON_BASELINE);
     expect(armA).not.toHaveProperty('tools');
     expect(armB).not.toHaveProperty('tools');
+    const restA = { ...armA, messages: armA.messages.slice(1) };
+    const restB = { ...armB, messages: armB.messages.slice(1) };
+    expect(restA).toEqual(restB);
+    expect(armB.messages[0].content.slice(armA.messages[0].content.length)).toBe(`\n${ARM_B_APPENDIX}`);
+  });
+
+  it('keeps the frozen #140 prompt and the B paragraph byte-identical', () => {
+    expect(createHash('sha256').update(PROMPT_TEMPLATE).digest('hex'))
+      .toBe('331ad5bdc0efcd58c4cf348c114f801c199382f0134c675218aa9f6e70fa5aa8');
+    expect(ARM_B_APPENDIX).toBe('For every decisive objection, name the binding clause and explain from the available evidence whether the condition is met, violated, or open. A decisive objection is a semantic check whose status is contradicted, a claim whose status is contradicted, or a limit you emit. clauseQuote is the exact clause in the mandate or policy document. reading is met, violated, or open. Missing evidence for a real obligation is open. Absence of a document cannot be quoted literally: set evidenceQuote to null, evidenceDocumentId to null, and reading to open. Do not drop the objection. A missing or inaccurate quote is not a release.');
+    expect(armSystemPrompt('A')).toBe(`${PROMPT_TEMPLATE}\n${SHARED_APPENDIX}`);
+    expect(armSystemPrompt('B')).toBe(`${PROMPT_TEMPLATE}\n${SHARED_APPENDIX}\n${ARM_B_APPENDIX}`);
+  });
+
+  it('puts the contract addendum on both arms and quotes no case text', () => {
+    expect(SHARED_APPENDIX).toContain('decision_basis.requirementIds is always []');
+    expect(SHARED_APPENDIX).toContain('order_strategy_consistency lists exactly the ids of the strategy requirements');
+    expect(SHARED_APPENDIX).toContain('mandate_compliance lists exactly the ids of the mandate requirements');
+    expect(SHARED_APPENDIX).toContain('Do not invent a strategy and do not set the status to fulfilled by default');
+    expect(SHARED_APPENDIX).toContain('same document, same text span');
+    expect(SHARED_APPENDIX).toContain('If the mandate requires no second approval, a pending second approval creates no objection.');
+    expect(SHARED_APPENDIX).not.toContain('shared word');
+    expect(SHARED_APPENDIX).not.toContain('quote length');
+    expect(SHARED_APPENDIX).not.toContain('five-letter');
+    const banned = ['Northwind', 'Contoso', 'Fabrikam', 'Alpine', 'Birch', 'Harbor', 'INV-100', 'INV-200', 'INV-440', 'BILL-9', 'BILL-3', 'SH-9', 'SH-10', 'EUR'];
+    for (const token of banned) expect(SHARED_APPENDIX).not.toContain(token);
+    for (const item of COMPARISON_CASES) {
+      expect(SHARED_APPENDIX).not.toContain(item.caseId);
+      for (const document of item.documents) expect(SHARED_APPENDIX).not.toContain(document.text);
+    }
   });
 
   it('keeps pair ids, counterparts, and sealed labels out of the payload', () => {

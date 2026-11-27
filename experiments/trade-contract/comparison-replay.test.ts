@@ -76,6 +76,37 @@ describe('recorded diagnostic replay', () => {
     ]);
   });
 
+  it('counts 9 decision_basis id mismatches and 3 order_strategy not_applicable first errors', () => {
+    const mismatch = rows.filter(row => row.checkId === 'decision_basis' && row.code === 'REQUIREMENT_SET_MISMATCH');
+    const notApplicable = rows.filter(row => row.checkId === 'order_strategy_consistency' && row.code === 'model_status' && row.triggerValue === 'not_applicable');
+    expect(mismatch).toHaveLength(9);
+    expect(notApplicable).toHaveLength(3);
+    expect(mismatch.length + notApplicable.length).toBe(rows.length);
+  });
+
+  it('lists follow-on errors apart from the first error', () => {
+    const line = (row: typeof rows[number]) => row.followOns.map(step => {
+      const value = step.code === 'INVALID_SEMANTIC_EVIDENCE'
+        ? `quotes:${Array.isArray(step.triggerValue) ? step.triggerValue.length : 0}`
+        : JSON.stringify(step.triggerValue);
+      return `${step.checkId} ${step.modelStatus} ${step.code} ${step.rule} ${step.triggerPath} ${value}`;
+    }).join(' | ');
+    expect(rows.map(row => `${row.caseId} ${row.arm}: ${line(row)}`)).toEqual([
+      'dev-01 A: order_strategy_consistency fulfilled REQUIREMENT_SET_MISMATCH evaluate.ts:267-269 $.semanticChecks[1].requirementIds ["req-settle"]',
+      'dev-01 B: order_strategy_consistency not_applicable APPLICABILITY_CONFLICT evaluate.ts:256-257 $.applicability[1] {"checkId":"order_strategy_consistency","status":"not_applicable","basis":"mandatory","documentIds":["proposal","bill","mandate"],"complete":true}',
+      'dev-02 A: mandate_compliance contradicted INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:2',
+      'dev-02 B: order_strategy_consistency not_applicable model_status evaluate.ts:277 $.semanticChecks[1].status "not_applicable" | mandate_compliance contradicted INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:2 | additional_claims applicable APPLICABILITY_CONFLICT evaluate.ts:256-257 $.applicability[3] {"checkId":"additional_claims","status":"applicable","basis":"none_in_complete_scope","documentIds":["proposal","bill","mandate"],"complete":true}',
+      'dev-03 A: order_strategy_consistency not_applicable model_status evaluate.ts:277 $.semanticChecks[1].status "not_applicable" | mandate_compliance fulfilled INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:3',
+      'dev-03 B: order_strategy_consistency not_applicable model_status evaluate.ts:277 $.semanticChecks[1].status "not_applicable" | mandate_compliance fulfilled INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:3',
+      'dev-04 A: order_strategy_consistency not_applicable model_status evaluate.ts:277 $.semanticChecks[1].status "not_applicable" | mandate_compliance not_verifiable model_status evaluate.ts:277 $.semanticChecks[2].status "not_verifiable"',
+      'dev-04 B: order_strategy_consistency not_applicable model_status evaluate.ts:277 $.semanticChecks[1].status "not_applicable" | mandate_compliance not_verifiable model_status evaluate.ts:277 $.semanticChecks[2].status "not_verifiable"',
+      'dev-05 A: mandate_compliance contradicted INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:2',
+      'dev-05 B: mandate_compliance contradicted INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:2',
+      'dev-06 A: order_strategy_consistency fulfilled REQUIREMENT_SET_MISMATCH evaluate.ts:267-269 $.semanticChecks[1].requirementIds ["m-pay"] | mandate_compliance fulfilled INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:2',
+      'dev-06 B: order_strategy_consistency not_applicable model_status evaluate.ts:277 $.semanticChecks[1].status "not_applicable" | mandate_compliance fulfilled INVALID_SEMANTIC_EVIDENCE evaluate.ts:278-285 $.semanticChecks[2].quotes quotes:2',
+    ]);
+  });
+
   it('proves dev-01 A needs the proposal quote after the requirement-id span is cleared', () => {
     const model = load('dev-01', 'A');
     for (const check of checksOf(model)) {
