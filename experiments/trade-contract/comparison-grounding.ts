@@ -1,5 +1,4 @@
 import type { Document } from './contract.ts';
-import type { ComparisonArm } from './comparison-prompt.ts';
 import { uniqueQuoteSpan } from './spans.ts';
 
 export type Reading = 'met' | 'violated' | 'open';
@@ -8,8 +7,9 @@ export interface GroundingRow {
   objectionId: string;
   clauseDocumentId: string;
   clauseQuote: string;
-  evidenceDocumentId: string;
-  evidenceQuote: string;
+  /** Null when the evidence document is absent and reading is open. */
+  evidenceDocumentId: string | null;
+  evidenceQuote: string | null;
   reading: Reading;
 }
 
@@ -18,6 +18,9 @@ export interface PreparedContent {
   publicContent: string;
   droppedIds: string[];
   schemaFailure: boolean;
+  /** True when the payload was not JSON. Distinct from a frozen-validator rejection. */
+  parseFailure: boolean;
+  grounding: GroundingRow[];
 }
 
 const ROOT_KEYS = [
@@ -60,7 +63,43 @@ function spanOk(documents: readonly Document[], id: string, quote: string): bool
 export function validGrounding(row: GroundingRow, documents: readonly Document[]): boolean {
   return authorizedClauseDocument(row.clauseDocumentId)
     && spanOk(documents, row.clauseDocumentId, row.clauseQuote)
+    && row.evidenceDocumentId !== null
+    && row.evidenceQuote !== null
     && spanOk(documents, row.evidenceDocumentId, row.evidenceQuote);
+}
+
+const OPEN_CONDITION = /\b(?:pending|not on file|still pending)\b/i;
+
+function contentWords(text: string): Set<string> {
+  return new Set(text.toLowerCase().match(/\p{L}{5,}/gu) ?? []);
+}
+
+function sharesContentWord(left: string, right: string): boolean {
+  const words = contentWords(left);
+  for (const word of contentWords(right)) if (words.has(word)) return true;
+  return false;
+}
+
+/**
+ * Shared host rule for both arms. A missing, inaccurate, irrelevant, or
+ * open quote cannot support a release. Open may omit the evidence quote.
+ */
+export function quoteBlocksRelease(row: GroundingRow, documents: readonly Document[]): boolean {
+  if (row.reading === 'open' || row.reading === 'violated') return true;
+  if (row.evidenceQuote === null || row.evidenceDocumentId === null) return true;
+  if (!spanOk(documents, row.clauseDocumentId, row.clauseQuote)) return true;
+  if (!spanOk(documents, row.evidenceDocumentId, row.evidenceQuote)) return true;
+  if (OPEN_CONDITION.test(row.evidenceQuote)) return true;
+  return !sharesContentWord(row.clauseQuote, row.evidenceQuote);
+}
+
+export function applySharedHost(
+  decision: 'ALLOW' | 'BLOCK' | 'UNCERTAIN',
+  grounding: readonly GroundingRow[],
+  documents: readonly Document[],
+): 'ALLOW' | 'BLOCK' | 'UNCERTAIN' {
+  if (decision !== 'ALLOW') return decision;
+  return grounding.some(row => quoteBlocksRelease(row, documents)) ? 'UNCERTAIN' : decision;
 }
 
 function quoteRow(value: unknown): boolean {
@@ -134,8 +173,9 @@ function parseGrounding(value: unknown): GroundingRow[] {
     ])) continue;
     if (item.reading !== 'met' && item.reading !== 'violated' && item.reading !== 'open') continue;
     if (typeof item.objectionId !== 'string' || typeof item.clauseDocumentId !== 'string'
-      || typeof item.clauseQuote !== 'string' || typeof item.evidenceDocumentId !== 'string'
-      || typeof item.evidenceQuote !== 'string') continue;
+      || typeof item.clauseQuote !== 'string') continue;
+    if (!(item.evidenceDocumentId === null || typeof item.evidenceDocumentId === 'string')) continue;
+    if (!(item.evidenceQuote === null || typeof item.evidenceQuote === 'string')) continue;
     parsed.push({
       objectionId: item.objectionId,
       clauseDocumentId: item.clauseDocumentId,
@@ -279,35 +319,46 @@ function applyDrop(root: Record<string, unknown>, documents: readonly Document[]
   ];
 }
 
+const EMPTY_PREPARED = (content: string): PreparedContent => ({
+  preGateContent: content,
+  publicContent: content,
+  droppedIds: [],
+  schemaFailure: true,
+  parseFailure: true,
+  grounding: [],
+});
+
 /**
- * Arm A keeps the model's objections. Arm B drops a decisive objection
- * whose grounding does not cite an exact mandate or policy clause and an
- * exact pre-action evidence span. The frozen parser never sees `grounding`.
+ * Primary path. Both arms use this. Grounding is stripped before the frozen
+ * parser and is not used to drop objections. `legacy-drop-replay` is the
+ * previous B filter, labelled and never the primary result.
  */
 export function prepareModelContent(
   content: string,
   documents: readonly Document[],
-  arm: ComparisonArm,
+  mode: 'primary' | 'legacy-drop-replay' = 'primary',
 ): PreparedContent {
   let raw: unknown;
   try {
     raw = JSON.parse(content);
   } catch {
-    return { preGateContent: content, publicContent: content, droppedIds: [], schemaFailure: true };
+    return EMPTY_PREPARED(content);
   }
-  if (!isPlain(raw)) {
-    return { preGateContent: content, publicContent: content, droppedIds: [], schemaFailure: true };
-  }
+  if (!isPlain(raw)) return EMPTY_PREPARED(content);
   const grounding = parseGrounding(raw.grounding);
   delete raw.grounding;
   const schemaFailure = !structurallyAcceptable(raw);
   const preGate = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
   const published = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
-  const droppedIds = arm === 'B' && !schemaFailure ? applyDrop(published, documents, grounding) : [];
+  const droppedIds = mode === 'legacy-drop-replay' && !schemaFailure
+    ? applyDrop(published, documents, grounding)
+    : [];
   return {
     preGateContent: JSON.stringify(preGate),
     publicContent: JSON.stringify(published),
     droppedIds,
     schemaFailure,
+    parseFailure: false,
+    grounding,
   };
 }

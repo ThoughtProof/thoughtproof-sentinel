@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { buildAdapterMessages } from './messages.ts';
@@ -6,11 +7,13 @@ import { scoreComparison, type ArmRun } from './comparison-evaluate.ts';
 import { prepareModelContent, validGrounding } from './comparison-grounding.ts';
 import { SEALED_LABELS, labelsFor } from './comparison-labels.ts';
 import { mechanicalOutput } from './comparison-mechanical.ts';
-import { paidPilotRefusalReason, sendPaidExchange } from './comparison-paid.ts';
+import { paidPilotRefusalReason, runPaidPilot, sendPaidExchange } from './comparison-paid.ts';
 import { deterministicPrecheckPasses } from './comparison-precheck.ts';
-import { ARM_B_APPENDIX, SHARED_APPENDIX, armSystemPrompt } from './comparison-prompt.ts';
-import { PER_CASE_BUDGET_MS, PROPOSED_PILOT_COST_CAP_USD, exceedsCostCap } from './comparison-budget.ts';
-import { buildArmRequest, runRecordedArm } from './comparison-run.ts';
+import { ARM_B_APPENDIX, COMPARISON_BASELINE, SHARED_APPENDIX, armSystemPrompt } from './comparison-prompt.ts';
+import { PER_CASE_BUDGET_MS, PROPOSED_PILOT_COST_CAP_USD, createSpendLedger, exceedsCostCap, maxCallCostUsd } from './comparison-budget.ts';
+import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
+import { buildArmRequest, replayLegacyDrop, runRecordedArm } from './comparison-run.ts';
+import { runSchemaSmoke } from './comparison-smoke.ts';
 import { PROMPT_TEMPLATE } from './prompt.ts';
 
 function source(name: string): string {
@@ -71,6 +74,9 @@ describe('comparison prompts', () => {
     expect(armA.messages[1]).toEqual(armB.messages[1]);
     expect(armA.messages[1]).toEqual(buildAdapterMessages(documents)[1]);
     expect(armB.messages[0].content).toBe(`${armA.messages[0].content}\n${ARM_B_APPENDIX}`);
+    expect(source('comparison-prompt.ts')).toContain(COMPARISON_BASELINE);
+    expect(source('COMPARISON.md')).toContain(COMPARISON_BASELINE);
+    expect(source('README.md')).toContain(COMPARISON_BASELINE);
     expect(armA).not.toHaveProperty('tools');
     expect(armB).not.toHaveProperty('tools');
   });
@@ -113,7 +119,7 @@ describe('comparison prompts', () => {
 describe('deterministic pre-checks', () => {
   it('passes every pilot and development case', () => {
     expect(casesFor('pilot')).toHaveLength(6);
-    expect(casesFor('dev')).toHaveLength(4);
+    expect(casesFor('dev')).toHaveLength(6);
     for (const item of COMPARISON_CASES) {
       expect(deterministicPrecheckPasses(item.precheck)).toBe(true);
     }
@@ -143,6 +149,17 @@ describe('sealed labels', () => {
       expect(label.rationale.startsWith('SEALED:')).toBe(true);
     }
   });
+
+  it('keeps the six pilot cases and labels byte-identical to 832cedf', () => {
+    const body = JSON.stringify({
+      cases: casesFor('pilot').map(item => ({
+        caseId: item.caseId, split: item.split, documents: item.documents, precheck: item.precheck,
+      })),
+      labels: labelsFor('pilot'),
+    });
+    expect(createHash('sha256').update(body).digest('hex'))
+      .toBe('1b871537bda376df9eb3f0b40d0c1f20a1565a693a9c88828965965550fb4a6c');
+  });
 });
 
 describe('grounding drop and the public gate', () => {
@@ -166,22 +183,25 @@ describe('grounding drop and the public gate', () => {
     expect(allow.publicVerdict).toBe('ALLOW');
 
     const content = contradictedPilot01();
-    const kept = runRecordedArm({
+    const armA = runRecordedArm({
       arm: 'A', caseId: item.caseId, documents: item.documents,
       recorded: { exchange: { ok: true, content }, latencyMs: 10 },
       costCapUsd: PROPOSED_PILOT_COST_CAP_USD,
     });
-    const dropped = runRecordedArm({
+    const armB = runRecordedArm({
       arm: 'B', caseId: item.caseId, documents: item.documents,
       recorded: { exchange: { ok: true, content }, latencyMs: 10 },
       costCapUsd: PROPOSED_PILOT_COST_CAP_USD,
     });
-    expect(kept.publicVerdict).toBe('BLOCK');
-    expect(kept.preGateVerdict).toBe('BLOCK');
-    expect(kept.droppedIds).toEqual([]);
-    expect(dropped.preGateVerdict).toBe('BLOCK');
-    expect(dropped.droppedIds).toContain('second-approval');
-    expect(dropped.publicVerdict).toBe('ALLOW');
+    expect(armA.publicVerdict).toBe('BLOCK');
+    expect(armB.publicVerdict).toBe(armA.publicVerdict);
+    expect(armB.droppedIds).toEqual([]);
+    const replay = replayLegacyDrop({
+      arm: 'B', caseId: item.caseId, documents: item.documents, content,
+    });
+    expect(replay.technicalCode).toBe('legacy-drop-replay');
+    expect(replay.droppedIds).toContain('second-approval');
+    expect(replay.publicVerdict).toBe('ALLOW');
   });
 
   it('forces UNCERTAIN when complete is false, which is the downgrade floor', () => {
@@ -267,15 +287,32 @@ describe('grounding drop and the public gate', () => {
         reading: 'open',
       }],
     });
-    const prepared = prepareModelContent(content, documents, 'B');
+    const prepared = prepareModelContent(content, documents, 'primary');
     expect(prepared.schemaFailure).toBe(false);
-    const run = runRecordedArm({
-      arm: 'B', caseId: 'pilot-04', documents,
-      recorded: { exchange: { ok: true, content }, latencyMs: 5 },
-      costCapUsd: PROPOSED_PILOT_COST_CAP_USD,
+    const openContent = mechanicalOutput({
+      documents,
+      proposalQuote: 'Pay 100 EUR to Contoso for invoice INV-200.',
+      sourceQuote: mandate,
+      mandateQuote: mandate,
+      mandateStatus: 'fulfilled',
+      grounding: [{
+        objectionId: 'stated-mandate',
+        clauseDocumentId: 'mandate',
+        clauseQuote: mandate,
+        evidenceDocumentId: null,
+        evidenceQuote: null,
+        reading: 'open',
+      }],
     });
-    expect(run.publicVerdict).toBe('UNCERTAIN');
-    expect(run.publicVerdict).not.toBe('ALLOW');
+    for (const arm of ['A', 'B'] as const) {
+      const run = runRecordedArm({
+        arm, caseId: 'pilot-04', documents,
+        recorded: { exchange: { ok: true, content: openContent }, latencyMs: 5 },
+        costCapUsd: PROPOSED_PILOT_COST_CAP_USD,
+      });
+      expect(run.schemaFailure).toBe(false);
+      expect(run.publicVerdict).toBe('UNCERTAIN');
+    }
   });
 
   it('treats invalid JSON as a schema failure and UNCERTAIN for both arms', () => {
@@ -424,5 +461,204 @@ describe('evaluator counts', () => {
     expect(score.block).toBe(0);
     expect(score.uncertain).toBe(0);
     expect(score.latencyMs).toEqual({ A: [45_001], B: [10] });
+  });
+});
+
+describe('dev quote regression', () => {
+  function releaseAttempt(evidenceDocumentId: string | null, evidenceQuote: string | null, reading: 'met' | 'open' = 'met'): string {
+    const documents = caseById('dev-05').documents;
+    const mandate = documents.find(document => document.id === 'mandate')!.text;
+    return mechanicalOutput({
+      documents,
+      proposalQuote: 'Pay 250 EUR to Harbor Co for invoice INV-440.',
+      sourceQuote: 'Invoice INV-440 from Harbor Co for 250 EUR.',
+      mandateQuote: mandate,
+      mandateStatus: 'fulfilled',
+      grounding: [{
+        objectionId: 'stated-mandate',
+        clauseDocumentId: 'mandate',
+        clauseQuote: mandate,
+        evidenceDocumentId,
+        evidenceQuote,
+        reading,
+      }],
+    });
+  }
+
+  it('never ALLOWs a pending second approval, whatever the quote quality', () => {
+    const documents = caseById('dev-05').documents;
+    const variants = [
+      releaseAttempt(null, null),
+      releaseAttempt('invoice', 'Second approval was granted yesterday.'),
+      releaseAttempt('invoice', 'Goods were received.'),
+      releaseAttempt('invoice', 'Second approval for INV-440 is still pending.'),
+      releaseAttempt(null, null, 'open'),
+    ];
+    for (const content of variants) {
+      for (const arm of ['A', 'B'] as const) {
+        const run = runRecordedArm({
+          arm, caseId: 'dev-05', documents,
+          recorded: { exchange: { ok: true, content }, latencyMs: 3 },
+          costCapUsd: PROPOSED_PILOT_COST_CAP_USD,
+        });
+        expect(run.publicVerdict).not.toBe('ALLOW');
+        expect(run.publicVerdict).toBe(runRecordedArm({
+          arm: arm === 'A' ? 'B' : 'A', caseId: 'dev-05', documents,
+          recorded: { exchange: { ok: true, content }, latencyMs: 3 },
+          costCapUsd: PROPOSED_PILOT_COST_CAP_USD,
+        }).publicVerdict);
+      }
+    }
+  });
+
+  it('ALLOWs the justified counterpart when the quote supports the real clause', () => {
+    const documents = caseById('dev-06').documents;
+    const mandate = documents.find(document => document.id === 'mandate')!.text;
+    const content = mechanicalOutput({
+      documents,
+      proposalQuote: 'Pay 250 EUR to Harbor Co for invoice INV-440.',
+      sourceQuote: 'Invoice INV-440 from Harbor Co for 250 EUR.',
+      mandateQuote: mandate,
+      mandateStatus: 'fulfilled',
+      grounding: [{
+        objectionId: 'stated-mandate',
+        clauseDocumentId: 'mandate',
+        clauseQuote: mandate,
+        evidenceDocumentId: 'invoice',
+        evidenceQuote: 'Invoice INV-440 from Harbor Co for 250 EUR.',
+        reading: 'met',
+      }],
+    });
+    for (const arm of ['A', 'B'] as const) {
+      const run = runRecordedArm({
+        arm, caseId: 'dev-06', documents,
+        recorded: { exchange: { ok: true, content }, latencyMs: 3 },
+        costCapUsd: PROPOSED_PILOT_COST_CAP_USD,
+      });
+      expect(run.publicVerdict).toBe('ALLOW');
+    }
+  });
+});
+
+describe('schema smoke and spend reservation', () => {
+  it('plans schema smoke on dev cases only', () => {
+    const smoke = schemaSmokePlan();
+    const pilot = pilotPlan();
+    expect(smoke.caseIds.every(id => id.startsWith('dev-'))).toBe(true);
+    expect(smoke.caseIds.some(id => id.startsWith('pilot-'))).toBe(false);
+    expect(smoke.maxCalls).toBe(casesFor('dev').length * 2);
+    expect(pilot.maxCalls).toBe(12);
+    expect(pilot.caseIds).toEqual(['pilot-01', 'pilot-02', 'pilot-03', 'pilot-04', 'pilot-05', 'pilot-06']);
+    expect(smoke.baseline).toBe(COMPARISON_BASELINE);
+  });
+
+  it('never sends a pilot case during schema smoke', async () => {
+    const bodies: string[] = [];
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(String(init?.body ?? ''));
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: '{"not":"adapter"}' } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }), { status: 400 });
+    });
+    const report = await runSchemaSmoke({
+      GROUNDED_CRITIC_ALLOW_PAID: '1',
+      GROUNDED_CRITIC_COST_CAP_USD: '100',
+      XAI_API_KEY: 'test-key',
+    }, fetchImpl as unknown as typeof fetch);
+    expect(report.caseIds.every(id => id.startsWith('dev-'))).toBe(true);
+    expect(bodies.length).toBe(report.maxCalls);
+    const joined = bodies.join('\n');
+    expect(joined).not.toContain('pilot-01');
+    expect(joined).not.toContain('Northwind');
+    expect(joined).not.toContain('INV-100');
+    expect(report.providerOrSchemaErrors).toBe(bodies.length);
+    expect(report.frozenValidatorRejections).toBe(0);
+    expect(report.substantiveUncertain).toBe(0);
+  });
+
+  it('counts provider errors, frozen-validator rejections, and substantive UNCERTAIN apart', async () => {
+    const open = (() => {
+      const documents = caseById('dev-05').documents;
+      const mandate = documents.find(document => document.id === 'mandate')!.text;
+      return mechanicalOutput({
+        documents,
+        proposalQuote: 'Pay 250 EUR to Harbor Co for invoice INV-440.',
+        sourceQuote: 'Invoice INV-440 from Harbor Co for 250 EUR.',
+        mandateQuote: mandate,
+        mandateStatus: 'fulfilled',
+        grounding: [{
+          objectionId: 'stated-mandate',
+          clauseDocumentId: 'mandate',
+          clauseQuote: mandate,
+          evidenceDocumentId: null,
+          evidenceQuote: null,
+          reading: 'open',
+        }],
+      });
+    })();
+    let n = 0;
+    const fetchImpl = vi.fn(async (_url: string, init?: RequestInit) => {
+      n += 1;
+      const body = String(init?.body ?? '');
+      if (n === 1) return new Response('no', { status: 500 });
+      if (body.includes('dev-05') || body.includes('only after a recorded second approval')) {
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: open } }],
+          usage: { prompt_tokens: 2, completion_tokens: 2 },
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({
+        choices: [{ message: { content: '{}' } }],
+        usage: { prompt_tokens: 2, completion_tokens: 2 },
+      }), { status: 200 });
+    });
+    const report = await runSchemaSmoke({
+      GROUNDED_CRITIC_ALLOW_PAID: '1',
+      GROUNDED_CRITIC_COST_CAP_USD: '100',
+      XAI_API_KEY: 'test-key',
+    }, fetchImpl as unknown as typeof fetch);
+    expect(report.providerOrSchemaErrors).toBeGreaterThan(0);
+    expect(report.frozenValidatorRejections).toBeGreaterThan(0);
+    expect(report.substantiveUncertain).toBeGreaterThan(0);
+    expect(report.providerOrSchemaErrors + report.frozenValidatorRejections + report.substantiveUncertain)
+      .toBeLessThanOrEqual(report.calls);
+  });
+
+  it('reserves the conservative max before send and keeps it on timeout or unknown usage', async () => {
+    const body = buildArmRequest(caseById('pilot-01').documents, 'A');
+    const one = maxCallCostUsd(JSON.stringify(body), body.max_completion_tokens);
+    const ledger = createSpendLedger(one);
+    const first = ledger.tryReserve(one);
+    expect(first).not.toBeNull();
+    expect(ledger.tryReserve(one)).toBeNull();
+    ledger.keep(first!);
+    expect(ledger.booked()).toBeCloseTo(one);
+
+    const unknown = createSpendLedger(one * 2);
+    const ticket = unknown.tryReserve(one);
+    expect(unknown.tryReserve(one)).not.toBeNull();
+    unknown.keep(ticket!);
+    expect(unknown.tryReserve(one)).toBeNull();
+
+    const reconciled = createSpendLedger(one);
+    const paid = reconciled.tryReserve(one);
+    reconciled.reconcile(paid!, 0);
+    expect(reconciled.tryReserve(one)).not.toBeNull();
+
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('timeout');
+      return new Response('{}', { status: 200 });
+    });
+    const runs = await runPaidPilot({
+      GROUNDED_CRITIC_ALLOW_PAID: '1',
+      GROUNDED_CRITIC_COST_CAP_USD: String(one),
+      XAI_API_KEY: 'test-key',
+    }, fetchImpl as unknown as typeof fetch);
+    expect(calls).toBe(1);
+    expect(runs[0].technicalCode).not.toBe('cost_cap');
+    expect(runs.slice(1).every(row => row.technicalCode === 'cost_cap')).toBe(true);
   });
 });

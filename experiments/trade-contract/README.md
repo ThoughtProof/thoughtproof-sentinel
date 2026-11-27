@@ -60,6 +60,8 @@ Die Kennung muss zur bewusst freigegebenen Adapterimplementierung gehören; sie 
 
 Der Freeze steht in [CANDIDATE.manifest.json](./CANDIDATE.manifest.json): SHA-256 der Prompt-Vorlage, SHA-256 der kanonischen Modellkonfiguration und SHA-256 der Quelldateien. `vercel.json` lässt Git-Deployments für `cursor/trade-contract-offline-20261124` aus; das bleibt bis vor einem späteren Merge stehen.
 
+The offline A/B in [COMPARISON.md](./COMPARISON.md) is a prompt comparison on the #140 extractor. The prod pot-cli critic (`node_modules/pot-cli/src/pipeline/critic.ts`, `runCritic`) and the verify cascade (`src/engine/cascade.ts`, `runSentinelCascade`) are a different host: they do not consume this adapter JSON, `evalOptions` carries no tools, and `mapVerdict` in `src/engine/verdict.ts` remaps CONDITIONAL_ALLOW to UNCERTAIN for conservative modes. Those paths are not arm A.
+
 ## Nächster Evaluationsschritt
 
 1. Der Kandidat aus Prompt, Adapter, Vertrag und Modellkonfiguration ist auf einem Commit eingefroren. Entwicklungsfälle bleiben vom unabhängig erstellten Abnahmesatz getrennt. Der Builder hat dessen Fälle und Ergebnisse nicht.

@@ -86,6 +86,20 @@ export const SEALED_LABELS: readonly SealedLabel[] = [
     justified: false,
     rationale: 'SEALED: The mandate requires the delivery receipt, and that receipt is absent, so the condition is open.',
   },
+  {
+    caseId: 'dev-05',
+    split: 'dev',
+    expected: 'BLOCK',
+    justified: false,
+    rationale: 'SEALED: Harbor Co stays non-ALLOW while the second approval is still pending.',
+  },
+  {
+    caseId: 'dev-06',
+    split: 'dev',
+    expected: 'ALLOW',
+    justified: true,
+    rationale: 'SEALED: Harbor Co does not impose a second approval, and the invoice is present.',
+  },
 ];
 
 export function labelsFor(split: CaseSplit): SealedLabel[] {

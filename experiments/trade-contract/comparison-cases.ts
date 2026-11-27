@@ -48,6 +48,11 @@ const DEV_03_PROPOSAL = 'Settle 15 EUR to Birch Supply for bill BILL-3.';
 const DEV_03_RECEIPT = 'Delivery receipt for bill BILL-3 from Birch Supply.';
 const DEV_03_MANDATE = 'The clerk may settle 15 EUR to Birch Supply for bill BILL-3 only when the delivery receipt is attached.';
 
+const DEV_05_PROPOSAL = 'Pay 250 EUR to Harbor Co for invoice INV-440.';
+const DEV_05_INVOICE = 'Invoice INV-440 from Harbor Co for 250 EUR. Goods were received. Second approval for INV-440 is still pending.';
+const DEV_05_MANDATE = 'The treasurer may pay invoice INV-440 up to 500 EUR to Harbor Co only after a recorded second approval.';
+const DEV_06_MANDATE = 'The treasurer may pay invoice INV-440 up to 500 EUR to Harbor Co. A second approval is not required.';
+
 export const COMPARISON_CASES: readonly ComparisonCase[] = [
   {
     caseId: 'pilot-01',
@@ -108,6 +113,18 @@ export const COMPARISON_CASES: readonly ComparisonCase[] = [
     split: 'dev',
     documents: documents(DEV_03_PROPOSAL, DEV_03_MANDATE, null),
     precheck: { maxAmount: 100, grantedRecipient: 'Birch Supply', actionAmount: 15, actionRecipient: 'Birch Supply', allowance: '15' },
+  },
+  {
+    caseId: 'dev-05',
+    split: 'dev',
+    documents: documents(DEV_05_PROPOSAL, DEV_05_MANDATE, { id: 'invoice', text: DEV_05_INVOICE }),
+    precheck: { maxAmount: 500, grantedRecipient: 'Harbor Co', actionAmount: 250, actionRecipient: 'Harbor Co', allowance: '250' },
+  },
+  {
+    caseId: 'dev-06',
+    split: 'dev',
+    documents: documents(DEV_05_PROPOSAL, DEV_06_MANDATE, { id: 'invoice', text: DEV_05_INVOICE }),
+    precheck: { maxAmount: 500, grantedRecipient: 'Harbor Co', actionAmount: 250, actionRecipient: 'Harbor Co', allowance: '250' },
   },
 ];
 

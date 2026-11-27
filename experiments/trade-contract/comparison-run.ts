@@ -2,7 +2,7 @@ import { ADAPTER_ID, buildAdapterRequest, decideCascade } from './adapter.ts';
 import type { AdapterExchange, AdapterMessage } from './adapter.ts';
 import type { Document } from './contract.ts';
 import { PER_CASE_BUDGET_MS, exceedsCostCap, overBudget } from './comparison-budget.ts';
-import { prepareModelContent } from './comparison-grounding.ts';
+import { applySharedHost, prepareModelContent } from './comparison-grounding.ts';
 import { armSystemPrompt, type ComparisonArm } from './comparison-prompt.ts';
 import { COMPARISON_SCHEMA, COMPARISON_SCHEMA_NAME } from './comparison-schema.ts';
 import type { ArmOutcome, ArmRun, PublicVerdict } from './comparison-evaluate.ts';
@@ -108,25 +108,45 @@ export function runRecordedArm(input: {
   if (input.recorded.usageUsd !== undefined && exceedsCostCap(input.recorded.usageUsd, input.costCapUsd)) {
     return finish(input.arm, input.caseId, 'technical_error', { latencyMs, technicalCode: 'cost_cap' });
   }
-  const prepared = prepareModelContent(input.recorded.exchange.content, input.documents, input.arm);
-  // Host gate: experiments/trade-contract/adapter.ts decideCascade, secondary null.
-  const preGate = decideCascade(
-    input.documents,
-    { ok: true, content: prepared.preGateContent },
-    null,
-    GATE_OPTIONS,
-  );
-  const published = decideCascade(
-    input.documents,
-    { ok: true, content: prepared.publicContent },
-    null,
-    GATE_OPTIONS,
-  );
-  return finish(input.arm, input.caseId, 'verdict', {
+  return decideRecorded(input.arm, input.caseId, input.documents, input.recorded.exchange.content, latencyMs, 'primary');
+}
+
+/**
+ * Previous B filter: drop ungrounded objections, then the frozen gate.
+ * Labelled replay of an already recorded answer. Not the primary result.
+ */
+export function replayLegacyDrop(input: {
+  arm: ComparisonArm;
+  caseId: string;
+  documents: readonly Document[];
+  content: string;
+}): ArmRun {
+  return decideRecorded(input.arm, input.caseId, input.documents, input.content, 0, 'legacy-drop-replay');
+}
+
+function decideRecorded(
+  arm: ComparisonArm,
+  caseId: string,
+  documents: readonly Document[],
+  content: string,
+  latencyMs: number,
+  mode: 'primary' | 'legacy-drop-replay',
+): ArmRun {
+  const prepared = prepareModelContent(content, documents, mode);
+  // Same frozen gate for both arms. Secondary exchange stays null.
+  const preGate = decideCascade(documents, { ok: true, content: prepared.preGateContent }, null, GATE_OPTIONS);
+  const frozen = decideCascade(documents, { ok: true, content: prepared.publicContent }, null, GATE_OPTIONS);
+  const frozenVerdict = verdictOf(frozen.decision);
+  const preGateVerdict = verdictOf(preGate.decision);
+  const publicVerdict = mode === 'primary' && frozenVerdict
+    ? applySharedHost(frozenVerdict, prepared.grounding, documents)
+    : frozenVerdict;
+  return finish(arm, caseId, 'verdict', {
     latencyMs,
     schemaFailure: prepared.schemaFailure,
     droppedIds: prepared.droppedIds,
-    preGateVerdict: verdictOf(preGate.decision),
-    publicVerdict: verdictOf(published.decision),
+    preGateVerdict,
+    publicVerdict,
+    technicalCode: mode === 'legacy-drop-replay' ? 'legacy-drop-replay' : null,
   });
 }

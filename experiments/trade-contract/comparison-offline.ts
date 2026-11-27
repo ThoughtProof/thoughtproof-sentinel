@@ -6,7 +6,9 @@ import { deterministicPrecheckPasses } from './comparison-precheck.ts';
 import { scoreComparison, type ArmRun } from './comparison-evaluate.ts';
 import { runRecordedArm, type RecordedExchange } from './comparison-run.ts';
 import { paidPilotRefusalReason, runPaidPilot } from './comparison-paid.ts';
-import type { ComparisonArm } from './comparison-prompt.ts';
+import { pilotPlan, schemaSmokePlan } from './comparison-plan.ts';
+import { COMPARISON_BASELINE, type ComparisonArm } from './comparison-prompt.ts';
+import { runSchemaSmoke } from './comparison-smoke.ts';
 
 export function precheckSummary(): { pilot: number; dev: number; failed: string[] } {
   return {
@@ -42,6 +44,10 @@ function scoreRecorded(file: RecordedFile): ReturnType<typeof scoreComparison> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+  if (args.includes('--schema-smoke') && !args.includes('--paid')) {
+    process.stdout.write(`${JSON.stringify(schemaSmokePlan())}\n`);
+    return;
+  }
   if (args.includes('--paid')) {
     const reason = paidPilotRefusalReason(process.env);
     if (reason) {
@@ -49,8 +55,16 @@ async function main(): Promise<void> {
       process.exitCode = 3;
       return;
     }
+    if (args.includes('--schema-smoke')) {
+      process.stdout.write(`${JSON.stringify(await runSchemaSmoke(process.env, fetch))}\n`);
+      return;
+    }
     const runs = await runPaidPilot(process.env);
-    process.stdout.write(`${JSON.stringify(scoreComparison(runs, labelsFor('pilot')))}\n`);
+    process.stdout.write(`${JSON.stringify({ baseline: COMPARISON_BASELINE, ...scoreComparison(runs, labelsFor('pilot')) })}\n`);
+    return;
+  }
+  if (args.includes('--plan')) {
+    process.stdout.write(`${JSON.stringify({ pilot: pilotPlan(), schemaSmoke: schemaSmokePlan() })}\n`);
     return;
   }
   const recordedFlag = args.indexOf('--recorded');

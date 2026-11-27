@@ -25,8 +25,8 @@ const groundingRow = {
     objectionId: { type: 'string', minLength: 1, maxLength: 256 },
     clauseDocumentId: { type: 'string', minLength: 1, maxLength: 256 },
     clauseQuote: quote,
-    evidenceDocumentId: { type: 'string', minLength: 1, maxLength: 256 },
-    evidenceQuote: quote,
+    evidenceDocumentId: { anyOf: [{ type: 'null' }, { type: 'string', minLength: 1, maxLength: 256 }] },
+    evidenceQuote: { anyOf: [{ type: 'null' }, quote] },
     reading: { type: 'string', enum: ['met', 'violated', 'open'] },
   },
 };

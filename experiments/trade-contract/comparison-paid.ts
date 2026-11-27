@@ -1,7 +1,7 @@
 import { XAI_CHAT_COMPLETIONS_URL } from './messages.ts';
 import { MODEL_CONFIG } from './model-config.ts';
 import { casesFor } from './comparison-cases.ts';
-import { PER_CASE_BUDGET_MS, exceedsCostCap } from './comparison-budget.ts';
+import { PER_CASE_BUDGET_MS, createSpendLedger, maxCallCostUsd } from './comparison-budget.ts';
 import { buildArmRequest, runRecordedArm } from './comparison-run.ts';
 import type { ArmRun } from './comparison-evaluate.ts';
 import type { ComparisonArm } from './comparison-prompt.ts';
@@ -28,7 +28,8 @@ export function paidPilotRefusalReason(env: PaidEnv): string | null {
 export type PaidSendResult = {
   ok: true;
   content: string;
-  usageUsd: number;
+  /** Null when the provider omits usage. That is not zero. */
+  usageUsd: number | null;
 } | {
   ok: false;
   reason: 'timeout' | 'transport_error' | 'http_error' | 'empty';
@@ -69,10 +70,13 @@ export async function sendPaidExchange(input: {
     };
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || content.trim() === '') return { ok: false, reason: 'empty' };
+    const promptTokens = payload.usage?.prompt_tokens;
+    const completionTokens = payload.usage?.completion_tokens;
+    const usageKnown = typeof promptTokens === 'number' && typeof completionTokens === 'number';
     return {
       ok: true,
       content,
-      usageUsd: estimateUsd(payload.usage?.prompt_tokens ?? 0, payload.usage?.completion_tokens ?? 0),
+      usageUsd: usageKnown ? estimateUsd(promptTokens, completionTokens) : null,
     };
   } catch (error) {
     const name = error instanceof Error ? error.name : '';
@@ -83,39 +87,56 @@ export async function sendPaidExchange(input: {
 
 const ARMS: readonly ComparisonArm[] = ['A', 'B'];
 
-/** Later paid pilot. Tests must not call this with a live fetch. */
+function costCapRow(arm: ComparisonArm, caseId: string): ArmRun {
+  return {
+    arm,
+    caseId,
+    outcome: 'technical_error',
+    publicVerdict: null,
+    preGateVerdict: null,
+    latencyMs: 0,
+    schemaFailure: false,
+    droppedIds: [],
+    technicalCode: 'cost_cap',
+  };
+}
+
+/**
+ * Later paid pilot. Reserves the conservative max before each send.
+ * Tests must pass a mock fetch. This function only walks pilot cases.
+ */
 export async function runPaidPilot(env: PaidEnv, fetchImpl?: typeof fetch): Promise<ArmRun[]> {
   const reason = paidPilotRefusalReason(env);
   if (reason) throw new Error(`PAID_PILOT_REFUSED: ${reason}`);
   const cap = Number(env.GROUNDED_CRITIC_COST_CAP_USD);
   const budgetMs = env.GROUNDED_CRITIC_BUDGET_MS ? Number(env.GROUNDED_CRITIC_BUDGET_MS) : PER_CASE_BUDGET_MS;
-  let spent = 0;
+  const ledger = createSpendLedger(cap);
   const runs: ArmRun[] = [];
   for (const item of casesFor('pilot')) {
     for (const arm of ARMS) {
-      if (exceedsCostCap(spent, cap)) {
-        runs.push({
-          arm,
-          caseId: item.caseId,
-          outcome: 'technical_error',
-          publicVerdict: null,
-          preGateVerdict: null,
-          latencyMs: 0,
-          schemaFailure: false,
-          droppedIds: [],
-          technicalCode: 'cost_cap',
-        });
+      const body = buildArmRequest(item.documents, arm);
+      const ticket = ledger.tryReserve(maxCallCostUsd(JSON.stringify(body), body.max_completion_tokens));
+      if (!ticket) {
+        runs.push(costCapRow(arm, item.caseId));
         continue;
       }
       const started = Date.now();
-      const sent = await sendPaidExchange({
-        env,
-        body: buildArmRequest(item.documents, arm),
-        timeoutMs: budgetMs,
-        fetchImpl,
-      });
+      let sent: Awaited<ReturnType<typeof sendPaidExchange>>;
+      try {
+        sent = await sendPaidExchange({ env, body, timeoutMs: budgetMs, fetchImpl });
+      } catch {
+        ledger.keep(ticket);
+        runs.push({
+          ...costCapRow(arm, item.caseId),
+          outcome: 'technical_error',
+          technicalCode: 'transport_error',
+          latencyMs: Date.now() - started,
+        });
+        continue;
+      }
       const latencyMs = Date.now() - started;
-      if (sent.ok) spent += sent.usageUsd;
+      if (!sent.ok || sent.usageUsd === null) ledger.keep(ticket);
+      else ledger.reconcile(ticket, sent.usageUsd);
       runs.push(runRecordedArm({
         arm,
         caseId: item.caseId,
@@ -123,7 +144,7 @@ export async function runPaidPilot(env: PaidEnv, fetchImpl?: typeof fetch): Prom
         costCapUsd: cap,
         budgetMs,
         recorded: sent.ok
-          ? { exchange: { ok: true, content: sent.content }, latencyMs, usageUsd: sent.usageUsd }
+          ? { exchange: { ok: true, content: sent.content }, latencyMs, usageUsd: sent.usageUsd ?? undefined }
           : { exchange: { ok: false, reason: sent.reason }, latencyMs },
       }));
     }
