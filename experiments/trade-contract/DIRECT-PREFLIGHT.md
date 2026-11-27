@@ -1,5 +1,7 @@
 # Dummy preflight
 
+The primary executor is no longer the September rewrite. See `DIRECT-BINDING.md`. A contradictory `execute: true` still becomes ALLOW under `september_rule`, and that result does not execute.
+
 `DUMMY-PREFLIGHT-01` is not a holdout and is not scored. The six fresh cases are not in this file. No request was sent.
 
 The freeze manifest is unchanged: sha256 `e591e341b04b1f339e56a34a2a592db91cfc0647b79afc094f4d11b688630f98`.

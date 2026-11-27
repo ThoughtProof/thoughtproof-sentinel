@@ -1,0 +1,16 @@
+{
+  "label": "historischer Critic + Gateway mit strikter Bindung",
+  "parentCommit": "b8fc844f0ce8c1992651bc15c0d576a21b3fa827",
+  "sentinelManifestSha256": "e591e341b04b1f339e56a34a2a592db91cfc0647b79afc094f4d11b688630f98",
+  "rule": "Execute only when the gateway passes, the critic fields are typed, execute is true, verdict is ALLOW, and the total time is at most 45000 ms. Contradictory or invalid fields are protocol_error and do not execute. september_rule is a separate metric.",
+  "files": [
+    {
+      "path": "experiments/trade-contract/direct-binding.ts",
+      "sha256": "61e1fb4c760f489f630f5f7094ba40eaf2fc206143415a2e437f5029093eb3ee"
+    },
+    {
+      "path": "experiments/trade-contract/direct-historical.ts",
+      "sha256": "2ca6bf47d18e2db7fe278d526a48d181ded4ec0ebba56f5616656ecf16f49bb0"
+    }
+  ]
+}

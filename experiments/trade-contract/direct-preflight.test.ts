@@ -9,6 +9,7 @@ import { ARM_B_APPENDIX } from './comparison-prompt.ts';
 import { buildArmRequest } from './comparison-run.ts';
 import { estimatePromptTokens, PER_CASE_BUDGET_MS } from './comparison-budget.ts';
 import { MODEL_CONFIG } from './model-config.ts';
+import { strictBinding } from './direct-binding.ts';
 import { BINDING_BUDGET_MS, bindHistorical, simulatedExecution } from './direct-historical.ts';
 import {
   DUMMY_CASE_ID, DUMMY_CRITIC_ACTION, DUMMY_EVIDENCE, DUMMY_GATEWAY_PROBE, DUMMY_MANDATE, DUMMY_ORDER,
@@ -45,7 +46,7 @@ describe('dummy preflight', () => {
       .toBe('e591e341b04b1f339e56a34a2a592db91cfc0647b79afc094f4d11b688630f98');
   });
 
-  it('sends execute true with BLOCK, REVIEW, and UNCERTAIN to the same executor result on both paths', () => {
+  it('keeps the September envelope as a secondary metric and does not execute it under strict binding', () => {
     const recorded = readJson('python-executor-trace.json') as {
       input_verdict: string;
       envelope_verdict: string;
@@ -62,20 +63,19 @@ describe('dummy preflight', () => {
         critic: { httpStatus: 200, execute: true, verdict: row.input_verdict },
       });
       expect(bound.criticCalled).toBe(true);
-      expect(bound.decision.systemVerdict).toBe(row.envelope_verdict);
+      expect(bound.decision.systemVerdict).toBe('ALLOW');
       expect(row.envelope_verdict).toBe('ALLOW');
       expect(row.envelope_execute).toBe(true);
-      expect(row.raw_verdict).toBe(row.input_verdict);
-      expect(row.raw_execute).toBe(true);
-      expect(simulatedExecution(bound.decision).executed).toBe(true);
-      const late = bindHistorical({
+      const strict = strictBinding({
         world: DUMMY_GATEWAY_PROBE.world,
         action: DUMMY_GATEWAY_PROBE.action,
-        durationMs: 45_001,
-        critic: { httpStatus: 200, execute: true, verdict: row.input_verdict },
+        durationMs: 1_000,
+        raw: { execute: true, verdict: row.input_verdict },
       });
-      expect(late.decision.systemVerdict).toBe('ALLOW');
-      expect(simulatedExecution(late.decision).executed).toBe(false);
+      expect(strict.executed).toBe(false);
+      expect(strict.protocolError).toBe('protocol_error');
+      expect(strict.september).toEqual({ label: 'september_rule', verdict: 'ALLOW', execute: true });
+      expect(simulatedExecution(bound.decision).executed).toBe(true);
     }
     if (!existsSync(TARBALL)) return;
     const dir = mkdtempSync(join(tmpdir(), 'preflight-'));
