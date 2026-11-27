@@ -1,0 +1,75 @@
+{
+  "candidate": "extractor arm B, including the section_heading downgrade",
+  "candidateCommit": "2b862b421c6993542a6cd1cd65e2b766e42fbb86",
+  "knownError": "v3-05 B is a documented error of this candidate. The stored answer parses and evaluates to ALLOW before downgrade. adapter.ts sets downgradeAllow when decidedBy is not clause, and downgrade rewrites that ALLOW to UNCERTAIN.",
+  "model": {
+    "model": "grok-4.7",
+    "temperature": 0,
+    "seed": 42,
+    "reasoning_effort": "low",
+    "max_completion_tokens": 4096,
+    "tools": false,
+    "source": "model-config.ts primary, copied by comparison-run.ts buildArmRequest. The request object has no tools field."
+  },
+  "systemPromptSha256": "8c936f075d7e1ffd13b75752ffd20a3ea55dd4ce18cc3ee7a905965d3d159e2f",
+  "systemPromptFiles": [
+    "experiments/trade-contract/prompt.ts",
+    "experiments/trade-contract/comparison-prompt.ts"
+  ],
+  "wireSchema": "experiments/trade-contract/comparison-schema.ts",
+  "files": [
+    {
+      "path": "experiments/trade-contract/prompt.ts",
+      "sha256": "7ab619fa2f7c2013dec1dbdd0caefcfccd54b801d07a07b7b272e493e9d9d0a5",
+      "lastCommit": "740f2cce782deaac5ddd3ddbe7e9344f961c9668",
+      "byteEqualTo": "30777b0f44912b6f14e910f647ab2940d5477c40"
+    },
+    {
+      "path": "experiments/trade-contract/comparison-prompt.ts",
+      "sha256": "f2fc2e5797997a274840e57049e6420c72244c4e0cca764a0e980e475e819092",
+      "lastCommit": "a585f5eb382fd57eed0401b429c6b5818ec7460a"
+    },
+    {
+      "path": "experiments/trade-contract/model-config.ts",
+      "sha256": "78414f4817336601e2505e3428bf16d67bab462e9c361bc461b43c30945af99b",
+      "lastCommit": "30777b0f44912b6f14e910f647ab2940d5477c40",
+      "byteEqualTo": "30777b0f44912b6f14e910f647ab2940d5477c40"
+    },
+    {
+      "path": "experiments/trade-contract/messages.ts",
+      "sha256": "d472b464826454aa95e679277b033aa8c7deed3e90e58a321de96932e71c4225",
+      "lastCommit": "30777b0f44912b6f14e910f647ab2940d5477c40",
+      "byteEqualTo": "30777b0f44912b6f14e910f647ab2940d5477c40"
+    },
+    {
+      "path": "experiments/trade-contract/adapter.ts",
+      "sha256": "833d03e1db5d1b75c70712150fc6a43f2023ab22158402271cd5884467d012bf",
+      "lastCommit": "b3ae9de9692f17990841aa4664ce7c89423893ce",
+      "role": "parser and downgrade. Not byte-identical to 30777b0. The downgrade at the decidedBy check and the ALLOW rewrite stay in this file."
+    },
+    {
+      "path": "experiments/trade-contract/evaluate.ts",
+      "sha256": "11bb51a1f3a3cad2d61a9a1e4bb6fd82660b366a249b2f3fc3cae2f8057dc5c4",
+      "lastCommit": "d40d05193476d7e4ab6cb3878ffdd0d52c825fd7",
+      "byteEqualTo": "30777b0f44912b6f14e910f647ab2940d5477c40"
+    },
+    {
+      "path": "experiments/trade-contract/comparison-grounding.ts",
+      "sha256": "270f19de7505d87c7d0f3fcf0bce201008476f1a4fabf79b2e1cef26107d2347",
+      "lastCommit": "d60c7381fdbaf9e0293634e68f1fdebe1be9fe10",
+      "role": "grounding host"
+    },
+    {
+      "path": "experiments/trade-contract/comparison-run.ts",
+      "sha256": "7e5d4a64b27816ba51dba37d3d36e0203e1dec5db425c1488fe703b376c0d3c4",
+      "lastCommit": "d60c7381fdbaf9e0293634e68f1fdebe1be9fe10",
+      "role": "arm B request assembly and recorded decision"
+    },
+    {
+      "path": "experiments/trade-contract/comparison-schema.ts",
+      "sha256": "915f3d6b55bc27869e0415eccb8f82150b6e12991fa9562c8073bf08b9db3219",
+      "lastCommit": "d60c7381fdbaf9e0293634e68f1fdebe1be9fe10",
+      "role": "json schema on the arm B wire"
+    }
+  ]
+}
