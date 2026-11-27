@@ -2,7 +2,7 @@ import { ADAPTER_OUTPUT_VERSION } from '../adapter.ts';
 import type { GroundingRow } from '../comparison-grounding.ts';
 import {
   BASIS_TEXT, MANDATE_APPROVAL, MANDATE_SOLE, NOTICE_PENDING, ORDER_CASES, ORDER_TEXT,
-  STRATEGY_INCREASE, STRATEGY_REDUCE, orderCaseById,
+  P3_STRATEGY_INCREASE, P3_STRATEGY_REDUCE, STRATEGY_REDUCE, orderCaseById,
 } from './cases.ts';
 
 type Quote = { documentId: string; quote: string };
@@ -77,7 +77,24 @@ const metSole: GroundingRow = {
 /** Honest reference JSON for one trade-order case. Quotes are spans of that case only. */
 export function orderReference(caseId: string): string {
   if (!ORDER_CASES.some(item => item.caseId === caseId)) throw new Error('UNKNOWN_ORDER_CASE');
-  if (caseId === 'ord-01' || caseId === 'ord-03' || caseId === 'ord-05') {
+  if (caseId === 'ord-05') {
+    return answer({
+      caseId,
+      requirements: [
+        { id: 'reduce-helio', kind: 'strategy', quotes: [q('strategy', P3_STRATEGY_REDUCE)] },
+        { id: 'sole-authority', kind: 'mandate', quotes: [soleQuote] },
+      ],
+      decisionQuotes: [orderQuote, basisQuote],
+      strategyStatus: 'fulfilled',
+      strategyIds: ['reduce-helio'],
+      strategyQuotes: [orderQuote, q('strategy', P3_STRATEGY_REDUCE)],
+      mandateStatus: 'fulfilled',
+      mandateIds: ['sole-authority'],
+      mandateQuotes: [orderQuote, soleQuote],
+      grounding: [metSole],
+    });
+  }
+  if (caseId === 'ord-01' || caseId === 'ord-03') {
     return answer({
       caseId,
       requirements: [
@@ -135,20 +152,20 @@ export function orderReference(caseId: string): string {
   return answer({
     caseId,
     requirements: [
-      { id: 'increase-helio', kind: 'strategy', quotes: [q('strategy', STRATEGY_INCREASE)] },
+      { id: 'increase-helio', kind: 'strategy', quotes: [q('strategy', P3_STRATEGY_INCREASE)] },
       { id: 'sole-authority', kind: 'mandate', quotes: [soleQuote] },
     ],
     decisionQuotes: [orderQuote, basisQuote],
     strategyStatus: 'contradicted',
     strategyIds: ['increase-helio'],
-    strategyQuotes: [orderQuote, q('strategy', STRATEGY_INCREASE)],
+    strategyQuotes: [orderQuote, q('strategy', P3_STRATEGY_INCREASE)],
     mandateStatus: 'fulfilled',
     mandateIds: ['sole-authority'],
     mandateQuotes: [orderQuote, soleQuote],
     grounding: [{
       objectionId: 'increase-helio',
       clauseDocumentId: 'strategy',
-      clauseQuote: STRATEGY_INCREASE,
+      clauseQuote: P3_STRATEGY_INCREASE,
       evidenceDocumentId: 'order',
       evidenceQuote: ORDER_TEXT,
       reading: 'violated',

@@ -7,7 +7,9 @@ export const DEV_V2_VERSION = 'dev-v2' as const;
 export const ORDER_TEXT = 'Sell 10 of the 40 Helio shares with a limit order.';
 export const BASIS_TEXT = 'Helio demand has weakened.';
 export const STRATEGY_REDUCE = 'Strategy: Reduce Helio exposure because demand has weakened.';
-export const STRATEGY_INCREASE = 'Strategy: Increase Helio exposure because demand has strengthened.';
+/** P3 only. The two sentences differ by the direction word and by nothing else. */
+export const P3_STRATEGY_REDUCE = 'Strategy: Reduce Helio exposure.';
+export const P3_STRATEGY_INCREASE = 'Strategy: Increase Helio exposure.';
 export const MANDATE_SOLE = 'The desk may sell these Helio shares under sole authority.';
 export const MANDATE_APPROVAL = 'The desk may sell these Helio shares only after a recorded second approval.';
 export const NOTICE_PENDING = 'Second approval for this Helio sale is still pending.';
@@ -73,12 +75,12 @@ export const ORDER_CASES: readonly OrderCase[] = [
   },
   {
     caseId: 'ord-05',
-    documents: [order(), basis(), strategy(STRATEGY_REDUCE), mandate(MANDATE_SOLE), book()],
+    documents: [order(), basis(), strategy(P3_STRATEGY_REDUCE), mandate(MANDATE_SOLE), book()],
     precheck: PRECHECK,
   },
   {
     caseId: 'ord-06',
-    documents: [order(), basis(), strategy(STRATEGY_INCREASE), mandate(MANDATE_SOLE), book()],
+    documents: [order(), basis(), strategy(P3_STRATEGY_INCREASE), mandate(MANDATE_SOLE), book()],
     precheck: PRECHECK,
   },
 ];
@@ -87,4 +89,14 @@ export function orderCaseById(caseId: string): OrderCase {
   const found = ORDER_CASES.find(item => item.caseId === caseId);
   if (!found) throw new Error('UNKNOWN_ORDER_CASE');
   return found;
+}
+
+/**
+ * Offline list only. Schema smoke does not call this.
+ * `comparison-smoke.ts` `schemaSmokeDocuments` uses `casesFor('dev')`,
+ * the closed payment cases. `comparison-offline.ts` has no flag for these
+ * six orders, and no paid path is wired to them.
+ */
+export function tradeOrderCases(): readonly OrderCase[] {
+  return ORDER_CASES;
 }

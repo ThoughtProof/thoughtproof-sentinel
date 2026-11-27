@@ -6,9 +6,10 @@ import { deterministicPrecheckPasses } from './comparison-precheck.ts';
 import { prepareModelContent } from './comparison-grounding.ts';
 import { assessModelText } from './comparison-report.ts';
 import { casesFor } from './comparison-cases.ts';
+import { schemaSmokePlan } from './comparison-plan.ts';
 import {
   BASIS_TEXT, MANDATE_APPROVAL, MANDATE_SOLE, NOTICE_PENDING, ORDER_CASES, ORDER_TEXT,
-  STRATEGY_INCREASE, STRATEGY_REDUCE, orderCaseById,
+  P3_STRATEGY_INCREASE, P3_STRATEGY_REDUCE, STRATEGY_REDUCE, orderCaseById, tradeOrderCases,
 } from './dev-v2/cases.ts';
 import { ORDER_LABELS } from './dev-v2/labels.ts';
 import { orderReference } from './dev-v2/reference.ts';
@@ -67,6 +68,56 @@ describe('dev-v2 trade orders', () => {
     }
   });
 
+  it('keeps P1 and P2 document bytes at d0d6f13b', () => {
+    expect(orderCaseById('ord-01').documents.map(document => document.text)).toEqual([
+      ORDER_TEXT, BASIS_TEXT, STRATEGY_REDUCE, NOTICE_PENDING, MANDATE_SOLE,
+    ]);
+    expect(orderCaseById('ord-02').documents.map(document => document.text)).toEqual([
+      ORDER_TEXT, BASIS_TEXT, STRATEGY_REDUCE, NOTICE_PENDING, MANDATE_APPROVAL,
+    ]);
+    expect(orderCaseById('ord-03').documents.map(document => document.text)).toEqual([
+      ORDER_TEXT, BASIS_TEXT, STRATEGY_REDUCE, MANDATE_SOLE,
+    ]);
+    expect(orderCaseById('ord-04').documents.map(document => document.text)).toEqual([
+      ORDER_TEXT, BASIS_TEXT, MANDATE_SOLE,
+    ]);
+    expect(STRATEGY_REDUCE).toBe('Strategy: Reduce Helio exposure because demand has weakened.');
+  });
+
+  it('differs inside P3 only by the direction word on both built requests', () => {
+    const reduce = orderCaseById('ord-05');
+    const increase = orderCaseById('ord-06');
+    expect(reduce.documents.find(document => document.id === 'basis')!.text)
+      .toBe(increase.documents.find(document => document.id === 'basis')!.text);
+    expect(reduce.documents.find(document => document.id === 'basis')!.text).toBe(BASIS_TEXT);
+    expect(P3_STRATEGY_REDUCE).toBe('Strategy: Reduce Helio exposure.');
+    expect(P3_STRATEGY_INCREASE).toBe('Strategy: Increase Helio exposure.');
+    expect(P3_STRATEGY_REDUCE.replace('Reduce', 'Increase')).toBe(P3_STRATEGY_INCREASE);
+    for (const arm of ['A', 'B'] as const) {
+      const left = JSON.stringify(buildArmRequest(reduce.documents, arm));
+      const right = JSON.stringify(buildArmRequest(increase.documents, arm));
+      expect(left.match(/Reduce/g)).toEqual(['Reduce']);
+      expect(left.includes('Increase')).toBe(false);
+      expect(right.match(/Increase/g)).toEqual(['Increase']);
+      expect(right.includes('Reduce')).toBe(false);
+      expect(left.replace('Reduce', 'Increase')).toBe(right);
+    }
+  });
+
+  it('builds six distinct requests per arm', () => {
+    for (const arm of ['A', 'B'] as const) {
+      const bodies = ORDER_CASES.map(item => JSON.stringify(buildArmRequest(item.documents, arm)));
+      expect(new Set(bodies).size).toBe(6);
+    }
+  });
+
+  it('leaves schema smoke on the closed payment cases', () => {
+    expect(schemaSmokePlan().caseIds).toEqual(['dev-01', 'dev-02', 'dev-03', 'dev-04', 'dev-05', 'dev-06']);
+    expect(tradeOrderCases().map(item => item.caseId)).toEqual(ORDER_CASES.map(item => item.caseId));
+    expect(source('./comparison-offline.ts')).not.toContain('dev-v2');
+    expect(source('./comparison-smoke.ts')).not.toContain('ord-0');
+  });
+
   it('reaches each sealed public verdict for the sealed check, with verbatim quotes', () => {
     for (const label of ORDER_LABELS) {
       const item = orderCaseById(label.caseId);
@@ -102,7 +153,8 @@ describe('dev-v2 trade orders', () => {
     }
     expect(BASIS_TEXT.includes('Helio demand')).toBe(true);
     expect(STRATEGY_REDUCE.includes('Reduce')).toBe(true);
-    expect(STRATEGY_INCREASE.includes('Increase')).toBe(true);
+    expect(P3_STRATEGY_REDUCE.includes('Reduce')).toBe(true);
+    expect(P3_STRATEGY_INCREASE.includes('Increase')).toBe(true);
     expect(MANDATE_SOLE.includes('sole authority')).toBe(true);
     expect(MANDATE_APPROVAL.includes('second approval')).toBe(true);
     expect(NOTICE_PENDING.includes('still pending')).toBe(true);
