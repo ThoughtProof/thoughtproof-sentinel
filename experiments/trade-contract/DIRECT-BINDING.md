@@ -34,6 +34,10 @@ The historical wire alias stays `grok-4-fast-reasoning`. Raul GO t942u states th
 
 Sentinel rates are the short-context card in `model-config.ts` at `30777b0`. A `grok-4.7` reasoning token is not bounded by `max_completion_tokens`, so the Sentinel figure is also not a measured bill. A run with no secondary is the primary total plus one historical column. Adding the secondary worst case and the 4096 historical column is 0.36348750 USD, and the historical part can still go higher.
 
+## Shared budget
+
+Both arms, including a Sentinel secondary call, share 1.00 USD in `direct-budget.ts`. Before each send the ledger checks measured cost plus open reservations plus the next estimate. Above 1.00 USD the call is `not_run_budget` and nothing is sent. After a response, confirmed usage replaces that call's reservation. A timeout or missing usage leaves the reservation open. When measured cost plus open reservations reaches 1.00 USD, sending stops. `measured_usd`, `open_reservations_usd`, and `actual_overrun_usd` stay separate. The overrun is confirmed spend above 1.00 USD, not a reservation. The next-call estimate assumes 32768 output tokens. That is not a ceiling. `createSpendLedger` is the same reserve, replace, and keep pattern, but its single booked figure cannot report the three amounts.
+
 ## Readiness
 
 Not ready to start a provider call. The six requests reach the critic and the strict binding is frozen. The historical body still has no output limit, so no dollar cap derived from these requests is a ceiling. The sealed labels stay with Raul and were not read.
