@@ -29,6 +29,12 @@ export interface DirectTransport {
   >;
 }
 
+export interface StageMark {
+  stage: 'sentinel_primary' | 'sentinel_secondary' | 'historical';
+  event: 'send' | 'receipt' | 'timeout';
+  elapsedMs: number;
+}
+
 export interface SystemOutcome {
   caseId: string;
   system: 'sentinel' | 'historical';
@@ -39,6 +45,7 @@ export interface SystemOutcome {
   secondary_called: boolean;
   public_verdict_stage: 'primary' | 'secondary' | 'none';
   protocolError: 'protocol_error' | null;
+  stages: StageMark[];
 }
 
 export interface DirectRunReport {
@@ -75,7 +82,9 @@ export async function runDirectComparison(input: {
   let calls = 0;
   const outcomes: SystemOutcome[] = [];
 
-  async function reserveAndSend(caseId: string, arm: BudgetArm, body: unknown, timeoutMs: number): Promise<Sent> {
+  async function reserveAndSend(
+    caseId: string, arm: BudgetArm, body: unknown, timeoutMs: number, origin: number, stages: StageMark[],
+  ): Promise<Sent> {
     if (calls >= maxCalls) return { kind: 'capped' };
     if (ledger.snapshot().closed) return { kind: 'not_run_budget' };
     const estimate = estimateNextCallUsd(arm, JSON.stringify(body));
@@ -88,6 +97,8 @@ export async function runDirectComparison(input: {
       ledger.latch();
       return { kind: 'not_run_budget' };
     }
+    const stage = arm;
+    stages.push({ stage, event: 'send', elapsedMs: Date.now() - origin });
     const started = Date.now();
     let sent: Awaited<ReturnType<DirectTransport['send']>>;
     try {
@@ -95,16 +106,21 @@ export async function runDirectComparison(input: {
     } catch {
       calls += 1;
       ledger.keep(ticket);
+      stages.push({ stage, event: 'receipt', elapsedMs: Date.now() - origin });
       return { kind: 'http', reason: 'transport_error', durationMs: Date.now() - started };
     }
     calls += 1;
     const durationMs = Date.now() - started;
     if (!sent.ok) {
       ledger.keep(ticket);
-      return sent.reason === 'timeout'
-        ? { kind: 'timeout', durationMs }
-        : { kind: 'http', reason: sent.reason, durationMs };
+      if (sent.reason === 'timeout') {
+        stages.push({ stage, event: 'timeout', elapsedMs: Date.now() - origin });
+        return { kind: 'timeout', durationMs };
+      }
+      stages.push({ stage, event: 'receipt', elapsedMs: Date.now() - origin });
+      return { kind: 'http', reason: sent.reason, durationMs };
     }
+    stages.push({ stage, event: 'receipt', elapsedMs: Date.now() - origin });
     if (sent.usageUsd === null) ledger.keep(ticket);
     else ledger.commitMeasured(ticket, sent.usageUsd);
     return { kind: 'result', content: sent.content, durationMs };
@@ -132,36 +148,39 @@ export async function runDirectComparison(input: {
 
   async function runSentinel(row: HoldoutCase): Promise<SystemOutcome> {
     const started = Date.now();
+    const stages: StageMark[] = [];
     const remain = () => systemMs - (Date.now() - started);
-    const primary = await reserveAndSend(row.caseId, 'sentinel_primary', buildArmRequest(row.documents, 'B'), Math.max(1, remain()));
-    if (primary.kind === 'not_run_budget') return stopped(row.caseId, 'sentinel');
-    if (primary.kind === 'capped') return technical(row.caseId, 'sentinel', 'error', Date.now() - started);
-    if (primary.kind === 'timeout') return technical(row.caseId, 'sentinel', 'timeout', Date.now() - started);
+    const primary = await reserveAndSend(
+      row.caseId, 'sentinel_primary', buildArmRequest(row.documents, 'B'), Math.max(1, remain()), started, stages,
+    );
+    if (primary.kind === 'not_run_budget') return stopped(row.caseId, 'sentinel', stages);
+    if (primary.kind === 'capped') return technical(row.caseId, 'sentinel', 'error', Date.now() - started, stages);
+    if (primary.kind === 'timeout') return technical(row.caseId, 'sentinel', 'timeout', Date.now() - started, stages);
+    const prepared = primary.kind === 'result' ? prepareModelContent(primary.content, row.documents, 'primary') : null;
+    const transportFailure = primary.kind === 'http' ? primary.reason : 'transport_error';
+    const parsed = prepared ? parseOutput(prepared.publicContent) : { failure: transportFailure };
+    const needsSecondary = 'failure' in parsed && FAILURES.has(parsed.failure);
     let secondaryExchange: AdapterExchange | null = null;
     let secondaryCalled = false;
-    const parsed = primary.kind === 'result' ? parseOutput(primary.content) : { failure: primary.reason };
-    const needsSecondary = 'failure' in parsed && FAILURES.has(parsed.failure);
     if (needsSecondary && remain() > 0) {
       const secondary = await reserveAndSend(
-        row.caseId, 'sentinel_secondary', buildAdapterRequest(row.documents, 'secondary'), Math.max(1, remain()),
+        row.caseId, 'sentinel_secondary', buildAdapterRequest(row.documents, 'secondary'), Math.max(1, remain()), started, stages,
       );
-      if (secondary.kind === 'not_run_budget') return stopped(row.caseId, 'sentinel');
-      if (secondary.kind === 'timeout') return technical(row.caseId, 'sentinel', 'timeout', Date.now() - started);
-      if (secondary.kind === 'result') {
-        secondaryCalled = true;
-        secondaryExchange = { ok: true, content: secondary.content };
+      secondaryCalled = secondary.kind === 'result' || secondary.kind === 'timeout' || secondary.kind === 'http';
+      if (secondary.kind === 'not_run_budget') return stopped(row.caseId, 'sentinel', stages);
+      if (secondary.kind === 'timeout') {
+        return { ...technical(row.caseId, 'sentinel', 'timeout', Date.now() - started, stages), secondary_called: true, public_verdict_stage: 'secondary' };
       }
+      if (secondary.kind === 'result') secondaryExchange = { ok: true, content: secondary.content };
     }
-    const primaryExchange: AdapterExchange = primary.kind === 'result'
-      ? { ok: true, content: primary.content }
-      : { ok: false, reason: primary.reason };
+    const primaryExchange: AdapterExchange = prepared
+      ? { ok: true, content: prepared.publicContent }
+      : { ok: false, reason: primary.kind === 'http' ? primary.reason : 'transport_error' };
     const decided = decideCascade(row.documents, primaryExchange, secondaryExchange, { trustedAdapterIds: [ADAPTER_ID] });
     if (secondaryCalled && decided.decision === 'ALLOW') throw new Error('SECONDARY_PUBLISHED_ALLOW');
-    const source = secondaryExchange?.ok ? secondaryExchange.content : primary.kind === 'result' ? primary.content : '';
-    const prepared = source ? prepareModelContent(source, row.documents, 'primary') : null;
-    const verdict = secondaryCalled || !prepared
-      ? verdictOf(decided.decision)
-      : applySharedHost(verdictOf(decided.decision), prepared.grounding, row.documents);
+    const verdict = prepared
+      ? applySharedHost(verdictOf(decided.decision), prepared.grounding, row.documents)
+      : verdictOf(decided.decision);
     const durationMs = Date.now() - started;
     const stage = sentinelStage({ documents: row.documents, primary: primaryExchange, secondary: secondaryExchange });
     return {
@@ -174,6 +193,7 @@ export async function runDirectComparison(input: {
       secondary_called: secondaryCalled,
       public_verdict_stage: secondaryCalled ? 'secondary' : stage.public_verdict_stage,
       protocolError: null,
+      stages,
     };
   }
 
@@ -184,16 +204,17 @@ export async function runDirectComparison(input: {
       return {
         caseId: row.caseId, system: 'historical', status: 'result', verdict: gate.verdict,
         executed: false, durationMs: Date.now() - started, secondary_called: false,
-        public_verdict_stage: 'none', protocolError: null,
+        public_verdict_stage: 'none', protocolError: null, stages: [],
       };
     }
+    const stages: StageMark[] = [];
     const sent = await reserveAndSend(
-      row.caseId, 'historical', historicalHoldoutRequest(row), Math.max(1, systemMs - (Date.now() - started)),
+      row.caseId, 'historical', historicalHoldoutRequest(row), Math.max(1, systemMs - (Date.now() - started)), started, stages,
     );
-    if (sent.kind === 'not_run_budget') return stopped(row.caseId, 'historical');
-    if (sent.kind === 'capped') return technical(row.caseId, 'historical', 'error', Date.now() - started);
-    if (sent.kind === 'timeout') return technical(row.caseId, 'historical', 'timeout', Date.now() - started);
-    if (sent.kind !== 'result') return technical(row.caseId, 'historical', 'error', Date.now() - started);
+    if (sent.kind === 'not_run_budget') return stopped(row.caseId, 'historical', stages);
+    if (sent.kind === 'capped') return technical(row.caseId, 'historical', 'error', Date.now() - started, stages);
+    if (sent.kind === 'timeout') return technical(row.caseId, 'historical', 'timeout', Date.now() - started, stages);
+    if (sent.kind !== 'result') return technical(row.caseId, 'historical', 'error', Date.now() - started, stages);
     const raw = rawCritic(sent.content);
     const bound = strictBinding({ world: row.world, action: row.action, durationMs: Date.now() - started, raw });
     return {
@@ -206,21 +227,24 @@ export async function runDirectComparison(input: {
       secondary_called: false,
       public_verdict_stage: 'none',
       protocolError: bound.protocolError,
+      stages,
     };
   }
 }
 
-function stopped(caseId: string, system: 'sentinel' | 'historical'): SystemOutcome {
+function stopped(caseId: string, system: 'sentinel' | 'historical', stages: StageMark[] = []): SystemOutcome {
   return {
     caseId, system, status: 'not_run_budget', verdict: null, executed: false, durationMs: 0,
-    secondary_called: false, public_verdict_stage: 'none', protocolError: null,
+    secondary_called: false, public_verdict_stage: 'none', protocolError: null, stages,
   };
 }
 
-function technical(caseId: string, system: 'sentinel' | 'historical', status: 'timeout' | 'error', durationMs: number): SystemOutcome {
+function technical(
+  caseId: string, system: 'sentinel' | 'historical', status: 'timeout' | 'error', durationMs: number, stages: StageMark[] = [],
+): SystemOutcome {
   return {
     caseId, system, status, verdict: null, executed: false, durationMs,
-    secondary_called: false, public_verdict_stage: 'none', protocolError: null,
+    secondary_called: false, public_verdict_stage: 'none', protocolError: null, stages,
   };
 }
 
