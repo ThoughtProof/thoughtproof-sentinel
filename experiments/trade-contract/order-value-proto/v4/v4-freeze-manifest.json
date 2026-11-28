@@ -1,0 +1,78 @@
+{
+  "version": "order-value-proto/v4",
+  "candidateCommit": "aac713cd3a37bb04e89064299d57b342fa224718",
+  "files": [
+    {
+      "path": "experiments/trade-contract/order-value-proto/v4/answers.ts",
+      "sha256": "2113a2d2729d1fb2e4b96dae2dcb862e37fe00241ee7614e1b9e7a0ae6a1c0dc"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v4/decimal-mul.ts",
+      "sha256": "b1c46914c465f605efa1104b70ad77f465b8929ae2a597ff3b918e2b4f0f4914"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v4/host.ts",
+      "sha256": "c6b8e2830de731d46dcec5af8e0a373dae0392a525f66a0f72e1cb120ff4039f"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v4/packet.ts",
+      "sha256": "10bd8a800279d1983be88132ce836ed67bebebf8c11be108b42eee73766c1809"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v4/public.ts",
+      "sha256": "4e327682b0f63d64b8c6ea484b59acb1280edea618464513ce8cba1e6faa4dd4"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v4/order-value-v4.test.ts",
+      "sha256": "595d250b4002c6bd49526f1eb043bd009548e48dd6e86bb4d8e5cfb9884086f2"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v4/MANIFEST.json",
+      "sha256": "75ca5eea46a792cc18570098f5f5e20438faf2c5bc5b72496ded0efbfbc622ba"
+    }
+  ],
+  "frozenImports": [
+    {
+      "path": "experiments/trade-contract/adapter.ts",
+      "sha256": "833d03e1db5d1b75c70712150fc6a43f2023ab22158402271cd5884467d012bf"
+    },
+    {
+      "path": "experiments/trade-contract/comparison-grounding.ts",
+      "sha256": "270f19de7505d87c7d0f3fcf0bce201008476f1a4fabf79b2e1cef26107d2347"
+    },
+    {
+      "path": "experiments/trade-contract/contract.ts",
+      "sha256": "5f8c7d8235b8edf95fe81258b3d09869391a839e0612ff7d7e93ea9bd0ed153c"
+    },
+    {
+      "path": "experiments/trade-contract/decimal.ts",
+      "sha256": "fd6cba7a997d5608493676a559b95b2f3999c0ca864bc488d4d7d308e7f911a6"
+    },
+    {
+      "path": "experiments/trade-contract/spans.ts",
+      "sha256": "9a57127e16c2244090b3110e68fb8ef838722b96674c1a54cc71b3f99871c7f2"
+    },
+    {
+      "path": "experiments/trade-contract/evaluate.ts",
+      "sha256": "11bb51a1f3a3cad2d61a9a1e4bb6fd82660b366a249b2f3fc3cae2f8057dc5c4"
+    }
+  ],
+  "harnessImports": [
+    {
+      "path": "experiments/trade-contract/direct-run.ts",
+      "sha256": "ea4d5d756d9279818fd70f0153d56f1340b0228f7f9fd9a05621e0ccb9610218"
+    },
+    {
+      "path": "experiments/trade-contract/direct-budget.ts",
+      "sha256": "56434a594f623aff49a6577e7198ae10b7727fb0c046702c4ef54876b0af3c15"
+    },
+    {
+      "path": "experiments/trade-contract/direct-holdout-plan.ts",
+      "sha256": "28c5f417df1e96d7d97ed611a998aa704015dbd52e7281bf805bccb70be6d839"
+    },
+    {
+      "path": "experiments/trade-contract/direct-historical.ts",
+      "sha256": "2ca6bf47d18e2db7fe278d526a48d181ded4ec0ebba56f5616656ecf16f49bb0"
+    }
+  ]
+}
