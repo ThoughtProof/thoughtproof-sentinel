@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["./*.ts", "./order-value-proto/*.ts", "./order-value-proto/v2/*.ts", "./order-value-proto/v3/*.ts", "./order-value-proto/v4/*.ts"]
+  "include": ["./*.ts", "./order-value-proto/*.ts", "./order-value-proto/v2/*.ts", "./order-value-proto/v3/*.ts", "./order-value-proto/v4/*.ts", "./order-value-proto/v5/*.ts"]
 }
