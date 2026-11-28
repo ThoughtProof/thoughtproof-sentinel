@@ -1,4 +1,10 @@
 {
+  "git": {
+    "deploymentEnabled": {
+      "cursor/trade-contract-offline-20261124": false,
+      "cursor/grounded-critic-offline-7c01": false
+    }
+  },
   "rewrites": [
     { "source": "/openapi.json", "destination": "/api/openapi" },
     { "source": "/docs", "destination": "/api/docs" },

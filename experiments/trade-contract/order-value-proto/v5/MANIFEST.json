@@ -1,0 +1,33 @@
+{
+  "version": "order-value-proto/v5",
+  "files": [
+    {
+      "path": "experiments/trade-contract/order-value-proto/v5/answers.ts",
+      "sha256": "2113a2d2729d1fb2e4b96dae2dcb862e37fe00241ee7614e1b9e7a0ae6a1c0dc"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v5/comparison.ts",
+      "sha256": "4713fd9b441c893edad98a687229e542a5e18eef98f1070a79fe6b510e64a3dc"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v5/decimal-mul.ts",
+      "sha256": "b1c46914c465f605efa1104b70ad77f465b8929ae2a597ff3b918e2b4f0f4914"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v5/host.ts",
+      "sha256": "a0d5522f3e2885f95961cb2639b174064b5a32693f0ad92debd99edaab33040c"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v5/packet.ts",
+      "sha256": "8efa0b9773831a5af939f68a9acaf6a8fb52f408e049ebbac1485f2a383ffc50"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v5/public.ts",
+      "sha256": "e30b02d74f85046d6ad311f14c1ff4652754cdcc8af2c5af126688621b455849"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v5/order-value-v5.test.ts",
+      "sha256": "75638cfedc542692287f8c327f8ab07d8a2ce9a6b8fa03aa6b0598b11f87188f"
+    }
+  ]
+}

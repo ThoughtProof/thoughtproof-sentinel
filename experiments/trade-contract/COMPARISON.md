@@ -1,0 +1,59 @@
+# prompt comparison on the #140 extractor
+
+This pilot is a **prompt comparison on the #140 extractor**. It is not a comparison against the production critic.
+
+## Why the strong critic is not arm A
+
+The strongest critic already in the tree is pot-cli `runCritic` (`node_modules/pot-cli/src/pipeline/critic.ts`). It scores proposals from 1 to 10, calls a provider unless `dryRun` is set, and the dry-run result is a fixed string. The function takes no tool list.
+
+The production verify path is `runSentinelCascade` (`src/engine/cascade.ts`). `evalOptions` is `mode`, `maxTokens`, and an optional nano-step flag. No tools are passed. The public map is `mapVerdict` (`src/engine/verdict.ts`): for `trade_execution`, `trade_reasoning`, and `action_authorization`, `CONDITIONAL_ALLOW` becomes UNCERTAIN. `runAuthorizationGate` (`src/engine/authorization-gate.ts`) hard-BLOCKs only amount overshoot, recipient mismatch, and unlimited allowance, and stays silent otherwise. It does not decide a pending second approval.
+
+Those hosts do not read this adapter's JSON. Using either as arm A would change the model, the schema, the gate, and the tool set. Arm B would then differ by more than one instruction. Arm A therefore stays the frozen extractor (`experiments/trade-contract/prompt.ts`: the model does not decide ALLOW or BLOCK; the local contract does). The extractor has no tools. Arm B gets that same request, with one extra paragraph.
+
+## Host
+
+Both arms call `decideCascade` with a null secondary exchange (`comparison-run.ts`). A schema-valid primary answer stands, including ALLOW (`adapter.ts`, `if (!first.failure) return first.result`). `finish` in `evaluate.ts` maps contradicted to BLOCK, invalid structure or `not_verifiable` to UNCERTAIN, and otherwise ALLOW. `downgrade` rewrites only ALLOW to UNCERTAIN when `downgradeAllow` is set (`adapter.ts`).
+
+After that frozen decision, the same host function runs for A and B. It never turns a non-ALLOW into ALLOW. It withholds ALLOW when a grounding row is `open` or `violated`, when a `met` quote is missing, does not locate, states a pending condition, or shares no content word with the clause. `open` may set `evidenceQuote` to null, because absence of a document cannot be quoted.
+
+The previous B filter, which dropped ungrounded objections and could turn BLOCK into ALLOW, is only `replayLegacyDrop`. Its rows are labelled `legacy-drop-replay`. It is not the primary B result. On the recorded pilot-01 payload it still ALLOWs, and the primary path for both arms stays BLOCK.
+
+## Cases
+
+6 pilot cases and their labels are frozen at `832cedf` (sha256 of the canonical pilot JSON is checked in `comparison.test.ts`). 6 development cases are disjoint. `dev-05` is a mandatory second approval that is still pending. `dev-06` is the same payment without that obligation. Quote-quality fixtures on `dev-05` (missing, inaccurate, irrelevant, correct, and open with a null quote) must not ALLOW.
+
+## Report rows
+
+Each smoke or pilot row has `caseId`, `arm`, `providerStatus`, `parserResult` (`ok` or the frozen `parseOutput` rejection), `frozenGateVerdict`, `publicVerdict`, and `firstAllowBlocker`. The blocker is the first step that is not on the path to ALLOW: provider, then `parser:<rejection>`, then `frozen_gate:<verdict>`, then `grounding_follow_up` when the frozen gate said ALLOW and the follow-up did not. A parser rejection is `validator_rejection`, not substantive UNCERTAIN, even though the frozen gate still publishes UNCERTAIN. If both dev-06 arms are public UNCERTAIN, `dev06.firstAllowBlocker` names that step for each arm.
+
+One invalid claim on an otherwise valid payload is `schema_violation` from `parseOutput` (`adapter.ts`, the claims row that fails `take` makes the group contain null, and the parser returns `schema_violation`). The export does not change that decision.
+
+## Commands
+
+No provider call is made by the default CLI.
+
+```sh
+node --experimental-strip-types experiments/trade-contract/comparison-offline.ts
+node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --plan
+node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --schema-smoke
+```
+
+`--schema-smoke` without `--paid` prints the dev plan and does not send. The paid smoke command uses a soft 1.00 USD cap:
+
+```sh
+node --experimental-strip-types experiments/trade-contract/comparison-offline.ts --schema-smoke --paid
+```
+
+The only environment variable it reads for the credential is `XAI_API_KEY`. It is not written to logs. Before each call, if cumulative actual cost plus that call's pre-send estimate would exceed 1.00 USD, that call and every later call are not sent. Actual cost is `usage.cost_in_usd_ticks / 10000000000` (https://docs.x.ai/developers/cost-tracking: 1 USD = 10^10 ticks). Missing ticks book that call's full pre-send estimate, never zero. Limits are 12 calls, 45 seconds each, and no retries. A single call may still exceed 1.00 USD, because `max_completion_tokens` does not bound grok-4.7 reasoning tokens. The report includes the per-case rows, `calls_sent`, and `cumulativeCostUsd`.
+
+The unpaid pilot command remains `--paid` without `--schema-smoke`. It is not run here. Set `GROUNDED_CRITIC_ALLOW_PAID` to the digit 1, `GROUNDED_CRITIC_COST_CAP_USD`, optional `GROUNDED_CRITIC_BUDGET_MS` (default 45000), and `XAI_API_KEY`. Its pre-send reservation is the same visible-token estimate and is also not an upper bound on reasoning.
+
+## Dev reachability
+
+A hand-built ideal answer for each development case, with verbatim locating quotes, was run through `parseOutput`, `decideCascade` (including `finish` and the downgrade floor), and the shared grounding follow-up. Both arms see that same JSON. dev-01, dev-03, and dev-06 reach public ALLOW. dev-02 and dev-05 reach BLOCK. dev-04 reaches UNCERTAIN because the receipt document is absent and the honest mandate status is `not_verifiable` (`evaluate.ts` `semantic`, the `not_verifiable` return), which `finish` publishes as UNCERTAIN. The case texts do not need a change for a justified ALLOW to be possible. Pilot cases stay at sha256 `1b871537bda376df9eb3f0b40d0c1f20a1565a693a9c88828965965550fb4a6c`.
+
+The paid smoke's parsed answers were `frozen_gate:UNCERTAIN` with no raw JSON saved, so the exact check inside those answers is unknown. A parsed answer becomes UNCERTAIN when a check is `not_verifiable` (`evaluate.ts` `finish`) or when `downgradeAllow` rewrites an ALLOW (`adapter.ts` `build` and `downgrade`). `--save-raw <dir>` writes only `caseId`, `arm`, `content`, and `usage` for a later run.
+
+## What a B win would mean
+
+A B win on the later paid pilot would mean: on these 6 frozen pilot cases, with the same host, model, tools (none), and evidence, the extra instruction produced more justified public ALLOWs than arm A, and the false-ALLOW counts say whether unjustified cases were released. It would not mean the production critic was beaten, that #140's 0/36 result was fixed, that a bad quote can be dropped into ALLOW, or that the result generalizes past this extractor and this pilot.

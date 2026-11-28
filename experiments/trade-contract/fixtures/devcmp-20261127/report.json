@@ -1,0 +1,285 @@
+{
+  "report": {
+    "baseline": "prompt comparison on the #140 extractor",
+    "maxCalls": 12,
+    "costCeilingUsd": 0.395336,
+    "devCases": 6,
+    "calls": 12,
+    "providerOrSchemaErrors": 0,
+    "frozenValidatorRejections": 0,
+    "substantiveUncertain": 8,
+    "caseIds": [
+      "dev-01",
+      "dev-02",
+      "dev-03",
+      "dev-04",
+      "dev-05",
+      "dev-06"
+    ],
+    "rows": [
+      {
+        "caseId": "dev-01",
+        "arm": "A",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      },
+      {
+        "caseId": "dev-01",
+        "arm": "B",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      },
+      {
+        "caseId": "dev-02",
+        "arm": "A",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "BLOCK",
+        "publicVerdict": "BLOCK",
+        "firstAllowBlocker": "frozen_gate:BLOCK",
+        "countsAs": "other"
+      },
+      {
+        "caseId": "dev-02",
+        "arm": "B",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "BLOCK",
+        "publicVerdict": "BLOCK",
+        "firstAllowBlocker": "frozen_gate:BLOCK",
+        "countsAs": "other"
+      },
+      {
+        "caseId": "dev-03",
+        "arm": "A",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      },
+      {
+        "caseId": "dev-03",
+        "arm": "B",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      },
+      {
+        "caseId": "dev-04",
+        "arm": "A",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      },
+      {
+        "caseId": "dev-04",
+        "arm": "B",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      },
+      {
+        "caseId": "dev-05",
+        "arm": "A",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "BLOCK",
+        "publicVerdict": "BLOCK",
+        "firstAllowBlocker": "frozen_gate:BLOCK",
+        "countsAs": "other"
+      },
+      {
+        "caseId": "dev-05",
+        "arm": "B",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "BLOCK",
+        "publicVerdict": "BLOCK",
+        "firstAllowBlocker": "frozen_gate:BLOCK",
+        "countsAs": "other"
+      },
+      {
+        "caseId": "dev-06",
+        "arm": "A",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      },
+      {
+        "caseId": "dev-06",
+        "arm": "B",
+        "providerStatus": "ok",
+        "parserResult": "ok",
+        "frozenGateVerdict": "UNCERTAIN",
+        "publicVerdict": "UNCERTAIN",
+        "firstAllowBlocker": "frozen_gate:UNCERTAIN",
+        "countsAs": "substantive_uncertain"
+      }
+    ],
+    "dev06": {
+      "bothUncertain": true,
+      "firstAllowBlocker": "A:frozen_gate:UNCERTAIN; B:frozen_gate:UNCERTAIN"
+    },
+    "calls_sent": 12,
+    "cumulativeCostUsd": 0.36288999999999993,
+    "softCapNote": "A single call may exceed the 1.00 USD cap. max_completion_tokens does not bound grok-4.7 reasoning tokens. Further calls are not sent once cumulative actual cost plus the next pre-send estimate would exceed 1.00 USD."
+  },
+  "timings": [
+    {
+      "i": 0,
+      "ms": 69261,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 1,
+      "ms": 40272,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 2,
+      "ms": 45186,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 3,
+      "ms": 52378,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 4,
+      "ms": 49904,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 5,
+      "ms": 50202,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 6,
+      "ms": 26950,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 7,
+      "ms": 39022,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 8,
+      "ms": 42464,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 9,
+      "ms": 37325,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 10,
+      "ms": 45719,
+      "outcome": "received",
+      "status": 200
+    },
+    {
+      "i": 11,
+      "ms": 34787,
+      "outcome": "received",
+      "status": 200
+    }
+  ],
+  "order": [
+    {
+      "caseId": "dev-01",
+      "arm": "A",
+      "estimateUsd": 0.032786
+    },
+    {
+      "caseId": "dev-01",
+      "arm": "B",
+      "estimateUsd": 0.033098
+    },
+    {
+      "caseId": "dev-02",
+      "arm": "A",
+      "estimateUsd": 0.032794
+    },
+    {
+      "caseId": "dev-02",
+      "arm": "B",
+      "estimateUsd": 0.033108
+    },
+    {
+      "caseId": "dev-03",
+      "arm": "A",
+      "estimateUsd": 0.032786
+    },
+    {
+      "caseId": "dev-03",
+      "arm": "B",
+      "estimateUsd": 0.0331
+    },
+    {
+      "caseId": "dev-04",
+      "arm": "A",
+      "estimateUsd": 0.032734
+    },
+    {
+      "caseId": "dev-04",
+      "arm": "B",
+      "estimateUsd": 0.033046
+    },
+    {
+      "caseId": "dev-05",
+      "arm": "A",
+      "estimateUsd": 0.032816
+    },
+    {
+      "caseId": "dev-05",
+      "arm": "B",
+      "estimateUsd": 0.033128
+    },
+    {
+      "caseId": "dev-06",
+      "arm": "A",
+      "estimateUsd": 0.032814
+    },
+    {
+      "caseId": "dev-06",
+      "arm": "B",
+      "estimateUsd": 0.033126
+    }
+  ]
+}

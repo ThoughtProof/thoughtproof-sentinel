@@ -1,0 +1,196 @@
+{
+  "manifestVersion": 1,
+  "frozen": true,
+  "description": "Frozen offline trade-contract candidate. SHA-256 over UTF-8 bytes. This manifest is not part of sourceFiles. No accuracy is claimed.",
+  "contractVersion": "trade-contract/v1",
+  "adapterOutputVersion": "trade-contract-adapter/v1",
+  "promptTemplates": [
+    {
+      "id": "trade-contract-adapter/v2",
+      "sha256": "331ad5bdc0efcd58c4cf348c114f801c199382f0134c675218aa9f6e70fa5aa8"
+    }
+  ],
+  "modelConfiguration": {
+    "provider": "xai",
+    "transport": "openai-compatible",
+    "baseUrl": "https://api.x.ai/v1",
+    "chatPath": "/chat/completions",
+    "docs": {
+      "models": "https://docs.x.ai/docs/models",
+      "chatCompletions": "https://docs.x.ai/developers/rest-api-reference/inference/chat-completions",
+      "structuredOutputs": "https://docs.x.ai/docs/guides/structured-outputs",
+      "retrievedOn": "2026-11-24"
+    },
+    "responseFormat": {
+      "type": "json_schema",
+      "name": "trade_contract_adapter_v1",
+      "strict": true,
+      "schemaId": "trade-contract-adapter-output/v1"
+    },
+    "primary": {
+      "model": "grok-4.7",
+      "temperature": 0,
+      "seed": 42,
+      "max_completion_tokens": 4096,
+      "reasoning_effort": "low",
+      "pricing": {
+        "currency": "USD",
+        "per": "1M_tokens",
+        "docUrl": "https://docs.x.ai/docs/models",
+        "retrievedOn": "2026-11-24",
+        "longContextFromPromptTokens": 200000,
+        "contextTokens": 500000,
+        "shortContext": {
+          "input": 2,
+          "cachedInput": 0.5,
+          "output": 6
+        },
+        "longContext": {
+          "input": 4,
+          "cachedInput": 1,
+          "output": 12
+        }
+      }
+    },
+    "cascade": {
+      "secondary": {
+        "model": "grok-4.3",
+        "temperature": 0,
+        "seed": 42,
+        "max_completion_tokens": 4096,
+        "reasoning_effort": "none",
+        "pricing": {
+          "currency": "USD",
+          "per": "1M_tokens",
+          "docUrl": "https://docs.x.ai/docs/models",
+          "retrievedOn": "2026-11-24",
+          "longContextFromPromptTokens": 200000,
+          "contextTokens": 1000000,
+          "shortContext": {
+            "input": 1.25,
+            "cachedInput": 0.2,
+            "output": 2.5
+          },
+          "longContext": {
+            "input": 2.5,
+            "cachedInput": 0.4,
+            "output": 5
+          }
+        }
+      },
+      "when": [
+        "timeout",
+        "transport_error",
+        "http_error",
+        "empty",
+        "parse_error",
+        "schema_violation",
+        "missing_checks"
+      ],
+      "secondaryPolicy": "block_only",
+      "onSecondaryBlock": "BLOCK",
+      "onSecondaryNonBlock": "UNCERTAIN",
+      "onSecondaryFailure": "UNCERTAIN",
+      "confirmBlocks": false,
+      "retriesPerModel": 0,
+      "timeoutMs": 900000
+    }
+  },
+  "modelConfigurationSha256": "721768d15939a86cd1ea996c9691d658717d56246e9247e86e8e967ce7bebe66",
+  "sourceFiles": [
+    {
+      "path": "experiments/trade-contract/adapter.ts",
+      "sha256": "833d03e1db5d1b75c70712150fc6a43f2023ab22158402271cd5884467d012bf"
+    },
+    {
+      "path": "experiments/trade-contract/contract.ts",
+      "sha256": "5f8c7d8235b8edf95fe81258b3d09869391a839e0612ff7d7e93ea9bd0ed153c"
+    },
+    {
+      "path": "experiments/trade-contract/decimal.ts",
+      "sha256": "fd6cba7a997d5608493676a559b95b2f3999c0ca864bc488d4d7d308e7f911a6"
+    },
+    {
+      "path": "experiments/trade-contract/development-fixture.ts",
+      "sha256": "4cfbed2f2585325e32a5b8a6d1e1acd47b55bcaec10e035744623ddbff43c87c"
+    },
+    {
+      "path": "experiments/trade-contract/evaluate.ts",
+      "sha256": "11bb51a1f3a3cad2d61a9a1e4bb6fd82660b366a249b2f3fc3cae2f8057dc5c4"
+    },
+    {
+      "path": "experiments/trade-contract/messages.ts",
+      "sha256": "d472b464826454aa95e679277b033aa8c7deed3e90e58a321de96932e71c4225"
+    },
+    {
+      "path": "experiments/trade-contract/model-config.ts",
+      "sha256": "78414f4817336601e2505e3428bf16d67bab462e9c361bc461b43c30945af99b"
+    },
+    {
+      "path": "experiments/trade-contract/offline.ts",
+      "sha256": "d9c2d48ff5c8936a157293a574f7b5d01f265a35ef23cbd141a469e12856e2f5"
+    },
+    {
+      "path": "experiments/trade-contract/prompt.ts",
+      "sha256": "7ab619fa2f7c2013dec1dbdd0caefcfccd54b801d07a07b7b272e493e9d9d0a5"
+    },
+    {
+      "path": "experiments/trade-contract/spans.ts",
+      "sha256": "9a57127e16c2244090b3110e68fb8ef838722b96674c1a54cc71b3f99871c7f2"
+    },
+    {
+      "path": "experiments/trade-contract/verdict-schema.ts",
+      "sha256": "5aa2a561968c2e4198f6f6ee1c64292edb248cd76d24dd31f3108e138454a0e0"
+    }
+  ],
+  "acceptance": {
+    "measured": false,
+    "falseAllowTarget": 0,
+    "correctAllowMinimum": 0.8,
+    "secondaryRelease": "block_only",
+    "absenceRisk": "A structured complete detection that no mandate exists can still produce ALLOW. That false absence remains a subject of the later acceptance test and is not solved by this freeze.",
+    "invalidAttempt": "88ba70186279aa8f9c4223bdcdf24eff265ab628 aborted at case 1: serv-swift rejected response_format {type:json_object} with HTTP 400. No results from that attempt count."
+  },
+  "messages": {
+    "endpoint": "https://api.x.ai/v1/chat/completions",
+    "module": "experiments/trade-contract/messages.ts",
+    "exportedFrom": "experiments/trade-contract/adapter.ts",
+    "functions": [
+      "buildAdapterMessages(documents: readonly Document[]): AdapterMessage[]",
+      "buildAdapterRequest(documents: readonly Document[], stage: 'primary' | 'secondary'): AdapterChatRequest"
+    ],
+    "requestBodyKeys": [
+      "model",
+      "temperature",
+      "seed",
+      "max_completion_tokens",
+      "reasoning_effort",
+      "response_format",
+      "messages"
+    ],
+    "reasoningEffort": {
+      "grok-4.7": "low",
+      "grok-4.3": "none"
+    },
+    "timeoutMs": 900000,
+    "seedSent": true,
+    "notInBody": [
+      "provider",
+      "transport",
+      "baseUrl",
+      "chatPath",
+      "docs",
+      "pricing",
+      "responseFormat.schemaId",
+      "cascade.when",
+      "cascade.secondaryPolicy",
+      "cascade.onSecondaryBlock",
+      "cascade.onSecondaryNonBlock",
+      "cascade.onSecondaryFailure",
+      "cascade.confirmBlocks",
+      "cascade.retriesPerModel",
+      "cascade.timeoutMs",
+      "max_tokens"
+    ]
+  }
+}

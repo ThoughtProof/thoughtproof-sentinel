@@ -1,0 +1,29 @@
+{
+  "version": "order-value-proto/v3",
+  "toggles": [
+    "clauseBinding",
+    "quantityGrounding"
+  ],
+  "files": [
+    {
+      "path": "experiments/trade-contract/order-value-proto/v3/host.ts",
+      "sha256": "c30774f0f3c50b7612dee86b4ef523e655be54eb39e8e3e095f3129b3af66a33"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v3/packet.ts",
+      "sha256": "2c5f66ce03d370aa9ac2b4b3f95faa165d843a6ebce37d2f4a2693901d7e941b"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v3/answers.ts",
+      "sha256": "45a950ea7cf59aca6fd50ac46ce3ad2732170908736cf31c66d8ebb5de6a787d"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v3/public.ts",
+      "sha256": "f17d39f9efb842fd27897dfccd8a3a03a01ed8ed707d979442560ecbfa85eaf7"
+    },
+    {
+      "path": "experiments/trade-contract/order-value-proto/v3/decimal-mul.ts",
+      "sha256": "b1c46914c465f605efa1104b70ad77f465b8929ae2a597ff3b918e2b4f0f4914"
+    }
+  ]
+}
