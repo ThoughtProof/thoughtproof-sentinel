@@ -36,7 +36,7 @@ Sentinel rates are the short-context card in `model-config.ts` at `30777b0`. A `
 
 ## Shared budget
 
-Both arms, including a Sentinel secondary call, share 1.00 USD in `direct-budget.ts`. Before each send the ledger checks measured cost plus open reservations plus the next estimate. Above 1.00 USD the call is `not_run_budget` and nothing is sent. After a response, confirmed usage replaces that call's reservation. A timeout or missing usage leaves the reservation open. When measured cost plus open reservations reaches 1.00 USD, sending stops. `measured_usd`, `open_reservations_usd`, and `actual_overrun_usd` stay separate. The overrun is confirmed spend above 1.00 USD, not a reservation. The next-call estimate assumes 32768 output tokens. That is not a ceiling. `createSpendLedger` is the same reserve, replace, and keep pattern, but its single booked figure cannot report the three amounts.
+Both arms, including a Sentinel secondary call, share 1.00 USD in `direct-budget.ts`. The first pre-send reservation that would pass 1.00 USD latches the ledger for the rest of the run. Later calls are `not_run_budget` and the latch does not reopen. A valid timely answer with no usage keeps its verdict and its open reservation. A timeout is a technical outcome, not a verdict and not `incomplete_budget`. `incomplete_budget` is only a call the pair needed and the budget did not start. `runDirectComparison` is the paid entry and uses one ledger for the primary, a conditional secondary, and the historical critic. The next-call estimate assumes 32768 output tokens. That is not a ceiling.
 
 ## Readiness
 

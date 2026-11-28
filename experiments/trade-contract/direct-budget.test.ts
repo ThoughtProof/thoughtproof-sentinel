@@ -29,6 +29,15 @@ describe('shared 1 USD budget', () => {
     expect(sends).toBe(0);
     expect(outcome.transportCalls).toBe(0);
     expect(outcome.rows[0].status).toBe('not_run_budget');
+    expect(outcome.budget.closed).toBe(true);
+    expect(createComparisonBudget().tryReserve(0.01)).not.toBeNull();
+    const follow = await dispatchWithinBudget([
+      { caseId: 'c2', arm: 'historical', promptText: 'later', send: async () => { sends += 1; return { measuredUsd: 0.01, value: 'ALLOW' }; } },
+    ], createComparisonBudget());
+    expect(follow.transportCalls).toBe(1);
+    const latched = createComparisonBudget();
+    latched.latch();
+    expect(latched.tryReserve(0.01)).toBeNull();
     expect(outcome.budget.measured_usd).toBe(0);
     expect(outcome.budget.open_reservations_usd).toBe(0);
     expect(outcome.budget.actual_overrun_usd).toBe(0);
@@ -58,8 +67,9 @@ describe('shared 1 USD budget', () => {
     expect(outcome.budget.measured_usd).toBeCloseTo(1.2, 6);
     expect(outcome.budget.open_reservations_usd).toBe(0);
     expect(outcome.budget.actual_overrun_usd).toBeCloseTo(0.2, 6);
+    expect(outcome.budget.closed).toBe(true);
     expect(pairStatus(outcome.rows, 'c1')).toBe('incomplete_budget');
-    expect(qualityVerdict('incomplete_budget', 'BLOCK')).toBeNull();
+    expect(qualityVerdict('incomplete_budget', 'result', 'BLOCK')).toBeNull();
   });
 
   it('stops before a Sentinel secondary call when the estimate would pass 1 USD', async () => {
@@ -100,7 +110,10 @@ describe('shared 1 USD budget', () => {
       },
     ]);
     expect(sends).toBe(2);
-    expect(outcome.rows.map(row => row.status)).toEqual(['error', 'error']);
+    expect(outcome.rows.map(row => row.status)).toEqual(['timeout', 'result']);
+    expect(outcome.rows[1].value).toBeNull();
+    expect(pairStatus(outcome.rows, 'c1')).toBe('complete');
+    expect(pairStatus(outcome.rows, 'c2')).toBe('complete');
     expect(outcome.budget.measured_usd).toBe(0);
     expect(outcome.budget.open_reservations_usd).toBeGreaterThan(0.3);
     expect(outcome.budget.actual_overrun_usd).toBe(0);
@@ -112,6 +125,8 @@ describe('shared 1 USD budget', () => {
     expect(held.snapshot().measured_usd).toBe(0);
     expect(held.wouldExceed(0.4)).toBe(true);
     expect(held.tryReserve(0.4)).toBeNull();
+    expect(held.snapshot().closed).toBe(true);
+    expect(held.tryReserve(0.01)).toBeNull();
   });
 
   it('preserves an earlier pair and leaves the unfinished pair out of quality counts', async () => {
@@ -125,11 +140,11 @@ describe('shared 1 USD budget', () => {
     expect(sends).toBe(3);
     expect(outcome.rows.filter(row => row.caseId === 'done').every(row => row.status === 'result')).toBe(true);
     expect(pairStatus(outcome.rows, 'done')).toBe('complete');
-    expect(qualityVerdict('complete', 'ALLOW')).toBe('ALLOW');
+    expect(qualityVerdict('complete', 'result', 'ALLOW')).toBe('ALLOW');
     expect(outcome.rows.find(row => row.caseId === 'later' && row.arm === 'sentinel_primary')?.value).toBe('BLOCK');
     expect(outcome.rows.find(row => row.caseId === 'later' && row.arm === 'historical')?.status).toBe('not_run_budget');
     expect(pairStatus(outcome.rows, 'later')).toBe('incomplete_budget');
-    expect(qualityVerdict(pairStatus(outcome.rows, 'later'), 'BLOCK')).toBeNull();
+    expect(qualityVerdict(pairStatus(outcome.rows, 'later'), 'result', 'BLOCK')).toBeNull();
   });
 
   it('confirms the binding, Sentinel, and holdout request hashes', () => {

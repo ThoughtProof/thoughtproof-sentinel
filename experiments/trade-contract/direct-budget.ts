@@ -25,7 +25,7 @@ const HISTORICAL_INPUT_PER_MILLION = 1.25;
 const HISTORICAL_OUTPUT_PER_MILLION = 2.5;
 
 export type BudgetArm = 'sentinel_primary' | 'sentinel_secondary' | 'historical';
-export type CallRunStatus = 'result' | 'not_run_budget' | 'error';
+export type CallRunStatus = 'result' | 'timeout' | 'error' | 'not_run_budget';
 export type PairStatus = 'complete' | 'incomplete_budget';
 
 export interface BudgetSnapshot {
@@ -83,9 +83,16 @@ export function createComparisonBudget(capUsd = SHARED_BUDGET_USD) {
     wouldExceed(estimateUsd: number): boolean {
       return measured + openUsd() + estimateUsd > capUsd + 1e-9;
     },
+    /** Latches the ledger. Later reservations do not reopen it. */
+    latch(): void {
+      closed = true;
+    },
     tryReserve(estimateUsd: number): BudgetTicket | null {
       if (closed || !Number.isFinite(estimateUsd) || estimateUsd < 0) return null;
-      if (measured + openUsd() + estimateUsd > capUsd + 1e-9) return null;
+      if (measured + openUsd() + estimateUsd > capUsd + 1e-9) {
+        closed = true;
+        return null;
+      }
       const ticket = { id: nextId, estimateUsd };
       nextId += 1;
       open.push(ticket);
@@ -127,23 +134,27 @@ export async function dispatchWithinBudget<T>(
   const rows: DispatchRow<T>[] = [];
   let transportCalls = 0;
   for (const call of calls) {
-    const estimate = estimateNextCallUsd(call.arm, call.promptText);
-    const state = budget.snapshot();
-    if (state.closed || budget.wouldExceed(estimate)) {
+    if (budget.snapshot().closed) {
       rows.push({ caseId: call.caseId, arm: call.arm, status: 'not_run_budget', value: null });
       continue;
     }
-    const ticket = budget.tryReserve(estimate);
+    const estimate = estimateNextCallUsd(call.arm, call.promptText);
+    if (budget.wouldExceed(estimate)) budget.latch();
+    const ticket = budget.snapshot().closed ? null : budget.tryReserve(estimate);
     if (!ticket) {
+      budget.latch();
       rows.push({ caseId: call.caseId, arm: call.arm, status: 'not_run_budget', value: null });
       continue;
     }
     try {
       transportCalls += 1;
       const response = await call.send();
-      if (response.timeout || response.measuredUsd === null || !Number.isFinite(response.measuredUsd)) {
+      if (response.timeout) {
         budget.keep(ticket);
-        rows.push({ caseId: call.caseId, arm: call.arm, status: 'error', value: response.value });
+        rows.push({ caseId: call.caseId, arm: call.arm, status: 'timeout', value: null });
+      } else if (response.measuredUsd === null || !Number.isFinite(response.measuredUsd)) {
+        budget.keep(ticket);
+        rows.push({ caseId: call.caseId, arm: call.arm, status: 'result', value: response.value });
       } else {
         budget.commitMeasured(ticket, response.measuredUsd);
         rows.push({ caseId: call.caseId, arm: call.arm, status: 'result', value: response.value });
@@ -160,11 +171,12 @@ export function pairStatus(rows: readonly { caseId: string; arm: BudgetArm; stat
   const mine = rows.filter(row => row.caseId === caseId && row.arm !== 'sentinel_secondary');
   const sentinel = mine.find(row => row.arm === 'sentinel_primary');
   const historical = mine.find(row => row.arm === 'historical');
-  if (sentinel?.status === 'result' && historical?.status === 'result') return 'complete';
-  return 'incomplete_budget';
+  if (sentinel?.status === 'not_run_budget' || historical?.status === 'not_run_budget') return 'incomplete_budget';
+  return 'complete';
 }
 
-/** A budget gap is not a verdict. Incomplete pairs stay out of quality counts. */
-export function qualityVerdict(pair: PairStatus, verdict: string | null): string | null {
-  return pair === 'complete' ? verdict : null;
+/** A budget gap is not a verdict. A timeout is not a verdict either. */
+export function qualityVerdict(pair: PairStatus, status: CallRunStatus, verdict: string | null): string | null {
+  if (pair === 'incomplete_budget' || status !== 'result') return null;
+  return verdict;
 }
